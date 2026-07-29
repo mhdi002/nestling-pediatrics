@@ -1,0 +1,18 @@
+﻿python : Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate 
+limits and faster downloads.
+At C:\Users\mhf\AppData\Local\Temp\ps-script-c3df0b78-2565-4283-bdc6-3b1636b57326.ps1:106 char:142
++ ... ODELS = "1"; $env:HF_HUB_DISABLE_SYMLINKS_WARNING = "1"; python -c @"
++                                                              ~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Warning: You ar...ster downloads.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+loading...
+
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s]
+Loading weights:  14%|#4        | 31/219 [00:00<00:00, 300.84it/s]
+Loading weights:  32%|###2      | 71/219 [00:00<00:00, 358.15it/s]
+Loading weights:  51%|#####1    | 112/219 [00:00<00:00, 376.82it/s]
+Loading weights:  68%|######8   | 150/219 [00:00<00:00, 376.93it/s]
+Loading weights:  86%|########6 | 189/219 [00:00<00:00, 376.12it/s]
+Loading weights: 100%|##########| 219/219 [00:00<00:00, 378.71it/s]

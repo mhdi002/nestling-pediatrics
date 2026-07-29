@@ -1,0 +1,86 @@
+TOTAL FILES: 42
+PDF COUNT: 28
+
+=== ALL FILES (bytes, path, classification) ===
+243000	10m.pdf	ASQ
+195636	12m.pdf	ASQ
+172765	14m.pdf	ASQ
+138305	16m.pdf	ASQ
+187869	18m.pdf	ASQ
+190404	20m.pdf	ASQ
+193485	22m.pdf	ASQ
+195860	27m.pdf	ASQ
+198125	30m.pdf	ASQ
+199857	33m.pdf	ASQ
+202070	36m.pdf	ASQ
+203993	42m.pdf	ASQ
+193897	48m.pdf	ASQ
+202479	4m.pdf	ASQ
+197869	54m.pdf	ASQ
+199304	60m.pdf	ASQ
+254720	6m.pdf	ASQ
+257562	8m.pdf	ASQ
+4253	_analyze_pdfs.py	
+106373	_pdf_analysis_summary.txt	
+22320	_pdf_meta.json	
+7632487	chart-boy-95.pdf	booklet (chart-boy/girl)
+7323536	chart-girl-95.pdf	booklet (chart-boy/girl)
+73063	info.txt	
+163530	preview_autism_mchat.png	
+508737	preview_chart-boy-95.png	
+417319	preview_chart-girl-95.png	
+330566	preview_combined_boys_preterm.png	
+324425	preview_combined_girls_preterm.png	
+256298	preview_hc_boys_preterm.png	
+254071	preview_hc_girls_preterm.png	
+250093	preview_length_boys_preterm.png	
+236776	preview_weight_boys_preterm.png	
+232237	preview_weight_girls_preterm.png	
+199395	غربالگری-اوتیسم.pdf	M-CHAT (غربالگری)
+4327861	نمودار-ترکیبی-رشد-دختران-نارس.pdf	INTERGROWTH chart (نمودار)
+4344993	نمودار-ترکیبی-رشد-پسران-نارس.pdf	INTERGROWTH chart (نمودار)
+4315848	نمودار-دور-سر-دختران-نارس.pdf	INTERGROWTH chart (نمودار)
+4329544	نمودار-دور-سر-پسران-نارس-.pdf	INTERGROWTH chart (نمودار)
+4329828	نمودار-قد-پسران-نارس.pdf	INTERGROWTH chart (نمودار)
+4313424	نمودار-وزن-دختران-نارس.pdf	INTERGROWTH chart (نمودار)
+4326502	نمودار-وزن-پسران-نارس.pdf	INTERGROWTH chart (نمودار)
+
+=== PDF CLASSIFICATION SUMMARY ===
+ASQ: 18
+INTERGROWTH chart (نمودار): 7
+M-CHAT (غربالگری): 1
+booklet (chart-boy/girl): 2
+
+=== PDFs BY CLASS ===
+[ASQ]
+  243000  10m.pdf
+  195636  12m.pdf
+  172765  14m.pdf
+  138305  16m.pdf
+  187869  18m.pdf
+  190404  20m.pdf
+  193485  22m.pdf
+  195860  27m.pdf
+  198125  30m.pdf
+  199857  33m.pdf
+  202070  36m.pdf
+  203993  42m.pdf
+  193897  48m.pdf
+  202479  4m.pdf
+  197869  54m.pdf
+  199304  60m.pdf
+  254720  6m.pdf
+  257562  8m.pdf
+[M-CHAT (غربالگری)]
+  199395  غربالگری-اوتیسم.pdf
+[INTERGROWTH chart (نمودار)]
+  4327861  نمودار-ترکیبی-رشد-دختران-نارس.pdf
+  4344993  نمودار-ترکیبی-رشد-پسران-نارس.pdf
+  4315848  نمودار-دور-سر-دختران-نارس.pdf
+  4329544  نمودار-دور-سر-پسران-نارس-.pdf
+  4329828  نمودار-قد-پسران-نارس.pdf
+  4313424  نمودار-وزن-دختران-نارس.pdf
+  4326502  نمودار-وزن-پسران-نارس.pdf
+[booklet (chart-boy/girl)]
+  7632487  chart-boy-95.pdf
+  7323536  chart-girl-95.pdf

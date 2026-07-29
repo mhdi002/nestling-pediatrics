@@ -1,0 +1,126 @@
+{
+  "all_ok": true,
+  "passed": 20,
+  "total": 20,
+  "checks": [
+    {
+      "name": "eq_male_40w_3.2",
+      "ok": true,
+      "detail": {
+        "centile": 30.849590000722326
+      }
+    },
+    {
+      "name": "db_growth_preterm",
+      "ok": true,
+      "detail": "weight=2.9 at 40.0w PMA (female, preterm): centile≈29.0, z≈-0.55, status=within_10_90"
+    },
+    {
+      "name": "db_growth_stored",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "db_growth_term_who",
+      "ok": true,
+      "detail": "weight=5.6 at 2.0 months (male, term): centile≈51.9, z≈0.05, status=within_10_90"
+    },
+    {
+      "name": "conv_help",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "conv_help_no_fa",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "conv_iron",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "conv_soft_growth_tools",
+      "ok": true,
+      "detail": [
+        "overlay_growth_on_chart"
+      ]
+    },
+    {
+      "name": "conv_soft_growth_no_fa",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "conv_soft_growth_centile",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "conv_history_intent",
+      "ok": true,
+      "detail": [
+        "history"
+      ]
+    },
+    {
+      "name": "conv_history_tool",
+      "ok": true,
+      "detail": [
+        "get_child_summary"
+      ]
+    },
+    {
+      "name": "conv_history_has_name",
+      "ok": true,
+      "detail": "PretermMaya (female)\nGA at birth: 32.0 weeks → preterm\nGrowth points: 2; screenings: 0\n- latest weight: 3.0 at 42.0w (centile≈10.787215035070446, z≈-1.237923842680769, within_10_90)\nSaved charts: overlay_e92b265d-da34-4d30-b74c-b94fad2629a8_weight_42.0w.png, overlay_e92b265d-da34-4d30-b74c-b94fad262"
+    },
+    {
+      "name": "conv_history_no_overlay_refire",
+      "ok": true,
+      "detail": [
+        "get_child_summary"
+      ]
+    },
+    {
+      "name": "conv_term_fetch",
+      "ok": true,
+      "detail": "TermOmar (male)\nGA at birth: 39.0 weeks → term\nGrowth points: 1; screenings: 0\n- latest weight: 5.6 at 8.69w (centile≈51.874893158911206, z≈0.04701391550734525, within_10_90)\nSaved charts: overlay_70042775-3e9e-4b51-966e-0ef08ca663ca_weight_2.0m.png Based on retrieved sources:\n- (event_9fbba3bf-0b33-473a-ab75-6ef5e5b597b7) Created child profile for"
+    },
+    {
+      "name": "conv_fa_help",
+      "ok": true,
+      "detail": "سلام! من نستلینگ، دستیار والدین هستم. می‌توانم:\n• رشد را روی نمودار درست به‌صورت خودکار بررسی کنم — نارس با INTERGROWTH و طبیعی با WHO؛ لازم نیست خودتان گروه را بدانید\n• غربالگری ASQ و M-CHAT-R را نمر"
+    },
+    {
+      "name": "memory_slots_sex",
+      "ok": true,
+      "detail": {
+        "child_id": "e92b265d-da34-4d30-b74c-b94fad2629a8",
+        "sex": "female",
+        "gestational_age_weeks": 32.0,
+        "chart_standard": "intergrowth_preterm",
+        "measure": "weight",
+        "weeks": 38.0,
+        "value": 2.8,
+        "want_overlay": true
+      }
+    },
+    {
+      "name": "memory_history_len",
+      "ok": true,
+      "detail": null
+    },
+    {
+      "name": "tool_child_summary_ok",
+      "ok": true,
+      "detail": "PretermMaya (female)\nGA at birth: 32.0 weeks → preterm\nGrowth points: 3; screenings: 0\n- latest weight: 3.0 at 42.0w (centile≈10.787215035070446, z≈-1.237923842680769, within_10_90)\nSaved charts: overlay_e92b265d-da34-4d30-b74c-b94fad2629a8_weight_38.0w.png, overlay_e92b265d-da34-4d30-b74c-b94fad2629a8_weight_42.0w.png, overlay_e92b265d-da34-4d30-b74c-b94fad2629a8_weight_40.0w.png"
+    },
+    {
+      "name": "pure_lang_strips_fa",
+      "ok": true,
+      "detail": null
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "asq": [
+    {
+      "file": "4m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "6m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "8m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "10m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "12m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "14m.pdf",
+      "domains": 6,
+      "questions": 36
+    },
+    {
+      "file": "16m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "18m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "20m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "22m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "27m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "30m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "33m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "36m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "42m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "48m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "54m.pdf",
+      "domains": 6,
+      "questions": 37
+    },
+    {
+      "file": "60m.pdf",
+      "domains": 6,
+      "questions": 37
+    }
+  ],
+  "screens": [
+    {
+      "file": "غربالگری-اوتیسم.pdf",
+      "questions": 20
+    }
+  ],
+  "charts": [
+    {
+      "file": "نمودار-ترکیبی-رشد-دختران-نارس.pdf"
+    },
+    {
+      "file": "نمودار-ترکیبی-رشد-پسران-نارس.pdf"
+    },
+    {
+      "file": "نمودار-دور-سر-دختران-نارس.pdf"
+    },
+    {
+      "file": "نمودار-دور-سر-پسران-نارس-.pdf"
+    },
+    {
+      "file": "نمودار-قد-پسران-نارس.pdf"
+    },
+    {
+      "file": "نمودار-وزن-دختران-نارس.pdf"
+    },
+    {
+      "file": "نمودار-وزن-پسران-نارس.pdf"
+    }
+  ],
+  "booklets": [
+    {
+      "file": "chart-boy-95.pdf",
+      "pages": 4
+    },
+    {
+      "file": "chart-girl-95.pdf",
+      "pages": 4
+    }
+  ],
+  "info": "info.md"
+}

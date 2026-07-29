@@ -1,0 +1,125 @@
+{
+  "child_id": "ab717a29-78c2-4b7d-8758-716f5f688367",
+  "session_id": "0ace4b43-d171-47ee-8329-dc7eae9d1621",
+  "turns": [
+    {
+      "message": "hi",
+      "pass": true,
+      "detail": "help intent + Nestling greeting",
+      "intents": [
+        "help"
+      ],
+      "tools": [],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "Hi! I'm Nestling, your pediatric parent assistant. I can:\n• Check growth on the right chart automatically (preterm or term)\n• Score ASQ and M-CHAT-R screenings\n• Answer care questions (iron, sleep, feeding, developmental concerns)\n• Remember your child's measurements during this chat Just talk simpl"
+    },
+    {
+      "message": "show my child profile",
+      "pass": true,
+      "detail": "history profile, no chart overlay",
+      "intents": [
+        "history"
+      ],
+      "tools": [
+        "get_child_summary"
+      ],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "VerifyEN (male)\nGA at birth: 39.0 weeks → term\nGrowth points: 0; screenings: 0"
+    },
+    {
+      "message": "boy weight 40 weeks 3.2 kg",
+      "pass": true,
+      "detail": "growth+overlay, age_months=0.23, centile=20.2, chart_standard=who_term",
+      "intents": [
+        "growth"
+      ],
+      "tools": [
+        "overlay_growth_on_chart"
+      ],
+      "has_overlay": true,
+      "growth": {
+        "age_months": 0.23014959723820486,
+        "centile": 20.203776567322834,
+        "z_score": -0.8343646493825881,
+        "chart_standard": "who_term",
+        "overlay_filename": "overlay_ab717a29-78c2-4b7d-8758-716f5f688367_weight_0.2m.png"
+      },
+      "reply_preview": "weight=3.2 at 0.2 months (male, term): centile≈20.2, z≈-0.83, status=within_10_90 I plotted this on the WHO chart (term). See the chart below."
+    },
+    {
+      "message": "show my child chart",
+      "pass": true,
+      "detail": "growth overlay, no history dump; intents=['growth'], tools=['overlay_growth_on_chart']",
+      "intents": [
+        "growth"
+      ],
+      "tools": [
+        "overlay_growth_on_chart"
+      ],
+      "has_overlay": true,
+      "growth": {
+        "age_months": 0.23014959723820486,
+        "centile": 20.203776567322834,
+        "z_score": -0.8343646493825881,
+        "chart_standard": "who_term",
+        "overlay_filename": "overlay_ab717a29-78c2-4b7d-8758-716f5f688367_weight_0.2m.png"
+      },
+      "reply_preview": "weight=3.2 at 0.2 months (male, term): centile≈20.2, z≈-0.83, status=within_10_90 I plotted this on the WHO chart (term). See the chart below."
+    },
+    {
+      "message": "when will my son talk?",
+      "pass": true,
+      "detail": "medical only, speech in reply; intents=['medical', 'screening'], tools=[]",
+      "intents": [
+        "medical",
+        "screening"
+      ],
+      "tools": [],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "Based on retrieved sources:\n- Speech and language concerns: Many 3-month-old infants coo and make vowel sounds; they are not expected to use words yet. Lack of words at 3 months is usually not a speech delay by itself. Watch for social smiling, turning to voices, and making sounds. By about 6-9 mont"
+    },
+    {
+      "message": "so its okey now",
+      "pass": true,
+      "detail": "reassure intent, not vague; intents=['reassure']",
+      "intents": [
+        "reassure"
+      ],
+      "tools": [],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "Yes — based on what you shared, that usually sounds okay for now. If you stay worried or skills seem to go backward, ask again or try the ASQ screen."
+    },
+    {
+      "message": "tell me about iron",
+      "pass": true,
+      "detail": "medical iron answer; intents=['medical'], tools=[]",
+      "intents": [
+        "medical"
+      ],
+      "tools": [],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "Based on retrieved sources:\n- Child growth & parenting guidance: Iron is required for hemoglobin and oxygen delivery. Exclusively breastfed infants often need iron supplementation after about 4 months until iron-rich complementary foods are established. Formula-fed infants usually receive iron-forti"
+    },
+    {
+      "message": "what was my child's last growth result?",
+      "pass": true,
+      "detail": "history recalls 3.2; intents=['history'], 3.2 in reply=True",
+      "intents": [
+        "history"
+      ],
+      "tools": [
+        "get_child_summary"
+      ],
+      "has_overlay": false,
+      "growth": {},
+      "reply_preview": "VerifyEN (male)\nGA at birth: 39.0 weeks → term\nGrowth points: 1; screenings: 0\n- latest weight: 3.2 at 1.0 weeks since birth, ≈0.2 months (centile≈20.2, within_10_90)\nSaved charts: overlay_ab717a29-78c2-4b7d-8758-716f5f688367_weight_0.2m.png"
+    }
+  ],
+  "sessions_count": 10,
+  "failed": 0
+}

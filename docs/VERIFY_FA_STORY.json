@@ -1,0 +1,81 @@
+{
+  "failed": 0,
+  "child_id": "f95d4210-3fdc-48de-8cbd-d5e4ccaaa826",
+  "session_id": "4f694f17-8ae4-4be5-8cbc-17cfcc5c8715",
+  "results": [
+    {
+      "message": "سلام",
+      "pass": true,
+      "reason": "help intent + Nestling greeting in FA",
+      "intents": [
+        "help"
+      ],
+      "tools": [],
+      "reply_preview": "سلام! من نستلینگ، دستیار والدین هستم. می‌توانم:\n• رشد را روی نمودار درست بررسی کنم (نارس یا طبیعی به‌صورت خودکار)\n• غربالگری ASQ و M-CHAT-R را نمره‌دهی کنم\n• به سوالات مراقبتی (آهن، خواب، تغذیه، نگرانی‌های تکاملی) پاسخ دهم\n• اندازه‌ها و پرونده فرزند را در این گفتگو به خاطر بسپارم\n\nساده بپرسید، مثلاً",
+      "has_overlay": false
+    },
+    {
+      "message": "پروفیل بچمو نشون میدی ؟",
+      "pass": true,
+      "reason": "history only, no chart, no RAG dump",
+      "intents": [
+        "history"
+      ],
+      "tools": [
+        "get_child_summary",
+        "get_child_summary"
+      ],
+      "reply_preview": "داستانفا (male)\nGA at birth: 39.0 weeks → term\nGrowth points: 1; screenings: 0\n- latest weight: 3.2 at 1.0 weeks since birth, ≈0.2 months (centile≈20.2, within_10_90)\nSaved charts: overlay_f95d4210-3fdc-48de-8cbd-d5e4ccaaa826_weight_0.2m.png",
+      "has_overlay": false
+    },
+    {
+      "message": "چارتشو نشون بده",
+      "pass": true,
+      "reason": "growth overlay, no history mash",
+      "intents": [
+        "growth"
+      ],
+      "tools": [
+        "overlay_growth_on_chart",
+        "overlay_growth_on_chart"
+      ],
+      "reply_preview": "weight=3.2 در 0.2 months (male، طبیعی): صدک≈20.2، z≈-0.83، وضعیت=within_10_90\n\nاین را روی نمودار WHO (طبیعی) رسم کردم. نمودار را پایین ببینید.",
+      "has_overlay": true
+    },
+    {
+      "message": "پسرم کی حرف میزنه؟",
+      "pass": true,
+      "reason": "medical only, no chart reuse",
+      "intents": [
+        "medical",
+        "screening"
+      ],
+      "tools": [],
+      "reply_preview": "بر اساس منابع بازیابی شده:\n- نگرانی های گفتاری و زبانی: بسیاری از نوزادان 3 ماهه صدا می زنند و صداهای صدادار تولید می کنند. آنها هنوز از کلمات استفاده نمی کنند. فقدان کلمات در 3 ماهگی معمولاً به خودی خود تاخیر در گفتار نیست. مراقب لبخندهای اجتماعی، روی آوردن به صداها و ایجاد صدا باشید. در حدود 6-9 م",
+      "has_overlay": false
+    },
+    {
+      "message": "پس خوبه",
+      "pass": true,
+      "reason": "reassure intent",
+      "intents": [
+        "chat",
+        "reassure"
+      ],
+      "tools": [],
+      "reply_preview": "بله — با توجه به آنچه گفتید، فعلاً جای نگرانی فوری به نظر نمی‌رسد. اگر بعداً نگران شدید یا مهارت‌ها عقب رفت، دوباره بپرسید یا ASQ را امتحان کنید.",
+      "has_overlay": false
+    },
+    {
+      "message": "درباره آهن بگو",
+      "pass": true,
+      "reason": "medical, no chart",
+      "intents": [
+        "medical"
+      ],
+      "tools": [],
+      "reply_preview": "بر اساس منابع بازیابی شده:\n- رشد کودک و راهنمایی والدین: آهن برای هموگلوبین و اکسیژن رسانی لازم است. نوزادانی که به طور انحصاری با شیر مادر تغذیه می شوند، اغلب پس از حدود 4 ماهگی تا زمانی که غذاهای مکمل غنی از آهن ایجاد شوند، نیاز به مکمل آهن دارند. نوزادانی که با شیر خشک تغذیه می شوند معمولا شیر خش",
+      "has_overlay": false
+    }
+  ]
+}

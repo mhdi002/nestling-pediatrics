@@ -1,0 +1,53 @@
+{
+  "reply": "weight=3.2 at 40.0w (male): centile≈30.8, z≈-0.50, status=within_10_90",
+  "tools": {
+    "query": "weight 40 weeks 3.2 kg overlay for male",
+    "tool_calls": [
+      {
+        "name": "growth_percentile",
+        "arguments": {
+          "sex": "male",
+          "measure": "weight",
+          "weeks": 40.0,
+          "value": 3.2
+        },
+        "result": {
+          "ok": true,
+          "tool": "growth_percentile",
+          "sex": "male",
+          "measure": "weight",
+          "weeks": 40.0,
+          "chart_percentiles": {
+            "3": 2.636405676183462,
+            "10": 2.8676740169034733,
+            "50": 3.4326297591566783,
+            "90": 4.108886503135845,
+            "97": 4.4693224452867115
+          },
+          "units": "kg",
+          "reference": "Villar et al. Lancet Glob Health 2015; INTERGROWTH-21st",
+          "value": 3.2,
+          "z_score": -0.5001182733626268,
+          "centile": 30.849590000722326,
+          "track_status": "within_10_90",
+          "summary": "weight=3.2 at 40.0w (male): centile≈30.8, z≈-0.50, status=within_10_90"
+        }
+      }
+    ],
+    "tool_model": "Salesforce/xLAM-1b-fc-r",
+    "intents": [
+      "growth"
+    ]
+  },
+  "slots": {
+    "sex": "male",
+    "measure": "weight",
+    "weeks": 40.0,
+    "value": 3.2,
+    "want_overlay": true
+  },
+  "missing_slots": [],
+  "intents": [
+    "growth"
+  ]
+}

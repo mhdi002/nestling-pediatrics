@@ -1,0 +1,58 @@
+# VCS / cache
+.git
+.gitignore
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+
+# IDE / OS
+.idea
+.vscode
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local agent / temp dumps
+preview_*.png
+_tmp_*
+_debug_*
+_run_log*
+_parser_*
+_probe_*
+_domain_*
+_slice_*
+_test_write*
+_file_list*
+_append_notes*
+_analyze_*
+_pdf_*
+_asq_*
+_mchat_*
+_extract_*
+_dump_*
+_compare_*
+_finalize_*
+agent-transcripts
+.cursor
+
+# Tests not needed in runtime image
+tests
+*.pyc
+.coverage
+htmlcov
+dist
+build
+
+# Large source PDFs (extracted/ + data/en already shipped)
+*.pdf
+
+# Heavy optional model caches if present locally
+.cache
+**/huggingface
+**/torch_cache

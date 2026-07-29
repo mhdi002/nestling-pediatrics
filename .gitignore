@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+HF_TOKEN
+**/HF_TOKEN*
+
+# Local runtime data (regenerable / PII)
+data/children/*.db
+data/children/*.sqlite
+data/children/**/*.db
+data/children/**/*.sqlite
+data/overlays/*
+!data/overlays/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+data/models/
+data/knowledge/rag_index/
+
+# Model weights
+*.gguf
+
+# Node
+node_modules/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Caches
+.cache/
+**/huggingface/
+**/torch_cache/
+
+# Build
+dist/
+build/
+data/children/rag_index/

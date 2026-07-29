@@ -1,0 +1,714 @@
+{
+  "source": "48m.pdf",
+  "type": "ASQ",
+  "age_months": 48,
+  "title_en": "Ages & Stages Questionnaire (A.S.Q)",
+  "title_fa": "پرسشنامه سنین و مراحل A.S.Q",
+  "header_fields": {
+    "child_name": "",
+    "family_name": "",
+    "date_of_birth": "",
+    "corrected_age": "",
+    "completion_date": "",
+    "completer_name": "",
+    "completer_relation": "",
+    "completer_phone": "",
+    "sex": "نام خانوادگي كودك",
+    "province": "شماره تلفن",
+    "county": "استان",
+    "village": "شهرستان",
+    "center_name": "",
+    "interviewer": "نام مركز",
+    "center_phone": ""
+  },
+  "domains": [
+    {
+      "id": "communication",
+      "title_fa": "برقراری ارتباط",
+      "title_en": "Communication",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك حداقل سه مورد ازيك مقوله متداول را نام مي برد؟ براي مثال ، اگر شما به كودك مي گوييد، \" اسم چند تا خوراكي را به من بگو \" آيا كودك در پاسخ چيزهايي مثل، \" و غذا، ميوه، شيريني تخم مرغ \" را نام مي برد . يا اگر بگوييد، \" اسم چند تا حيوان را به من بگو . \" آيا كودك در پاسخ چيزهايي مثل \" گاو ،سگ و فيل \" را نام مي برد؟",
+          "text_en": "Does the child name at least three items from a common category? For example, if you say to a child, \"Tell me the names of some foods,\" will the child name things like, \"and food, fruit, egg dessert?\" Or if you say, \"Tell me the names of some animals.\" Does the child answer things like \"cow, dog, and elephant\"?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك به سوالات زير پاسخ مي دهد : \" وقتي گرسنه هستي چكار مي كني؟ \") پاسخ هاي قابل \" نان،بيسكويت و مي خورم \" لطفا پاسخ كودك را بنويسيد زير هستند قبول شامل موارد :\" غذا مي خورم \"،\" از كسي مي خوام كه چيزي به من بده تا بخورم و \"",
+          "text_en": "Does the child answer the following questions: \"What do you do when you're hungry?\") Possible answers: \"I eat bread, biscuits, etc.\"",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا هنگام تعريف كردن در مورد چيزهاي آشنا،حداقل دو مورد را درباره آن بيان مي كند؟براي مثال م ي گويد ؟ اگر بپرسيد به بگو \" توپت چه جوريه؟ \" آيا چيزي مثل \" اون گرده \"،\" بزرگه \"،\" اونو شوت مي كنم \" را",
+          "text_en": "When describing familiar things, does he state at least two things about it? For example, does he say? If you ask, \"What's your ball like?\", do you say something like \"that ball\", \"it's big\", \"I'll shoot it\"",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك مواردي مثل \" ها \" نشانه جمع، \"_ م،يم \" نشانه گذشته، مي \" \" نشانه استمرار را در كلمات مي كنم \" يا \" توپ را شوت كردم \" را مي گويد؟ بكار مي برد؟براي مثال ، آيا كودك شما چيزهايي مثل ، \" من گربه ها را مي بينم \"،\" من دارم بازي",
+          "text_en": "Does your child say things like ``ha'', ``plural'', ``y'', ``past'', ``I'll mark continuous words'' or ``I shot the ball''? For example, does your child say things like, ``I see cats,'' ``I'm playing",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "اگر بدون هيچ اشاره اي آنچه را كه گفته ايد،تكرار نكنيد،آيا كودك از سه دستوري كه ربطي به و قبل از اينكه كودك شروع به پشت سرهم را پيروي مي كند؟شما بايد هر سه دستور يكديگر ندارند انجام دادن آنها نمايد،ارائه دهيد . براي مثال ، مي توانيد سه دستور زير را به كود ك ارائه دهيد \" دست بزن ) كف زدن ( ،به طرف در برو و بنشين \".",
+          "text_en": "If you don't repeat what you said without any cues, does the child follow three commands that are related to and before the child starts to follow the sequence? For example, you can give the following three commands to the child: \"clap your hands, go to the door and sit\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك براي ساختن جملات كاملي مثل \" من دارم به اون پارك مي رم \".\" يه اسباب بازي دارين يك \"، مي \"،\"آن \"،\" \" در فعل هايي مثل مي روم .( كه باهاش بازي كنم ؟ \" \"يا شما هم مي آيي؟ \" از تمام كلمات لازم استفاده مي كند؟ ) براي مثال جمع كل",
+          "text_en": "Does the child use all the necessary words to make complete sentences such as \"I am going to that park\", \"do you have a toy, one\", \"may\", \"that\", \"\" in verbs such as \"to play with him?\" \"or are you coming too?\"",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "gross_motor",
+      "title_fa": "حرکات درشت",
+      "title_en": "Gross motor",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "زماني كه يك توپ بزرگ را براي كودك پرت مي كنيد، آيا آن را با هر دو دستش مي گيرد؟ شما بايدحدود .15 متر از كودك فاصله داشته و براي اين كار به او دو يا سه بار فرصت دهيد؟",
+          "text_en": "When you throw a big ball to a child, does he catch it with both hands? You should be about 15 meters away from the child and give him two or three chances to do this.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك بدون اينكه كسي به او كمك كند، از پله هاي سرسره بالا رفته و سپس از بالاي آن سر مي خورد؟",
+          "text_en": "Does the child go up the stairs of the slide without someone helping him and then slide down it?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك در حالت ايستاده، بازويش را تا سطح شانه بالا مي برد و توپ را به طرف جلو و به سمت فردي كه در فاصله حدود 2 متري از او ايستاده است،پرتاب مي كند؟ ) چنانچه توپ از را بدون بالا بردن رها كند يا توپ را دست كودك بيفتد،توپ دستش پرتاب كند،پاسخ \" خير \" را علامت بزنيد .(",
+          "text_en": "Does the child, while standing, raise his arm up to shoulder level and throw the ball forward towards a person who is standing about 2 meters away from him? (If the ball drops without lifting it or if the ball falls into the child's hand and the child throws the ball, mark the answer \"No\".)",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك مي تواند حداقل يكبار و بدون اينكه تعادلش را از دست بدهد، با پاي راست يا پاي چپ خود لي لي كند؟",
+          "text_en": "Can the child li at least once without losing his balance with his right or left foot?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك مي تواند در حالت ايستاده و جفت پا ،نيم متر به جلو بپرد؟",
+          "text_en": "Can the child jump forward half a meter while standing?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك بدون اينكه به چيزي يا جايي تكيه دهد و بدون از دست دادن تعادلش و پايش،حداقل به مدت5 ثانيه روي يك پا مي ايستد؟ پاسخ دهيد، مي توانيد براي اين كار دو يا سه بار به قبل از اينكه به اين سوال كودك فرصت دهيد . جمع كل",
+          "text_en": "Does the child stand on one leg for at least 5 seconds without leaning on something or somewhere and without losing his or her balance? Answer, you can do this two or three times before giving this child a chance. total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "fine_motor",
+      "title_fa": "حرکات ظریف",
+      "title_en": "Fine motor",
+      "instruction_fa": "ظريف پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Zarif, before answering, make sure that you have seen or experienced any activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك قطعات يك اسباب بازي جورچين شش تكه اي ) پازل 6 تكه اي ( را بطور صحيح كنار يكديگر قرار مي دهد؟ اگر اسباب بازي موجود نبود ،يك صفحه از يك مجله را را به شش قسمت ببريد و آن روي آن يك تصوير بزرگ است برداريد كه . آيا كودك شما آنها را بطور صحيح كنار يكديگر قرار مي دهد ؟",
+          "text_en": "Does the child put the pieces of a six-piece jigsaw puzzle (6-piece puzzle) together correctly? If the toy is not available, cut a page of a magazine into six parts and take a big picture on it. Does your child put them together correctly?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك با باز و بسته كردن قيچي ، كاغذ را از وسط و تقريبا در يك خط صاف ، قيچي مي كند ؟",
+          "text_en": "By opening and closing the scissors, does the child cut the paper from the middle and almost in a straight line?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك با نگاه كردن به اشكال زير، حداقل سه تا از آنها را روي يك ورق كاغذ رسم را كپي كند و آنها روي اين اشكال بگذارد را بر مي كند ؟ البته او نبايد كاغذ خود . آنچه ولي اندازه آنها ، او نشان داده ايد مي تواند متفاوت باشد . رسم مي كند،از نظر طرح بايد مشابه اشكالي باشند كه به كودك",
+          "text_en": "Looking at the shapes below, does the child copy at least three of them on a sheet of drawing paper and put them on these shapes? Of course, he should not be his paper. What you have shown but their size can be different. draws, in terms of design, they should be similar to the shapes that the child",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك دگمه يا دگمه ها را باز مي كند؟ براي انجام اين كار، او مي تواند از لباس خودش يا لباس عروسك استفاده كند .",
+          "text_en": "Does the child open the button or buttons? To do this, he can use his own clothes or doll clothes.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك در كشيدن تصوير افراد يا تصوير آدمك ،حداقل سه مورد از موارد زير را رسم پا (؟ مي كند : سر، چشم ها، بيني،دهان،كردن، مو، تنه، بازوها، دست ها، ران، و يا پاها ) كف",
+          "text_en": "When drawing a picture of a person or a dummy, does the child draw at least three of the following: head, eyes, nose, mouth, hair, trunk, arms, hands, thighs, or feet?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك هنگام رنگ آميزي يك تصوير ،اكثرا داخل خطوط آن رنگ مي كند؟ ) هنگام رنگ كردن يك تصوير نبايد بيش از .05 سانتي متر از خطوط تصوير بيرون برود .( جمع كل",
+          "text_en": "When coloring a picture, does the child mostly color inside its lines? (When coloring a picture, no more than 0.5 cm should go out of the lines of the picture.)",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "problem_solving",
+      "title_fa": "حل مسئله",
+      "title_en": "Problem solving",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "زماني كه يك شي را به كودك نشان مي دهيد و مي گوييد \" اين چه رنگيه؟ \" آيا اوپنج پاسخ،را به صورت صحيح بكار برد رنگ پنج صورتي كه كودك نام بله \" \" را علامت بزنيد . رنگ مختلف مثل قرمز ، آبي ،زرد،سياه ) مشكي ( ،سفيد يا صورتي را نام مي برد؟ تنها در",
+          "text_en": "When you show an object to a child and say, \"What color is this?\", did he use the five answers correctly, mark the five colors that the child names yes. Does he name different colors such as red, blue, yellow, black (black), white or pink? Only in",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك با پوشيدن لباس هاي ديگران و \" ادا درآوردن \" وانمود مي كند كسي يا چيز وانمود كند كه يك مامان،بابا،برادر ،خواهر، يا يك حيوان يا موجود خيالي است. ديگري است؟ براي مثال كودك ممكن است كه به شكل هاي مختلفي لباس بپوشد و",
+          "text_en": "Does the child pretend to be someone or something by wearing other people's clothes and pretending to be a mom, dad, brother, sister, or an animal or imaginary creature? is it another For example, a child may dress in different ways",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "اگر پنج شي را مقابل كودك قرار دهيد،آيا مي تواند آنها را به ترتيب با كردن ،انجام حركت يا نام بردن به او كمك كنيد . گفتن، \" يك،دو،سه،چهار،پنج \" بشمارد؟ هنگام پرسيدن اين سوال از كودك،نبايد با اشاره",
+          "text_en": "If you put five objects in front of the child, can you help him by making, moving or naming them? Saying, \"count one, two, three, four, five\"? When asking this question to the child, you should not point",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "زماني كه از كودك مي پرسيد \" كوچكترين دايره كدام است؟ \" آيا به كوچكترين دايره را بدون استفاده از اشاره،حركات چهره يا نگاه كردن به كوچكترين اشاره مي كند؟ سئوال دايره بپرسيد ؟",
+          "text_en": "When you ask the child, \"Which is the smallest circle?\", does he point to the smallest circle without using gestures, facial movements, or looking at the smallest? Ask a circle question?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك از تا 1 15 را بدون اشتباه مي شمارد؟اگر چنين است،پاسخ بله \" \" را علامت بزنيد . اگر تا 21 را بدون اشتباه مي شمارد پاسخ \" گاهي \" را علامت بزنيد .",
+          "text_en": "Does the child count from 1 to 15 without mistakes? If so, mark the answer yes. If you count to 21 without mistakes, mark the answer \"sometimes\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك نام اعداد را مي داند اگر . سه عدد زير را مي شناسد و نام مي برد پاسخ\"بله \" را علامت بزنيد . اگر دو عدد از اعداد زير را شناخت و اسم آنها را گفت،پاسخ \" گاهي \" را علامت بزنيد . جمع كل",
+          "text_en": "Does the child know the names of the numbers if He knows and names the following three numbers. Mark the answer \"yes\". If you recognize two of the following numbers and say their names, mark the answer \"sometimes\". total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "personal_social",
+      "title_fa": "شخصی-اجتماعی",
+      "title_en": "Personal-social",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا با استفاده از وسايل آشپزخانه و غذاخوري براي خودش غذا مي كشد . به عنوان مثال ريزد؟ مي و در طرف خود را از يك كاسه بزرگ بر مي دارد با استفاده از يك قاشق بزرگ ماست",
+          "text_en": "Does he make food for himself using kitchen and eating utensils? For example, razed? He takes his side from a big bowl using a big spoon of yogurt",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك حداقل4 مورد از موارد زير را بازگو مي كند؟ 1( نام خودش 2( نام خانوادگي خودش 3( سن خودش 4 (دختر يا پسر بودن خودش 5 ( شهري كه در آن زندگي مي كند 6 (شماره تلفن خودش را كه كودك مي داند، دايره بكشيد لطفا دور مواردي .",
+          "text_en": "Does the child recount at least 4 of the following? 1) His name 2) His family name 3) His age 4) Whether he is a girl or boy 5) The city he lives in 6) Circle his phone number that the child knows, please circle the items.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك بدون كمك و به تنهايي ، دست و صورتش را با استفاده از صابون مي شويد و با حوله خشك مي كند؟",
+          "text_en": "Does the child wash his hands and face with soap and dry with a towel without help?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك اسم دو يا چند نفر از همباز هايش را به شما مي گويد . اين اسامي نبايد شامل همبازي يا دوستانش به او كمك كنيد . و خواهرها باشد اسم برادر . زماني كه اين سوال را از كودك مي پرسيد ،نبايد با گفتن اسم",
+          "text_en": "Does the child tell you the names of two or more of his teammates? These names should not include his teammates or friends. Help him. And sisters should be the name of brother. When you ask this question to the child, you should not say the name",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك بدون هيچ كمكي ، خمير دندان را بر ر وي مسوال مي گذارد و تمام دندان هايش را را مسواك بزنيد دندانهايش . و دوباره زدن كودك نظارت كنيد زند؟ البته شايد هنوز لازم باشد كه بر مسواك مسواك مي",
+          "text_en": "Does the child put toothpaste on the mat without any help and brush all his teeth? And monitor the child again? Of course, it may still be necessary to brush the toothbrush",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك بدون هيچ كمكي ، خودش لباس هايش را مي پوشد يا در مي آورد؟ ) به استثناي دگمه هاي فشاري،معمولي،زيپ ها ( جمع كل",
+          "text_en": "Does the child put on or take off his clothes by himself without any help? (with the exception of normal buttons, zippers) (Total total",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "overall",
+      "title_fa": "موارد کلی",
+      "title_en": "Overall",
+      "instruction_fa": "",
+      "instruction_en": "",
+      "answer_options_en": [
+        "Yes",
+        "No"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "به نظر شما آيا كودكتان خوب مي شنود ؟ اگر نه توضيح دهيد .",
+          "text_en": "Do you think your child can hear well? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "به نظر شما آيا كودكتان مثل هم سن و سالانش حرف مي زند ؟اگر نه توضيح دهيد .",
+          "text_en": "Do you think your child talks like his peers? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا شما اكثرا آنچه كه كودكتان مي گويد، مي فهميد ؟اگر نه توضيح دهيد .",
+          "text_en": "Do you understand most of what your child says? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "به نظر شما آيا كودكتان مثل هم سن و سالانش راه مي رود ، مي دود و از رود؟ اگر نه توضيح دهيد وسايل بالا مي.",
+          "text_en": "Do you think your child walks, runs and walks like his peers? If not, please explain, the equipment will be raised.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا سابقه ناشنوايي و يا مشكلات شنوايي در دوران كودكي اعضاي خانواده هر وجود دارد؟ اگر والدين يك از بله توضيح دهيد .",
+          "text_en": "Is there a history of deafness or hearing problems in the childhood of any family members? If the parents are one of yes, please explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا به نظر شما ، كودكتان از نظر بينايي مشكلي دارد؟ اگر بله توضيح دهيد .",
+          "text_en": "Do you think your child has a vision problem? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 7,
+          "text_fa": "آيا در مورد كودك خود نگراني خاصي داريد ؟اگر بله توضيح دهيد .",
+          "text_en": "Do you have any special concerns about your child? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        }
+      ]
+    }
+  ],
+  "language": "en+fa",
+  "verification": {
+    "ok": false,
+    "issues": [
+      "empty .domains[0].answer_options_en",
+      "empty .domains[0].questions[0].options_en",
+      "empty .domains[0].questions[1].options_en",
+      "empty .domains[0].questions[2].options_en",
+      "empty .domains[0].questions[3].options_en",
+      "empty .domains[0].questions[4].options_en",
+      "empty .domains[0].questions[5].options_en",
+      "empty .domains[1].answer_options_en",
+      "empty .domains[1].questions[0].options_en",
+      "empty .domains[1].questions[1].options_en",
+      "empty .domains[1].questions[2].options_en",
+      "empty .domains[1].questions[3].options_en",
+      "empty .domains[1].questions[4].options_en",
+      "empty .domains[1].questions[5].options_en",
+      "empty .domains[2].answer_options_en",
+      "empty .domains[2].questions[0].options_en",
+      "empty .domains[2].questions[1].options_en",
+      "empty .domains[2].questions[2].options_en",
+      "empty .domains[2].questions[3].options_en",
+      "empty .domains[2].questions[4].options_en"
+    ],
+    "issue_count": 44
+  }
+}

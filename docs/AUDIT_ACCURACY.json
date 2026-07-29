@@ -1,0 +1,462 @@
+{
+  "ok": true,
+  "passed": 19,
+  "failed": 0,
+  "failed_names": [],
+  "total_checks": 19,
+  "sections": {
+    "intergrowth": [
+      {
+        "name": "intergrowth_monotonic_p3_p50_p97",
+        "ok": true,
+        "detail": {
+          "sample": {
+            "male": {
+              "weight": {
+                "p3": 2.636405676183462,
+                "p50": 3.4326297591566783,
+                "p97": 4.4693224452867115
+              },
+              "length": {
+                "p3": 47.50448309022455,
+                "p50": 50.91349290655348,
+                "p97": 54.567139590223015
+              },
+              "head_circumference": {
+                "p3": 33.17368661045386,
+                "p50": 35.0318128,
+                "p97": 36.88993898954613
+              }
+            },
+            "female": {
+              "weight": {
+                "p3": 2.4066905865562354,
+                "p50": 3.133538136078679,
+                "p97": 4.079901797559139
+              },
+              "length": {
+                "p3": 46.03159402830383,
+                "p50": 49.33490659368247,
+                "p97": 52.87527099562969
+              },
+              "head_circumference": {
+                "p3": 32.37789631045386,
+                "p50": 34.2360225,
+                "p97": 36.09414868954613
+              }
+            }
+          },
+          "failures": []
+        }
+      },
+      {
+        "name": "intergrowth_full_grid",
+        "ok": true,
+        "detail": {
+          "weeks": [
+            27,
+            40,
+            64
+          ],
+          "sexes": [
+            "male",
+            "female"
+          ],
+          "measures": [
+            "weight",
+            "length",
+            "head_circumference"
+          ],
+          "values": {
+            "male": {
+              "weight": {
+                "27": {
+                  "p3": 0.45447725519318477,
+                  "p50": 0.6718325653252835,
+                  "p97": 0.9931387999597296
+                },
+                "40": {
+                  "p3": 2.636405676183462,
+                  "p50": 3.4326297591566783,
+                  "p97": 4.4693224452867115
+                },
+                "64": {
+                  "p3": 6.117444294207727,
+                  "p50": 7.787464030561326,
+                  "p97": 9.913387537457025
+                }
+              },
+              "length": {
+                "27": {
+                  "p3": 28.725448199217052,
+                  "p50": 32.71301121792787,
+                  "p97": 37.25411333959422
+                },
+                "40": {
+                  "p3": 47.50448309022455,
+                  "p50": 50.91349290655348,
+                  "p97": 54.567139590223015
+                },
+                "64": {
+                  "p3": 62.5220208627146,
+                  "p50": 66.75419479468569,
+                  "p97": 71.27284852918565
+                }
+              },
+              "head_circumference": {
+                "27": {
+                  "p3": 21.514308103614535,
+                  "p50": 24.776186225925926,
+                  "p97": 28.038064348237317
+                },
+                "40": {
+                  "p3": 33.17368661045386,
+                  "p50": 35.0318128,
+                  "p97": 36.88993898954613
+                },
+                "64": {
+                  "p3": 40.77832318093807,
+                  "p50": 43.0193681125,
+                  "p97": 45.26041304406193
+                }
+              }
+            },
+            "female": {
+              "weight": {
+                "27": {
+                  "p3": 0.41487777915148116,
+                  "p50": 0.6132945036937368,
+                  "p97": 0.9066047090548405
+                },
+                "40": {
+                  "p3": 2.4066905865562354,
+                  "p50": 3.133538136078679,
+                  "p97": 4.079901797559139
+                },
+                "64": {
+                  "p3": 5.584419624663014,
+                  "p50": 7.108927334213872,
+                  "p97": 9.049615043243232
+                }
+              },
+              "length": {
+                "27": {
+                  "p3": 27.834808080661517,
+                  "p50": 31.698735653369823,
+                  "p97": 36.099039702749735
+                },
+                "40": {
+                  "p3": 46.03159402830383,
+                  "p50": 49.33490659368247,
+                  "p97": 52.87527099562969
+                },
+                "64": {
+                  "p3": 60.58350907040712,
+                  "p50": 64.6844633303168,
+                  "p97": 69.06301501071144
+                }
+              },
+              "head_circumference": {
+                "27": {
+                  "p3": 20.718517803614535,
+                  "p50": 23.980395925925926,
+                  "p97": 27.242274048237316
+                },
+                "40": {
+                  "p3": 32.37789631045386,
+                  "p50": 34.2360225,
+                  "p97": 36.09414868954613
+                },
+                "64": {
+                  "p3": 39.98253288093807,
+                  "p50": 42.2235778125,
+                  "p97": 44.46462274406193
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "published_male_wt_27w_0.99kg",
+        "ok": true,
+        "detail": {
+          "centile": 96.89486314195159,
+          "expected": 96.89,
+          "tol": 0.05
+        }
+      },
+      {
+        "name": "published_female_wt_27w_0.91kg",
+        "ok": true,
+        "detail": {
+          "centile": 97.12033546173531,
+          "expected": 97.12,
+          "tol": 0.05
+        }
+      },
+      {
+        "name": "published_female_length_64w_64.68_z0",
+        "ok": true,
+        "detail": {
+          "z": -0.001981458943436527,
+          "expected": 0.0,
+          "tol": 0.05
+        }
+      }
+    ],
+    "asq": [
+      {
+        "name": "asq_6x_yes_equals_60",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "item_scores": [
+            10,
+            10,
+            10,
+            10,
+            10,
+            10
+          ],
+          "total": 60,
+          "max": 60,
+          "cutoff": 30,
+          "below_cutoff": false,
+          "interpretation": "above_cutoff_monitor"
+        }
+      },
+      {
+        "name": "asq_6x_not_yet_0_below_cutoff",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "item_scores": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "total": 0,
+          "max": 60,
+          "cutoff": 30,
+          "below_cutoff": true,
+          "interpretation": "below_cutoff_refer"
+        }
+      },
+      {
+        "name": "asq_mixed_referral",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "tool": "score_asq_questionnaire",
+          "domains": {
+            "communication": {
+              "ok": true,
+              "item_scores": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "total": 0,
+              "max": 60,
+              "cutoff": 30,
+              "below_cutoff": true,
+              "interpretation": "below_cutoff_refer"
+            },
+            "gross_motor": {
+              "ok": true,
+              "item_scores": [
+                10,
+                10,
+                10,
+                10,
+                10,
+                10
+              ],
+              "total": 60,
+              "max": 60,
+              "cutoff": 30,
+              "below_cutoff": false,
+              "interpretation": "above_cutoff_monitor"
+            }
+          },
+          "referral_domains": [
+            "communication"
+          ],
+          "needs_referral": true,
+          "summary": "ASQ scored 2 domains; referral suggested for: communication"
+        }
+      }
+    ],
+    "mchat": [
+      {
+        "name": "mchat_reverse_items",
+        "ok": true,
+        "detail": {
+          "MCHAT_REVERSE": [
+            2,
+            5,
+            12
+          ]
+        }
+      },
+      {
+        "name": "mchat_low_risk",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "tool": "score_mchat",
+          "failed_items": [],
+          "total_failed": 0,
+          "risk": "low",
+          "summary": "M-CHAT-R: 0 failed items → low risk",
+          "note": "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer."
+        }
+      },
+      {
+        "name": "mchat_medium_risk",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "tool": "score_mchat",
+          "failed_items": [
+            2,
+            5,
+            12
+          ],
+          "total_failed": 3,
+          "risk": "medium",
+          "summary": "M-CHAT-R: 3 failed items → medium risk",
+          "note": "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer."
+        }
+      },
+      {
+        "name": "mchat_high_risk",
+        "ok": true,
+        "detail": {
+          "ok": true,
+          "tool": "score_mchat",
+          "failed_items": [
+            1,
+            3,
+            4,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20
+          ],
+          "total_failed": 17,
+          "risk": "high",
+          "summary": "M-CHAT-R: 17 failed items → high risk",
+          "note": "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer."
+        }
+      }
+    ],
+    "intent_routing": [
+      {
+        "name": "intent_help_no_medical",
+        "ok": true,
+        "detail": {
+          "intents": [
+            "help"
+          ],
+          "has_medical_rag": false
+        }
+      },
+      {
+        "name": "intent_iron_medical_clean",
+        "ok": true,
+        "detail": {
+          "intents": [
+            "medical"
+          ],
+          "citation_ids": [
+            "info_0088",
+            "info_0052",
+            "info_0048",
+            "info_0044",
+            "info_0050"
+          ],
+          "mchat_q_in_citations": false
+        }
+      },
+      {
+        "name": "intent_history_no_growth",
+        "ok": true,
+        "detail": {
+          "intents": [
+            "history"
+          ]
+        }
+      }
+    ],
+    "translation": [
+      {
+        "name": "translation_fa_en_pending_zero",
+        "ok": true,
+        "detail": {
+          "pending_count": 0,
+          "en_asq_files": 18,
+          "path": "C:\\Users\\mhf\\Desktop\\pedriatrics\\data\\en\\asq"
+        }
+      }
+    ],
+    "parent_assistant": [
+      {
+        "name": "multiturn_boy_slot",
+        "ok": true,
+        "detail": {
+          "slots": {
+            "child_id": "d30e5de2-2bc5-4f71-8cf2-5adbf2d37381",
+            "sex": "male",
+            "gestational_age_weeks": 32.0,
+            "chart_standard": "intergrowth_preterm"
+          },
+          "intents": [
+            "slot_update"
+          ]
+        }
+      },
+      {
+        "name": "multiturn_overlay_centile_30_8",
+        "ok": true,
+        "detail": {
+          "tools": [
+            "overlay_growth_on_chart"
+          ],
+          "centile": 30.849590000722326,
+          "expected": 30.8,
+          "tol": 0.2
+        }
+      },
+      {
+        "name": "multiturn_history_excludes_overlay",
+        "ok": true,
+        "detail": {
+          "intents": [
+            "history"
+          ],
+          "tools": [
+            "get_child_summary"
+          ]
+        }
+      }
+    ]
+  }
+}

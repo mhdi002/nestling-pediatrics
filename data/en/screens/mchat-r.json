@@ -1,0 +1,249 @@
+{
+  "source": "غربالگری-اوتیسم.pdf",
+  "type": "M-CHAT-R",
+  "title_en": "Modified Checklist for Autism in Toddlers, Revised (M-CHAT-R)",
+  "title_fa": "چک‌لیست اصلاح‌شده ارزیابی اوتیسم در کودکان (M-CHAT-R)",
+  "instructions_en": [
+    "Revised checklist for the evaluation of autism in children.",
+    "(Revised version of M-CHAT-R",
+    ")",
+    "Please answer the following questions about your child's behavior. When answering your questions, remember that what your child",
+    "Consider what he usually does. If you do some of the behaviors mentioned in this checklist only once or twice",
+    "You have observed your child, but your child does not always show these behaviors.",
+    "\"No\" option",
+    "select Please answer all questions by choosing",
+    "\"Yes\" option",
+    "or \"no\"",
+    "Answer"
+  ],
+  "questions": [
+    {
+      "id": 1,
+      "text_fa": "آيا زمانيكه به چيزي در گوشه اي از اتاق اشاره مي كنيد, كودكتان به آن شي نگاه مي كند؟ آري خير ( به عنوان مثال وقتي به يك اسباب بازي و يا حيوان اشاره مي كنيد, كودكتان به آن اسباب بازي يا حيوان )نگاه مي كند",
+      "text_en": "When you point to something in the corner of the room, does your child look at that object? Yes No (for example, when you point to a toy or animal, your child looks at that toy or animal)",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 2,
+      "text_fa": "آيا تا به حال گمان كرديد كه كودكتان ممكن است ناشنوا باشد؟ آري خير",
+      "text_en": "Have you ever thought that your child might be deaf? yes no",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 3,
+      "text_fa": "آيا كودك شما بازي هاي وانمودي يا ساختگي انجام مي دهد؟ آري خير (به عنوان مثال وانمود كند كه از ليوان خالي آب مي خورد, وانمود كند با تلفن صحبت مي كند يا وانمود مي كند كه به عروسك يا حيوانات عرو)سكي غذا مي دهد",
+      "text_en": "Does your child play make-believe games? Yes No (for example, pretend to drink from an empty glass, pretend to talk on the phone, or pretend to feed dolls or stuffed animals)",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 4,
+      "text_fa": "آيا كودك شما باال رفتن از اشيا را دوست دارد؟ آري خير (به عنوان مثال باال رفتن از مبل, )وسايل پارك يا پله ها را دوست داشته باشد",
+      "text_en": "Does your child like to climb things? Yes No (for example, climbing up from the sofa,) likes park equipment or stairs",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 5,
+      "text_fa": "آيا كودك شما با انگشتانش حركات غيرعادي در جلوي چشمانش انجام مي دهد؟ آري خير (به عنوان مثال )انگشتانش را نزديك چشمانش دائما تكان دهد",
+      "text_en": "Does your child make unusual movements with his fingers in front of his eyes? Yes, it is okay (for example) to move his fingers near his eyes constantly",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 6,
+      "text_fa": "آيا زمانيكه كودك شما چيزي را مي خواهد يا نياز به كمك دارد از انگشت خود براي اشاره كردن استفاده مي آري خير نمايد؟ (به عنوان مثال )به خوراكي يا اسباب بازي كه دور از دسترس او قرار دارد اشاره مي كند",
+      "text_en": "Do you use your finger to point when your child wants something or needs help? (for example) refers to a food or toy that is far from his reach",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 7,
+      "text_fa": "آيا كودك شما با اشاره كردن چيزهايي كه برايش جالب است را به شما نشان مي دهد؟ آري خير (به عنوان مثال )به هواپيما در آسمان اشاره كند يا به كاميوني كه از خيابان رد مي شود اشاره كند",
+      "text_en": "Does your child show you things that are interesting to him by pointing? yes no (for example) point to an airplane in the sky or point to a truck passing by on the street",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 8,
+      "text_fa": "آيا كودك شما به كودكان ديگر عالقه اي دارد؟ آري خير (به عنوان مثال كودكان ديگر را تماشا كند, )يا به آنها لبخند بزند و يا با آنها همراه شود",
+      "text_en": "Is your child interested in other children? Yes, no (for example, watch other children, or smile at them, or accompany them)",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 9,
+      "text_fa": ")آيا كودك شما با آوردن يك شي يا نگه داشتن آن در مقابل شما (بدون اينكه هدفش خواستن آن شي باشد آري خير تالش مي كند تا آن شي را به شما نشان دهد؟ (به عنوان مثال )يك گل يا حيوان عروسكي و يا كاميون اسباب بازي را به شما نشان دهد",
+      "text_en": "(Does your child bring an object or hold it in front of you (without wanting to ask for it) does your child try to show you that object? (For example) show you a flower or a stuffed animal or a toy truck.",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 10,
+      "text_fa": "آيا زمانيكه اسم كودكتان را صدا مي زنيد, او واكنش نشان مي دهد؟ آري خير (به عنوان مثال زمانيكه اسمش را صدا مي زنيد او به سمت صدا بر ميگردد, يا با كالم و صداسازي واكنش نشان )مي دهد و يا وقتيكه اسمش را صدا ميزنيد كاري را كه در حال انجام دادن آن است متوقف مي كند",
+      "text_en": "Does he react when you call your child's name? Yes, no (for example, when you call his name, he turns to the sound, or he reacts with words and vocalizations), or when you call his name, he stops what he is doing.",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 11,
+      "text_fa": "زمانيكه شما به كودكتان لبخند مي زنيد, آيا او در پاسخ به لبخند شما لبخند مي زند؟ آري خير",
+      "text_en": "When you smile at your child, does he smile back? yes no",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 12,
+      "text_fa": "آيا كودك شما زمانيكه صداهاي معمول روزمره را مي شنود, ناراحت و آشفته مي شود؟ آري خير (به عنوان مثال )صداي جاروبرقي يا صداي موسيقي و آهنگ بلند او را آشفته مي كند",
+      "text_en": "Does your child get upset when he hears normal everyday sounds? Yes, no (for example) the sound of a vacuum cleaner or the sound of loud music disturbs him.",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 13,
+      "text_fa": "آيا كودك شما مي تواند راه برود؟ آري خير",
+      "text_en": "Can your child walk? yes no",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 14,
+      "text_fa": "آيا كودك شما زمانيكه با او حرف مي زنيد يا با او بازي مي كنيد و يا به او لباس مي پوشانيد به چشمان شما نگاه ميكند؟ آري خير",
+      "text_en": "Does your child look into your eyes when you talk to him or play with him or dress him? yes no",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 15,
+      "text_fa": "آيا كودك شما تالش مي كند تا كارهايي كه شما انجام مي دهيد را تقليد كند؟ آري خير ( به عنوان مثال به تقليد از شما با دست باي باي كند يا دست بزند و يا صداهاي خنده داري كه شما توليد مي )كنيد را تقليد كند",
+      "text_en": "Does your child try to imitate what you do? yes, no (for example, imitating you by waving or clapping, or imitating the funny sounds you make)",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 16,
+      "text_fa": "آيا وقتيكه شما سر خود را به سمت چيزي يا شيي بر مي گردانيد تا به آن نگاه كنيد, كودك شما نگاه شما را )دنبال مي كند (تا ببيند شما به چه چيزي نگاه مي كنيد آري خير",
+      "text_en": "When you turn your head to look at something, does your child follow your gaze to see what you are looking at Yes No",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 17,
+      "text_fa": "آيا كودك شما تالش مي كند تا توجه شما را به سمت خودش جلب كند؟ آري خير (به عنوان مثال به شما بگويد\"منو نگاه كن\" يا\"به من نگاه كن\" و يا به شما طوري نگاه كند كه هدفش اين )باشد كه شما او را تشويق كنيد",
+      "text_en": "Does your child try to get your attention? Yes, no (for example, he tells you \"look at me\" or \"look at me\" or he looks at you in such a way that his goal is that you encourage him)",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 18,
+      "text_fa": "آيا كودك شما كارهايي را كه به او مي گوييد تا انجام دهد را درك مي كند؟ آري خير (به عنوان مثال وقتيكه بدون اشاره كردن به او مي گوييد\"كتاب را روي صندلي بذار\" يا\"پتو را براي من بيار\" )كودك شما دستور شما را درك مي كند",
+      "text_en": "Does your child understand what you tell him to do? Yes No (for example, when you say \"put the book on the chair\" or \"bring me the blanket\" without pointing) your child understands your command.",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 19,
+      "text_fa": "وقي اتفاق جديدي رخ مي دهد, آيا كودك شما به چهره ي شما نگاه مي كند تا واكنش شما را در مورد آن آري خير اتفاق جديد ببيند؟ ( به عنوان مثال زمانيكه كودك شما صداي عجيب و غريب يا خنده داري مي شنود و يا اسباب بازي جديدي مي ) بيند به چهره شما نگاه مي كند",
+      "text_en": "When something new happens, does your child look at your face to see your reaction to that new thing? (For example, when your child hears a strange or funny sound or a new toy) he will look at your face.",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    },
+    {
+      "id": 20,
+      "text_fa": "آيا كودك شما فعاليت ها يا بازي هاي حركتي (كه همراه با جست و خيز است) را دوست دارد؟ آري خير (به عنوان مثال )تاب تاب خوردن يا روي زانوي شما باال و پايين شدن را دوست دارد",
+      "text_en": "Does your child like movement activities or games (that involve crawling)? Yes, no (for example) likes to swing or bounce up and down on your knee",
+      "options_en": [
+        "Yes",
+        "No"
+      ],
+      "answer": null
+    }
+  ],
+  "language": "en+fa",
+  "verification": {
+    "ok": false,
+    "issues": [
+      "empty .instructions_en",
+      "empty .questions[0].options_en",
+      "empty .questions[1].options_en",
+      "empty .questions[2].options_en",
+      "empty .questions[3].options_en",
+      "empty .questions[4].options_en",
+      "empty .questions[5].options_en",
+      "empty .questions[6].options_en",
+      "empty .questions[7].options_en",
+      "empty .questions[8].options_en",
+      "empty .questions[9].options_en",
+      "empty .questions[10].options_en",
+      "empty .questions[11].options_en",
+      "empty .questions[12].options_en",
+      "empty .questions[13].options_en",
+      "empty .questions[14].options_en",
+      "empty .questions[15].options_en",
+      "empty .questions[16].options_en",
+      "empty .questions[17].options_en",
+      "empty .questions[18].options_en",
+      "empty .questions[19].options_en"
+    ],
+    "issue_count": 21
+  }
+}

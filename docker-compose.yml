@@ -1,0 +1,83 @@
+# Nestling — fully dockerized (app + optional Bonsai LLM/vision)
+#
+# App only (tests / lightweight):
+#   docker compose up --build -d nestling
+#
+# Full stack — Bonsai-27B Q1_0 + mmproj (HF download ~4.5GB, no GitHub needed):
+#   set HF_TOKEN=...   # recommended for download speed
+#   docker compose --profile llm up --build -d
+#
+# Logs:
+#   docker compose logs -f nestling
+#   docker compose --profile llm logs -f bonsai
+
+services:
+  nestling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_ML: "0"
+    ports:
+      - "8000:8000"
+    volumes:
+      - nestling_children:/app/data/children
+      - nestling_overlays:/app/data/overlays
+      - nestling_uploads:/app/data/uploads
+      - nestling_knowledge:/app/data/knowledge
+      # Live code mounts — server deploy without rebuild when Hub is unreachable
+      - ./assistant:/app/assistant
+      - ./app:/app/app
+      - ./web:/app/web
+      - ./docs:/app/docs
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      - ./data/en:/app/data/en:ro
+      - ./intergrowth_preterm_equations.py:/app/intergrowth_preterm_equations.py:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MPLBACKEND=Agg
+      - NESTLING_LOAD_MODELS=${NESTLING_LOAD_MODELS:-0}
+      # Point at Bonsai when profile llm is up; harmless if bonsai is down (RAG falls back)
+      - NESTLING_BONSAI_URL=${NESTLING_BONSAI_URL:-http://bonsai:8080}
+      - NESTLING_USE_BONSAI=${NESTLING_USE_BONSAI:-1}
+      - NESTLING_BONSAI_MODEL=${NESTLING_BONSAI_MODEL:-Bonsai-27B-Q1_0}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  bonsai:
+    profiles: ["llm"]
+    build:
+      context: .
+      dockerfile: docker/bonsai/Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - bonsai_models:/models
+    environment:
+      - MODELS_DIR=/models
+      - BONSAI_HF_REPO=prism-ml/Bonsai-27B-gguf
+      - BONSAI_GGUF=Bonsai-27B-Q1_0.gguf
+      - BONSAI_MMPROJ=Bonsai-27B-mmproj-Q8_0.gguf
+      - BONSAI_ENABLE_VISION=1
+      - BONSAI_NGL=${BONSAI_NGL:-0}
+      - BONSAI_CTX=${BONSAI_CTX:-4096}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 1200s
+
+volumes:
+  nestling_children:
+  nestling_overlays:
+  nestling_uploads:
+  nestling_knowledge:
+  bonsai_models:

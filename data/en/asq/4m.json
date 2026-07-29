@@ -1,0 +1,700 @@
+{
+  "source": "4m.pdf",
+  "type": "ASQ",
+  "age_months": 4,
+  "title_en": "Ages & Stages Questionnaire (A.S.Q)",
+  "title_fa": "پرسشنامه سنین و مراحل A.S.Q",
+  "header_fields": {
+    "child_name": "",
+    "family_name": "",
+    "date_of_birth": "",
+    "corrected_age": "",
+    "completion_date": "",
+    "completer_name": "",
+    "completer_relation": "",
+    "completer_phone": "",
+    "sex": "نام خانوادگي كودك",
+    "province": "شماره تلفن",
+    "county": "استان",
+    "village": "شهرستان",
+    "center_name": "",
+    "interviewer": "نام مركز",
+    "center_phone": ""
+  },
+  "domains": [
+    {
+      "id": "communication",
+      "title_fa": "برقراری ارتباط",
+      "title_en": "Communication",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك در بيداري لبخند مي زند ؟",
+          "text_en": "Does the child smile when he wakes up?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه نزد كودك نيستيد و او گريه مي كند،آيا با ديدن شما گريه اش را متوقف مي سازد؟",
+          "text_en": "When you are not with the child and he cries, does he stop crying when you see him?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا زماني كه صدايي غير از صداي شما مي شنود گريه اش را متوقف مي سازد ؟",
+          "text_en": "Does he stop crying when he hears a voice other than yours?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا جيغ مي زند؟",
+          "text_en": "Does he scream?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا با صداي بلند مي خندد ؟",
+          "text_en": "Does he laugh out loud?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا زماني كه به اسباب بازي ها نگاه مي كند از خودش صدا در آورد ؟ جمع كل",
+          "text_en": "Does he make a sound when he looks at the toys? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "gross_motor",
+      "title_fa": "حرکات درشت",
+      "title_en": "Gross motor",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "درحالي كه كودك به پشت خوابيده است ) طاقباز ( ، آيا سرش را به طرفين حركت مي دهد؟",
+          "text_en": "While the child is lying on his back, does he move his head to the sides?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "در حالي كه كودك روي شكمش خوابيده و سرش را بالا نگه داشته بيفتد؟ است آيا مي تواند خودش را پايين بياورد ؟ ) بدون اينكه سرش بي اختيار",
+          "text_en": "Does the child fall while lying on his stomach and holding his head up? Can he lower himself? ) without being helpless",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "زماني كه كودك روي شكمش خوابيده ، سرش را به مدت حداقل 15 ثانيه بالا نگه مي دارد طوري كه فاصله با كف زمين حدود يا 34 انگشت بسته باشد ؟",
+          "text_en": "When the child is lying on his stomach, does he keep his head up for at least 15 seconds so that the distance from the ground is about 34 fingers?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "زماني كه روي شكمش خوابيده است ، آيا سرش را بالا آورده به اطراف نگاه مي كند؟ ) حين انجام اين كار ، او مي تواند به دست هايش نيز تكيه دهد .(",
+          "text_en": "When he is lying on his stomach, does he raise his head and look around? (While doing this, he can also lean on his hands.)",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "زماني كه كودك را در وضعيت نشسته قرار مي دهيد ، آيا سرش را صاف نگه مي دارد ؟",
+          "text_en": "When you put the child in a sitting position, does he keep his head straight?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "در حاليكه كودك به پشت خوابيده ، آيا انگشتانش را روي سينه به هم مي رساند ؟ جمع كل",
+          "text_en": "While the child is lying on his back, does he put his fingers together on the chest? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "fine_motor",
+      "title_fa": "حرکات ظریف",
+      "title_en": "Fine motor",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك انگشتان دستهايش را به طور كامل و يا تا حدي باز مي كند؟ ) در مقايسه با حالت مشت شده انگشتان در دوران نوزادي (",
+          "text_en": "Does the child open his fingers completely or partially? (compared to the clenched position of the fingers during infancy)",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه يك اسباب بازي را در دست كودك مي گذاريد، آيا آن را براي مدت كوتاهي تكان مي دهد؟",
+          "text_en": "When you put a toy in the child's hand, does he shake it for a short time?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك لباسش را مي گيرد و يا به آن چنگ مي زند؟",
+          "text_en": "Does the child grab his clothes or cling to them?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "زماني كه يك اسباب بازي را در دست كودك مي گذاريد، آيا در حالي كه حدود يك دقيقه نگاه داشته ، به آن نگاه مي كند آن را تكان مي دهد يا مي جود ؟",
+          "text_en": "When you put a toy in a child's hand, does he look at it, shake it, or chew it?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "در حاليكه كودك را در وضعيت نشسته نگاه داشته،يا بر روي شكمش قرار داده ايد،آيا زمين جلوي خود را با انگشتان چنگ مي زند؟",
+          "text_en": "While holding the child in a sitting position, or placing him on his stomach, does he grab the ground in front of him with his fingers?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "زماني كه كودك را در وضعيت نشسته نگاه داشته ايد،آيا براي گرفتن اسباب بازي نزديك خودش، دستش را به طرف آن دراز مي كند، هر چند كه ممكن است دستش به آن نرسد ؟ جمع كل",
+          "text_en": "When you hold the child in a sitting position, does he reach for a nearby toy, even though he may not be able to reach it? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "problem_solving",
+      "title_fa": "حل مسئله",
+      "title_en": "Problem solving",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "زماني كه يك اسباب بازي را مقابل كودك ) در فاصله تقريبا يك وجب به ( ميكند و گاهي نيز سرش را مي چرخاند ؟ آرامي به طرفين حركت مي دهيد، آيا با چشم هايش اسباب بازي را دنبال",
+          "text_en": "When he puts a toy in front of the child (at a distance of about a foot) and sometimes he turns his head?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه يك اسباب بازي را در مقابل صورت كودك ) در فاصله تقريبا يك اسباب بازي را دنبال مي كند؟ وجب ( به آهستگي به بالا و پايين حركت مي دهيد، آبا با چشم هايش",
+          "text_en": "When he follows a toy in front of the child's face (at a distance of approximately one toy)? Wajab (You move up and down slowly, father with his eyes",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "زماني كه كودك را در حالت نشسته نگاه داشته ايد، آيا به اسباب بازي ايد نگاه مي كند ؟ ) در حدود اندازه فنجان يا جغجغه ( كه روي ميز يا زمين در مقابلش قرار داده",
+          "text_en": "When you have kept the child in a sitting position, does he look at your toy? (about the size of a cup or rattle) that he placed on the table or the ground in front of him",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "زماني كه يك اسباب بازي را در دست كودك خود قرار مي دهيد ، آيا به آن نگاه مي كند ؟",
+          "text_en": "When you put a toy in your child's hand, does he look at it?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "زماني كه يك اسباب بازي را دست كودك قرار مي دهيد، آيا آن را به دهانش مي برد؟",
+          "text_en": "When you put a toy in a child's hand, does he put it in his mouth?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "در حالي كه كودك به پشت خوابيده ،آِيا دستش را به اسباب بازي اي كه از بالا آويزان كرده ايد حركت مي دهد؟ جمع كل",
+          "text_en": "While the child is lying on his back, does he move his hand to the toy that you have hung from above? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "personal_social",
+      "title_fa": "شخصی-اجتماعی",
+      "title_en": "Personal-social",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك به دست هايش نگاه مي كند؟",
+          "text_en": "Does the child look at his hands?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه كودك دست هايش را به هم مي رساند، آيا با انگشتانش بازي مي كند؟",
+          "text_en": "When the child puts his hands together, is he playing with his fingers?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "زماني كه كودك پستان مادر يا بطري شير را مي بيند آيا مي فهمد كه وقت شيرخوردن است ؟",
+          "text_en": "When the child sees the mother's breast or milk bottle, does he understand that it is time to feed?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "زماني كه كودك شير مي خورد آيا با دست آزاد خود پستان مادر را دست خود نگاه دارد ؟ مي گيرد يا هنگام شير خوردن از بطري سعي مي كند شير را با هر دو",
+          "text_en": "When the child is breastfeeding, does he hold the mother's breast with his free hand? takes or tries to drink milk from a bottle with both",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "پيش از اينكه به كودك لبخند بزنيد با او صحبت كنيد، آبا با ديدن شما لبخند مي زند؟",
+          "text_en": "Before you smile at the child, talk to him, does he smile when he sees you?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "زماني كه كودك روبروي يك آينه قرار مي گيرد ،آيا به خودش لبخند مي زند يا با خودش غان و غون مي كند ؟ جمع كل",
+          "text_en": "When a child faces a mirror, does he smile at himself or mumble to himself? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "overall",
+      "title_fa": "موارد کلی",
+      "title_en": "Overall",
+      "instruction_fa": "",
+      "instruction_en": "",
+      "answer_options_en": [
+        "Yes",
+        "No"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "به نظر شما آيا كودكتان خوب مي شنود ؟ اگر نه توضيح دهيد .",
+          "text_en": "Do you think your child can hear well? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك از دو دست خود در يك حد استفاده مي كند؟ اگر نه توضيح دهيد .",
+          "text_en": "Does the child use both hands at the same time? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "زماني كه به كودكتان كمك مي كنيد تا در حالت ايستاده قرار گيرد ، آيا در اكثر مواقع روي كف پاهايش مي ايستد ؟اگر نه توضيح دهيد .",
+          "text_en": "When you help your child to stand, does he stand on his feet most of the time? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا سابقه ناشنوايي و يا مشكلات شنوايي در دوران كودكي اعضاي خانواده هر يك از والدين وجود دارد ؟ اگر بله توضيح دهيد .",
+          "text_en": "Is there a history of deafness or hearing problems in the childhood of the family members of each parent? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا به نظر شما ، كودكتان از نظر بينايي مشكلي دارد؟ اگر بله توضيح دهيد .",
+          "text_en": "Do you think your child has a vision problem? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا در مورد كودك خود نگراني خاصي داريد ؟اگر بله توضيح دهيد .",
+          "text_en": "Do you have any special concerns about your child? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        }
+      ]
+    }
+  ],
+  "language": "en+fa",
+  "verification": {
+    "ok": false,
+    "issues": [
+      "empty .domains[0].answer_options_en",
+      "empty .domains[0].questions[0].options_en",
+      "empty .domains[0].questions[1].options_en",
+      "empty .domains[0].questions[2].options_en",
+      "empty .domains[0].questions[3].options_en",
+      "empty .domains[0].questions[4].options_en",
+      "empty .domains[0].questions[5].options_en",
+      "empty .domains[1].answer_options_en",
+      "empty .domains[1].questions[0].options_en",
+      "empty .domains[1].questions[1].options_en",
+      "empty .domains[1].questions[2].options_en",
+      "empty .domains[1].questions[3].options_en",
+      "empty .domains[1].questions[4].options_en",
+      "empty .domains[1].questions[5].options_en",
+      "empty .domains[2].answer_options_en",
+      "empty .domains[2].questions[0].options_en",
+      "empty .domains[2].questions[1].options_en",
+      "empty .domains[2].questions[2].options_en",
+      "empty .domains[2].questions[3].options_en",
+      "empty .domains[2].questions[4].options_en"
+    ],
+    "issue_count": 43
+  }
+}

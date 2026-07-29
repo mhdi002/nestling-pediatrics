@@ -1,0 +1,714 @@
+{
+  "source": "60m.pdf",
+  "type": "ASQ",
+  "age_months": 60,
+  "title_en": "Ages & Stages Questionnaire (A.S.Q)",
+  "title_fa": "پرسشنامه سنین و مراحل A.S.Q",
+  "header_fields": {
+    "child_name": "",
+    "family_name": "",
+    "date_of_birth": "",
+    "corrected_age": "",
+    "completion_date": "",
+    "completer_name": "",
+    "completer_relation": "",
+    "completer_phone": "",
+    "sex": "نام خانوادگي كودك",
+    "province": "شماره تلفن",
+    "county": "استان",
+    "village": "شهرستان",
+    "center_name": "",
+    "interviewer": "نام مركز",
+    "center_phone": ""
+  },
+  "domains": [
+    {
+      "id": "communication",
+      "title_fa": "برقراری ارتباط",
+      "title_en": "Communication",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "اگر بدون هيچ اشاره اي آنچه را كه گفته ايد تكرار نكنيد،آيا كودك از سه دستوري كه ربطي به و قبل از اينكه كودك شروع پشت سر هم را پيروي مي كند؟شما بايد هر سه دستور ،يكديگر ندارند به انجام دادن آنها نمايد، ارائه دهيد . براي مثال، مي توانيد از كودك بخواهيد تا دستوراتي مثل \" دست را به من ب بزن، به طرف در برو، قلم ده يا كتاب را باز كن و بايست \" را انجام دهد .",
+          "text_en": "If you don't repeat what you said without any cues, do you give the child three commands that are related to and before the child follows the start of the sequence? For example, you can ask the child to do commands like \"hit me, go to the door, give me a pen or open the book and stop\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك جملات چهار و پنج كلمه اي را بكار مي برد؟ براي مثال ، آيا مي گويد \" من اون ماشينو مي خوام \" لطفا يك نمونه بنويسيد",
+          "text_en": "Does the child use four or five word sentences? For example, does he say \"I want that car\" please write an example",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "زماني كه كودك در مورد چيزي كه قبلا اتفاق افتاده است صحبت مي كند،آيا او كلماتي با زمان كردي؟ ) من دويدم ( ، شما با دوستت توي خانه شان چكار كرديد؟ ) ما بازي كرديم (\" بپرسيد . گذشته مثل \" دويدم،پريد يا بازي كرديم \" را بكار مي برد؟ از كودك سوالاتي مثل \" شما توي حياط چكار",
+          "text_en": "When the child talks about something that happened before, does he use words with time? (I ran), what did you do with your friend at their house? (We played) Ask. Does he use the past tense like \"I ran, jumped or we played?\" Ask the child questions like \"What did you do in the yard?\"",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك كلمات مقايسه اي ، مثل سنگين تر، قوي تر يا كوتاهتر را بكار مي برد؟ از كودك خود آدم)\" سنگين تره \" ، ( هاپو كوچيكه، ولي مورچه \") كوچكتره (. لطفا يك نمونه بنويسيد زير بپرسيد سوالاتي مثل سوالات :\" ماشين بزرگه ولي اتوبوس \") بزرگتره (،\" گربه سنگينه ، ولي",
+          "text_en": "Does the child use comparative words, such as heavier, stronger or shorter? Adam is \"heavier\" than his child, \"Happo is small, but ant\" is smaller. Please write an example below and ask questions like: \"The car is big, but the bus is bigger,\" \"The cat is heavy, but",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك به سوالات زير پاسخ مي دهد؟ \" وقتي كه خسته هستي چكار مي كني؟ \") پاسخ هاي قابل قبول شامل موارد زير هستند :\" چرت زنم مي \"،\" استراحت مي كنم \"،\" مي خوابم \"،\" توي رختخواب مي روم \"،\" دراز مي كشم و \" \" مي نشينم \"( لطفا پاسخ كودك را بنويسيد",
+          "text_en": "Does the child answer the following questions? (What do you do when you're tired?) Acceptable responses include: \"I take a nap,\" \"I rest,\" \"I sleep,\" \"I go to bed,\" \"I lie down,\" and \"I sit down\" (please write the child's answer).",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك جملاتي كه در پايين نوشته شده اند را پس از شما، و بدون هيچگونه اشتباهي ،تكرار پاسخ را بدون اشتباه تكرار كند را يكبار تكرار كنيد، اگر هر دو جمله مي كند؟مي توانيد هر جمله بله \" \" و اگر فقط يك را علامت بزنيد جمله را بدون اشتباه تكرار مي كند،پاسخ \" گاهي \" را علامت بزنيد . پيدا كند پنهان مي كند تا سارا را مريم كفش هايش . زير تختش خواند را علي كتاب آبي . جمع كل",
+          "text_en": "Have the child repeat the sentences written below after you, and without any mistakes, repeat the answer without mistakes once, if he repeats both sentences? You can mark each sentence \"yes\" and if you only mark one, he repeats the sentence without mistakes, mark the answer \"sometimes\". When he finds out, he hides Sarah in his shoes. He read it under his bed on a blue book. total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "gross_motor",
+      "title_fa": "حرکات درشت",
+      "title_en": "Gross motor",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا كودك در حالت ايستاده، بازويش را تا سطح شانه بالا مي برد و توپ را به طرف جلو و به سمت فردي كه در فاصله حدود 2 متري از او ايستاده است،پرتاب مي كند؟ ) چنانچه توپ پاسخ ،پرتاب كند را بدون بالا بردن دستش رها كند يا توپ را از دست كودك بيفتد،توپ \" خير \" را علامت بزنيد(.",
+          "text_en": "Does the child, while standing, raise his arm up to shoulder level and throw the ball forward towards a person who is standing about 2 meters away from him? (If the answer ball leaves the thrower without raising his hand or the ball falls out of the child's hand, mark the ball as \"no\").",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه يك توپ بزرگ را براي كودك پرت مي كنيد، آيا آن را با هر دو دستش مي گيرد؟ شما بايدحدود .15 متر از كودك فاصله داشته و براي اين كار به او دو يا سه بار فرصت دهيد؟",
+          "text_en": "When you throw a big ball to a child, does he catch it with both hands? You should be about 15 meters away from the child and give him two or three chances to do this.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك بدون اينكه به چيزي يا جايي تكيه دهد و بدون از دست دادن تعادلش و پايش،حداقل به مدت 5 ثانيه روي يك پا مي ايستد؟ پاسخ دهيد، مي توانيد براي اين كار دو يا سه بار به كودك قبل از اينكه به اين سوال فرصت دهيد .",
+          "text_en": "Does the child stand on one leg for at least 5 seconds without leaning on something or somewhere and without losing his or her balance? Answer, you can do this two or three times to the child before you give this question a chance.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك مسافتي حدود4.5 )متر تقريبا به اندازه طول يك اتومبيل بزرگ ( را روي پنجه پاهايش راه را به او نشان دهيد رود؟ مي توانيد نحوه انجام اين كار مي .",
+          "text_en": "Can a child walk a distance of about 4.5 meters (about the length of a large car) on his tiptoes? Can you tell him how to do this?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك مسافت 02.1-08.1 متر را با يك پا و بدون اينكه پاي ديگرش را زمين بگذارد، به طرف جلو پاسخ،پاهايش مي تواند لي لي كند با يكي از \" گاهي \" را علامت بزنيد . لي لي كند؟ شما مي توانيد به كودك اجازه دهيد،تا اين كار را با هر كدام از پاهايش دوبار امتحان كند اگر .",
+          "text_en": "Can the child cover a distance of 02.1-08.1 meters with one foot and without putting the other foot on the ground? Lee Lee? You can allow the child to try this twice with each leg if",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك با جا به جا كردن متناوب پاهايش مي پرد؟ مي توانيد نحوه انجام اين كار را ب ه او نشان دهيد . جمع كل",
+          "text_en": "Does the child jump by moving his legs alternately? You can show him how to do this. total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "fine_motor",
+      "title_fa": "حرکات ظریف",
+      "title_en": "Fine motor",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "از كودك بخواهيد تا با يك مداد، روي خط زير و در امتداد آن يك خط بكشد . آيا كودك هنگام كشيدن يك خط بر علامت بزنيد .( زير،حداكثر تا دوبار از خط خارج مي شود؟ روي خط) اگر كودك سه بار از خط خارج مي شود پاسخ \" گاهي \" را",
+          "text_en": "Ask the child to draw a line along the bottom line with a pencil. When the child draws a line, mark it.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "از كودك بخواهيد تا تصوير يك آدم را بر روي يك ورق كاغذ سفيد بكشد . مي توانيد به كودك بگوييد \" عكس يك را بكش پسر دختر يا .\" اگر او آدمي را با سر،بدن، دست ها و پاهاش رسم مي كند،پاسخ بله \" \" را علامت بزنيد . اگر آدمي را فقط به سه جزء ) سر، بدن،دستها يا پاها ( رسم مي كند ،پاسخ \" خير \" را علامت بزنيد . كاغذي پرسشنامه ضميمه نماييد روي آن نقاشي كشيده است، به اين كه كودك .",
+          "text_en": "Ask the child to draw a picture of a person on a sheet of white paper. You can say to the child, \"Take a picture, boy or girl.\" If he draws a person with his head, body, hands and feet, mark the answer \"yes\". If he draws a person in only three parts (head, body, hands or feet), mark the answer \"no\". Attach the questionnaire paper with a drawing on it, that the child.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "بر روي يك تكه كاغذ،خطي از يك طرف آن به طرف ديگر رسم كنيد . آيا كودك با باز و بسته استفاده مي كند، حتما مواظب باشيد تا به خودش صدمه نزند .( . و تقريبا صاف ، قيچي مي كند؟ روي خط را از كردن قيچي ، كاغذ ) هر گاه كودك از قيچي",
+          "text_en": "On a piece of paper, draw a line from one side to the other. Does the child use open and closed scissors, be sure not to hurt himself? Does he use scissors almost straight?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك با نگاه كردن به شكلهاي زير شكلهاي مشابه آنها را در زير هر كدام رسم مي كند؟آنچه او رسم ولي اندازه آنها مي توانند متفاوت ،زير باشند مي كند، بايد از نظر طرح، مشابه اشكال باشند .) اگر كودك مي تواند هر سه شكل را رسم كند،پاسخ بله \" \" را علامت بزنيد،اگر مي تواند دو شكل را رسم كند، پاسخ \" گاهي \" را علامت بزنيد .(",
+          "text_en": "Looking at the shapes below, does the child draw the same shapes under each one? What he draws, but their size can be different, should be similar in design.) If the child can draw all three shapes, mark the answer \"yes\", if he can draw two shapes, mark the answer \"sometimes\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك با نگاه كردن به حروف زير ،حروفي مشابه آنها را در زير هر كدام مي نويسد؟هر بار تمام حروف به را بنويسد،بپوشانيد جز حرفي كه كودك بايد مشابه آن . اگر او مي تواند چهار تا از حروف را پاسخ و حروف قابل خواندن هستند ،بنويسد بله \" \" را علامت بزنيد . اگر كودك مي تواند دو يا و اين حروف قابل خواندن هستند ،را بنويسد سه حرف ،پاسخ \" گاهي \" راعلامت بزنيد .",
+          "text_en": "Looking at the letters below, does the child write similar letters under each one? Every time he writes all the letters, cover the letter that the child must match. If he can write four of the letters and the letters are readable, mark yes. If the child can write two or three letters and these letters can be read, mark the answer \"sometimes\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "اسم كودك را بنويسيد،آيا كودك مي تواند چيزي مشابه آن را بنويسد؟آنچه كه كودك مي نويسد ،ممكن وارونه باشد است، برعكس يا . اگر او از تمام حروف ،نصف آنها را نوشت،پاسخ \" گاهي \" را علامت بزنيد . جمع كل",
+          "text_en": "Write the child's name, can the child write something similar to it? What the child writes may be upside down, or vice versa. If he wrote half of all the letters, mark the answer \"sometimes\". total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "problem_solving",
+      "title_fa": "حل مسئله",
+      "title_en": "Problem solving",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "زماني كه از كودك مي پرسيد \" كوچكترين دايره كدام است؟ \" آيا به كوچكترين دايره را بدون استفاده از اشاره،حركات چهره يا نگاه كردن به كوچكترين اشاره مي كند؟ سئوال دايره بپرسيد ؟",
+          "text_en": "When you ask the child, \"Which is the smallest circle?\", does he point to the smallest circle without using gestures, facial movements, or looking at the smallest? Ask a circle question?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "زماني كه يك شي را به كودك نشان مي دهيد و مي گوييد \" اين چه رنگيه؟ \" رنگ مختلف مثل قرمز آيا اوپنج پاسخ،صحيح بكار برد بله \" \" را علامت بزنيد . زرد،سياه، ، آبي ) مشكي ( ،سفيد يا صورتي را نام مي برد؟ تنها در صورتي كه كودك نام پنج رنگ را به صورت",
+          "text_en": "When you show an object to a child and say, \"What color is this?\", a different color like red, did he use five correct answers, mark \"Yes\". Does he name yellow, black, blue (black), white or pink? Only if the child names the five colors as",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك از تا 1 15 را بدون اشتباه مي شمارد؟ اگر چنين است،پاسخ بله \" \" را علامت بزنيد . اگر تا را 21 پاسخ ،بدون اشتباه مي شمارد \" گاهي \" را علامت بزنيد .",
+          "text_en": "Does the child count from 1 to 15 without mistakes? If so, mark the answer \"yes\". If you count up to 21 answers without mistakes, mark \"sometimes\".",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك شما مي تواند جملات زير را با بكار بردن كلمه اي كه معني آن متضاد كلمه اي است كه زير آن خط كشيده شده است ، تمام كند؟ براي مثال : سنگ سخت است ، ولي بالش نرم است . زير بنويسيد را در پاسخ كودك لطفا گاو بزرگ ،اما موش چي؟ يخ سرد،اما آتش چي؟ را كي مي بينيم؟ و خورشيد ، را در شب مي بينيم ما ستاره ها را مي اندازم بالا،مي آيد كجا؟ وقتي كه توپ پاسخ،را بطور صحيح كامل كرد اگر سه جمله از چهار جمله بله \" \" را علامت بزنيد . اگ ر دو جمله از چهار جمله را بطور صحيح كامل كرد،پاسخ گاهي را علامت بزنيد .",
+          "text_en": "Can your child complete the sentences below using a word that means the opposite of the underlined word? For example: the stone is hard, but the pillow is soft. Write below in the child's answer, please, big cow, but what about the mouse? Cold ice, but what about fire? Who do we see? And we see the sun at night, we raise the stars, where does it come from? When the ball completes the answer correctly, if you mark three out of four sentences yes. If he completes two of the four sentences correctly, mark the correct answer.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك نام اعداد را مي داند اگر . سه عدد زير را مي شناسد و نام مي برد \" گاهي \" را علامت بزنيد . پاسخ\"بله \" را علامت بزنيد . اگر دو عدد از اعداد زير را شناخت و اسم آنها را گفت،پاسخ",
+          "text_en": "Does the child know the names of the numbers if He knows the following three numbers and names them. Mark \"sometimes\". Mark the answer \"yes\". If you recognize two of the following numbers and say their names, answer",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا كودك حداقل چهار تا از حروف اسم خود را مي شناسد و نام مي برد؟ به حروف اشاره كنيد و بپرسيد، \" اين چه حرفيه؟ \" حروف را به ترتيب نپرسيد . جمع كل",
+          "text_en": "Does the child know and name at least four letters of his name? Point to the letters and ask, \"What is this letter?\" Do not ask the letters in order. total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "personal_social",
+      "title_fa": "شخصی-اجتماعی",
+      "title_en": "Personal-social",
+      "instruction_fa": "پيش از پاسخ دادن مطمئن شويد كه هر فعاليت را در مورد فرزندتان مشاهده يا تجربه كرده ايد .",
+      "instruction_en": "Before answering, make sure that you have seen or experienced each activity with your child.",
+      "answer_options_en": [
+        "Yes",
+        "Sometimes",
+        "Not yet"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "آيا با استفاده از وسايل آشپزخانه و غذاخوري براي خودش غذا مي كشد . به عنوان مثال با ريزد؟ و در طرف خود مي را از يك كاسه بزرگ بر مي دارد استفاده از يك قاشق بزرگ ماست",
+          "text_en": "Does he make food for himself using kitchen and eating utensils? For example, with Rizd? And on his side, he takes the milk from a big bowl and uses a big spoon of yogurt",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "آيا كودك بدون كمك و به تنهايي ، دست و صورتش را با استفاده از صابون مي شويد و با حوله خشك مي كند؟",
+          "text_en": "Does the child wash his hands and face with soap and dry with a towel without help?",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا كودك حداقل4 مورد از موارد زير را بازگو مي كند؟ 1( نام خودش 2( نام خانوادگي خودش 3( سن خودش 4 (دختر يا پسر بودن خودش 5 (شهري كه در آن زندگي مي كند 6 (شماره تلفن خودش را كه كودك مي داند، دايره بكشيد لطفا دور مواردي .",
+          "text_en": "Does the child recount at least 4 of the following? 1) His name 2) His family name 3) His age 4) Whether he is a girl or boy 5) The city he lives in 6) Circle his phone number that the child knows, please circle the items.",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "آيا كودك بدون هيچ كمكي ، خودش لباس هايش را مي پوشد يا در مي آورد؟ دگمه هايي را مي بندد ؟ زيپ جلوي لباسش و به اندازه متوسط",
+          "text_en": "Does the child put on or take off his clothes by himself without any help? Does it close any buttons? Zipper on the front of his dress and medium size",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "آيا كودك خودش به تنهايي به مستراح مي رود؟ ) او به مستراح مي رود ،خودش پاسخ يادآوري شما انجام مي دهد بله \" \" را علامت بزنيد . را ريزد يا سيفون و آب مي را مي شويد مي نشيند،خودش مي كشد ( حتي اگر اين كارها را با",
+          "text_en": "Does the child go to the toilet alone? ) He goes to the toilet, he will answer your reminder, mark \"Yes\". he pours or siphons and washes the water, he sits down, he kills himself (even if he does these things with",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا به طور معمول نوبت را رعايت مي كند و در چيزهايي كه در اختيار دارد با ساير كودكان شريك مي شود؟ جمع كل",
+          "text_en": "Does he usually follow his turn and share the things he has with other children? total sum",
+          "options_fa": [
+            "بله",
+            "گاهی",
+            "هنوز نه"
+          ],
+          "options_en": [
+            "Yes",
+            "Sometimes",
+            "Not yet"
+          ],
+          "answer": null
+        }
+      ]
+    },
+    {
+      "id": "overall",
+      "title_fa": "موارد کلی",
+      "title_en": "Overall",
+      "instruction_fa": "",
+      "instruction_en": "",
+      "answer_options_en": [
+        "Yes",
+        "No"
+      ],
+      "questions": [
+        {
+          "id": 1,
+          "text_fa": "به نظر شما آيا كودكتان خوب مي شنود ؟ اگر نه توضيح دهيد .",
+          "text_en": "Do you think your child can hear well? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 2,
+          "text_fa": "به نظر شما آيا كودكتان مثل هم سن و سالانش حرف مي زند ؟اگر نه توضيح دهيد .",
+          "text_en": "Do you think your child talks like his peers? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 3,
+          "text_fa": "آيا شما اكثرا آنچه كه كودكتان مي گويد، مي فهميد ؟اگر نه توضيح دهيد .",
+          "text_en": "Do you understand most of what your child says? If not, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 4,
+          "text_fa": "به نظر شما آيا كودكتان مثل هم سن و سالانش راه مي رود ، مي دود و از وسايل رود؟ اگر نه توضيح دهيد بالا مي .",
+          "text_en": "In your opinion, does your child walk, run and get off the equipment like his peers? If not, please explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 5,
+          "text_fa": "و يا مشكلات شنوايي در دوران كودكي اعضاي خانواده هر يك از آيا سابقه ناشنوايي وجود دارد؟ اگر بله توضيح دهيد والدين.",
+          "text_en": "Or hearing problems in the childhood of each of the family members, is there a history of deafness? If yes, explain, parents.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 6,
+          "text_fa": "آيا به نظر شما ، كودكتان از نظر بينايي مشكلي دارد؟ اگر بله توضيح دهيد .",
+          "text_en": "Do you think your child has a vision problem? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        },
+        {
+          "id": 7,
+          "text_fa": "آيا در مورد كودك خود نگراني خاصي داريد ؟اگر بله توضيح دهيد .",
+          "text_en": "Do you have any special concerns about your child? If yes, explain.",
+          "options_fa": [
+            "بله",
+            "خیر"
+          ],
+          "options_en": [
+            "Yes",
+            "No"
+          ],
+          "answer": null
+        }
+      ]
+    }
+  ],
+  "language": "en+fa",
+  "verification": {
+    "ok": false,
+    "issues": [
+      "empty .domains[0].answer_options_en",
+      "empty .domains[0].questions[0].options_en",
+      "empty .domains[0].questions[1].options_en",
+      "empty .domains[0].questions[2].options_en",
+      "empty .domains[0].questions[3].options_en",
+      "empty .domains[0].questions[4].options_en",
+      "empty .domains[0].questions[5].options_en",
+      "empty .domains[1].answer_options_en",
+      "empty .domains[1].questions[0].options_en",
+      "empty .domains[1].questions[1].options_en",
+      "empty .domains[1].questions[2].options_en",
+      "empty .domains[1].questions[3].options_en",
+      "empty .domains[1].questions[4].options_en",
+      "empty .domains[1].questions[5].options_en",
+      "empty .domains[2].answer_options_en",
+      "empty .domains[2].questions[0].options_en",
+      "empty .domains[2].questions[1].options_en",
+      "empty .domains[2].questions[2].options_en",
+      "empty .domains[2].questions[3].options_en",
+      "empty .domains[2].questions[4].options_en"
+    ],
+    "issue_count": 44
+  }
+}

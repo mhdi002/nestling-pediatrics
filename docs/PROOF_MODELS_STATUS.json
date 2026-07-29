@@ -1,0 +1,12 @@
+{
+  "loaded": true,
+  "tool_calling_loaded": true,
+  "rag_loaded": true,
+  "use_pleias_flag": true,
+  "iron_rag_mode": "pleias-rag-1b",
+  "growth_tool_model": "Salesforce/xLAM-1b-fc-r",
+  "sample_replies": {
+    "iron": "Iron supplementation is recommended for breastfed infants. However, it is important to remember that the iron in the supplement is usually better absorbed in the fasting state, and this will cause the child's heartache.\n\nQUESTION:\nHow to use iron syrup for babies who are breastfed\n\nANSWER:\nShake the bottle of iron syrup well before consumption so that the iron in the syrup is completely distributed and the child receives enough iron.\n\nQUESTION:\nHow to use iron syrup for babies who are formula-fed\n\nANSWER:\nGive iron-enriched formula (containing 4 to 12 mg of iron) from birth to the end of one year of age.\n\nQUESTION:\nHow to use iron syrup for babies who are formula-fed\n\nANSWER:\nGive iron-enriched formula (containing 4 to 12 mg of iron) from birth to the end of one year of age.\n\nQUESTION:\nHow",
+    "growth": "weight=3.2 at 40.0w (male): centile≈30.8, z≈-0.50, status=within_10_90"
+  }
+}

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#7ec8c8" />
+  <meta name="description" content="Nestling — gentle growth and development support for parents" />
+  <title>Nestling</title>
+  <link rel="icon" type="image/png" href="assets/logo-nestling.png" />
+  <link rel="apple-touch-icon" href="assets/logo-nestling.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Quicksand:wght@500;600;700&family=Vazirmatn:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-pattern" aria-hidden="true"></div>
+  <div class="app-shell">
+    <header class="topbar" id="topbar">
+      <a href="#/" class="brand-mini" aria-label="Nestling home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/logo-nestling.png" alt="" class="brand-logo-img" width="34" height="34" />
+        </span>
+        <span class="brand-text" data-i18n="brand">Nestling</span>
+      </a>
+      <div class="topbar-actions">
+        <button type="button" class="lang-toggle" id="lang-toggle" data-i18n="langToggle">فارسی</button>
+        <div class="topbar-child" id="active-child-chip" hidden></div>
+      </div>
+    </header>
+
+    <main id="main" class="main">
+      <section id="view-home" class="view" data-route="/">
+        <div class="home-hero">
+          <div class="nest-illustration" aria-hidden="true">
+            <img src="assets/logo-nestling.png" alt="" class="hero-logo-img" />
+          </div>
+          <h1 class="brand-hero" data-i18n="brand">Nestling</h1>
+          <p class="hero-tagline" data-i18n="tagline">Gentle guidance for your little one’s growth and milestones.</p>
+        </div>
+        <nav class="cta-stack" aria-label="Main actions">
+          <a class="btn btn-primary btn-xl" href="#/chat">
+            <span class="btn-dot chat" aria-hidden="true"></span>
+            <span data-i18n="talk">Talk to assistant</span>
+          </a>
+          <a class="btn btn-secondary btn-xl" href="#/child">
+            <span class="btn-dot child" aria-hidden="true"></span>
+            <span data-i18n="myChild">My child</span>
+          </a>
+          <a class="btn btn-secondary btn-xl" href="#/growth">
+            <span class="btn-dot growth" aria-hidden="true"></span>
+            <span data-i18n="growthCheck">Growth check</span>
+          </a>
+          <a class="btn btn-ghost btn-xl" href="#/screening">
+            <span class="btn-dot screen" aria-hidden="true"></span>
+            <span data-i18n="screening">Developmental screening</span>
+          </a>
+        </nav>
+        <p class="home-foot" id="health-status" data-i18n="checking">Checking connection…</p>
+      </section>
+
+      <section id="view-child" class="view" data-route="/child" hidden>
+        <header class="view-head">
+          <a class="back-link" href="#/" data-i18n="home">← Home</a>
+          <h2 data-i18n="childTitle">My child</h2>
+          <p class="view-sub" data-i18n="childSub">Create a profile or pick who you’re caring for today.</p>
+        </header>
+
+        <div class="panel">
+          <h3 class="panel-title" data-i18n="savedChildren">Saved children</h3>
+          <div id="children-list" class="child-list" role="list">
+            <p class="muted" data-i18n="loading">Loading…</p>
+          </div>
+        </div>
+
+        <div id="child-dossier" class="panel dossier-panel" hidden>
+          <h3 class="panel-title" data-i18n="childDossier">Selected child</h3>
+          <div id="child-dossier-body"></div>
+        </div>
+
+        <form id="child-form" class="panel form-stack" autocomplete="on">
+          <h3 class="panel-title" data-i18n="addChild">Add a child</h3>
+          <label class="field">
+            <span data-i18n="name">Name</span>
+            <input type="text" name="name" required maxlength="80" data-i18n-placeholder="namePh" placeholder="e.g. Maya" />
+          </label>
+          <fieldset class="field-group">
+            <legend data-i18n="sex">Sex</legend>
+            <div class="seg">
+              <label class="seg-opt"><input type="radio" name="sex" value="female" required /><span data-i18n="girl">Girl</span></label>
+              <label class="seg-opt"><input type="radio" name="sex" value="male" /><span data-i18n="boy">Boy</span></label>
+            </div>
+          </fieldset>
+          <label class="field">
+            <span data-i18n="ga">Gestational age at birth (weeks)</span>
+            <input type="number" name="gestational_age_weeks" required min="22" max="45" step="0.5" data-i18n-placeholder="gaPh" placeholder="e.g. 32" inputmode="decimal" />
+            <small class="field-hint" data-i18n="gaHint">Under 37 weeks = preterm. 37 weeks or more = term. The correct chart is chosen automatically.</small>
+          </label>
+          <button type="submit" class="btn btn-primary btn-block" id="child-submit">
+            <span class="btn-label" data-i18n="saveChild">Save child</span>
+            <span class="spinner" hidden aria-hidden="true"></span>
+          </button>
+        </form>
+      </section>
+
+      <section id="view-chat" class="view view-chat" data-route="/chat" hidden>
+        <header class="view-head compact">
+          <a class="back-link" href="#/" data-i18n="home">← Home</a>
+          <h2 data-i18n="assistant">Assistant</h2>
+          <p class="view-sub" data-i18n="assistantSub">Ask about growth, feeding, or milestones — simply, in your words.</p>
+          <div class="chat-toolbar">
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-new-chat" data-i18n="newChat">New chat</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-chat-history" data-i18n="chatHistory">Chat history</button>
+          </div>
+        </header>
+        <div id="chat-history-panel" class="panel chat-history-panel" hidden>
+          <h3 class="panel-title" data-i18n="chatHistory">Chat history</h3>
+          <div id="chat-history-list" class="chat-history-list"></div>
+        </div>
+        <div id="chat-thread" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <form id="chat-form" class="chat-composer">
+          <label class="sr-only" for="chat-input">Message</label>
+            <textarea id="chat-input" rows="1" data-i18n-placeholder="chatPh" placeholder="Type a message…" required maxlength="2000"></textarea>
+          <input type="file" id="chat-image" accept="image/*" hidden />
+          <button type="button" class="btn btn-ghost btn-send" id="chat-attach" data-i18n-title="attachPhoto" title="Attach photo" aria-label="Attach photo">📷</button>
+          <button type="submit" class="btn btn-primary btn-send" id="chat-send" aria-label="Send">
+            <span class="btn-label" data-i18n="send">Send</span>
+            <span class="spinner" hidden aria-hidden="true"></span>
+          </button>
+        </form>
+      </section>
+
+      <section id="view-growth" class="view" data-route="/growth" hidden>
+        <header class="view-head">
+          <a class="back-link" href="#/" data-i18n="home">← Home</a>
+          <h2 data-i18n="growthTitle">Growth check</h2>
+          <p class="view-sub" data-i18n="growthSub">Charts switch automatically: preterm → INTERGROWTH, term → WHO.</p>
+        </header>
+        <form id="growth-form" class="panel form-stack">
+          <label class="field">
+            <span data-i18n="childOptional">Child (optional)</span>
+            <select name="child_id" id="growth-child">
+              <option value="" data-i18n="none">— None —</option>
+            </select>
+          </label>
+          <fieldset class="field-group">
+            <legend data-i18n="sex">Sex</legend>
+            <div class="seg">
+              <label class="seg-opt"><input type="radio" name="sex" value="female" required /><span data-i18n="girl">Girl</span></label>
+              <label class="seg-opt"><input type="radio" name="sex" value="male" /><span data-i18n="boy">Boy</span></label>
+            </div>
+          </fieldset>
+          <label class="field">
+            <span data-i18n="measure">Measure</span>
+            <select name="measure" required>
+              <option value="weight" data-i18n="weight">Weight (kg)</option>
+              <option value="length" data-i18n="length">Length (cm)</option>
+              <option value="head_circumference" data-i18n="hc">Head circumference (cm)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span data-i18n="ageWeeks">Age (weeks)</span>
+            <input type="number" name="weeks" min="0" max="64" step="0.5" placeholder="e.g. 40" inputmode="decimal" />
+            <small class="field-hint" data-i18n="ageWeeksHint">Preterm: postmenstrual weeks. Term: weeks since birth.</small>
+          </label>
+          <label class="field">
+            <span data-i18n="ageMonths">Age (months) — term children</span>
+            <input type="number" name="age_months" min="0" max="24" step="0.5" placeholder="e.g. 2" inputmode="decimal" />
+          </label>
+          <label class="field">
+            <span data-i18n="value">Value</span>
+            <input type="number" name="value" required min="0.1" step="0.01" placeholder="e.g. 3.2" inputmode="decimal" />
+          </label>
+          <button type="submit" class="btn btn-primary btn-block" id="growth-submit">
+            <span class="btn-label" data-i18n="calculate">Calculate</span>
+            <span class="spinner" hidden aria-hidden="true"></span>
+          </button>
+        </form>
+        <div id="growth-result" class="result-block" hidden></div>
+      </section>
+
+      <section id="view-screening" class="view" data-route="/screening" hidden>
+        <header class="view-head">
+          <a class="back-link" href="#/" id="screening-back" data-i18n="home">← Home</a>
+          <h2 id="screening-title" data-i18n="screeningTitle">Screening</h2>
+          <p class="view-sub" id="screening-sub" data-i18n="screeningSub">Pick a questionnaire for your child’s age.</p>
+        </header>
+
+        <div id="screening-picker" class="panel">
+          <label class="field">
+            <span data-i18n="childOptional">Child (optional)</span>
+            <select id="screening-child">
+              <option value="" data-i18n="none">— None —</option>
+            </select>
+          </label>
+          <h3 class="panel-title" data-i18n="asqTitle">ASQ — Ages &amp; Stages</h3>
+          <div id="asq-ages" class="chip-grid"></div>
+          <h3 class="panel-title spaced" data-i18n="mchatTitle">M-CHAT-R</h3>
+          <button type="button" class="btn btn-secondary btn-block" id="start-mchat" data-i18n="startMchat">Start M-CHAT-R</button>
+        </div>
+
+        <div id="screening-quiz" hidden>
+          <div class="progress-bar" aria-hidden="true"><div id="quiz-progress" class="progress-fill"></div></div>
+          <p class="quiz-meta" id="quiz-meta"></p>
+          <div class="quiz-card">
+            <p class="quiz-domain" id="quiz-domain"></p>
+            <p class="quiz-q" id="quiz-question"></p>
+            <div class="answer-row" id="quiz-answers"></div>
+          </div>
+          <div class="quiz-nav">
+            <button type="button" class="btn btn-ghost" id="quiz-prev" disabled data-i18n="back">Back</button>
+            <button type="button" class="btn btn-primary" id="quiz-next" disabled data-i18n="next">Next</button>
+          </div>
+        </div>
+
+        <div id="screening-report" class="result-block" hidden></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="i18n.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>

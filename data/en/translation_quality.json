@@ -1,0 +1,30 @@
+{
+  "backend": "google",
+  "pending_fa_markers": 0,
+  "asq_files": 18,
+  "samples": [
+    {
+      "file": "10m.json",
+      "domain": "Communication",
+      "id": 1,
+      "text_fa": "آيا كودك صداھايي مانند \" \" ا\" \" با \"،\"گا را از خودش در مي آورد؟  ",
+      "text_en": "Does the child make sounds such as \"a\" and \"ga\"?"
+    },
+    {
+      "file": "10m.json",
+      "domain": "Communication",
+      "id": 2,
+      "text_fa": "اگر صداھايي كه كودكتان از خودش در آورد ، تقليد كنيد، آيا آن صداھا را بعد از شما تكرار مي كند؟   ",
+      "text_en": "If you imitate the sounds your child makes, will he repeat those sounds after you?   "
+    },
+    {
+      "file": "10m.json",
+      "domain": "Communication",
+      "id": 3,
+      "text_fa": "آيا كودك دو صداي مشابه مانند \" بابا \"،\" قاقا \"يا \" دادا \" را از خودش در نبرد.(    مي آورد؟) ممكن است اين صداھا را براي ناميدن يك شيء يا شخص خاص بكار",
+      "text_en": "Didn't the child make two similar sounds such as \"Baba\", \"Qaqa\" or \"Dada\"? (Does he make   ?) It is possible to use these sounds to name a specific thing or person."
+    }
+  ],
+  "untranslated_markers": 0,
+  "empty_en_fields": 807
+}
