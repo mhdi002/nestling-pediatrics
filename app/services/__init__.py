@@ -36,7 +36,7 @@ _services: Services | None = None
 
 
 def load_models_enabled() -> bool:
-    """True when NESTLING_LOAD_MODELS=1 (loads xLAM + Pleias)."""
+    """True when NESTLING_LOAD_MODELS=1 (loads optional xLAM)."""
     return os.environ.get("NESTLING_LOAD_MODELS", "0") == "1"
 
 
@@ -46,13 +46,14 @@ def get_assistant(
     use_xlam: bool | None = None,
     use_pleias: bool | None = None,
 ) -> ParentAssistant:
-    """Factory — HF models stay off unless NESTLING_LOAD_MODELS=1 or flags are set."""
+    """Factory — xLAM only when NESTLING_LOAD_MODELS=1; generative RAG follows NESTLING_USE_LLM."""
     load = load_models_enabled()
     return ParentAssistant(
         db=child_db,
         chat_memory=chat_db,
         use_xlam=load if use_xlam is None else use_xlam,
-        use_pleias=load if use_pleias is None else use_pleias,
+        # None → ParentAssistant enables sidecar LLM via llm_enabled()
+        use_pleias=use_pleias,
     )
 
 
@@ -82,7 +83,8 @@ def create_services(
         db=db,
         chat_memory=chat_mem,
         use_xlam=load if use_xlam is None else use_xlam,
-        use_pleias=load if use_pleias is None else use_pleias,
+        # Do not force use_pleias=False when LOAD_MODELS=0 — that disabled Qwen RAG.
+        use_pleias=use_pleias,
     )
     return Services(db=db, chat=chat_mem, assistant=assistant)
 

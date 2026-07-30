@@ -1,16 +1,4 @@
-# Nestling — fully dockerized (app + optional Bonsai LLM/vision)
-#
-# App only (tests / lightweight):
-#   docker compose up --build -d nestling
-#
-# Full stack — Bonsai-27B Q1_0 + mmproj (HF download ~4.5GB, no GitHub needed):
-#   set HF_TOKEN=...   # recommended for download speed
-#   docker compose --profile llm up --build -d
-#
-# Logs:
-#   docker compose logs -f nestling
-#   docker compose --profile llm logs -f bonsai
-
+# Nestling — fully dockerized (app + optional local Qwen vLLM)
 services:
   nestling:
     build:
@@ -25,59 +13,86 @@ services:
       - nestling_overlays:/app/data/overlays
       - nestling_uploads:/app/data/uploads
       - nestling_knowledge:/app/data/knowledge
-      # Live code mounts — server deploy without rebuild when Hub is unreachable
+      - nestling_hf_cache:/app/data/hf_cache
       - ./assistant:/app/assistant
       - ./app:/app/app
       - ./web:/app/web
       - ./docs:/app/docs
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+      - ./config:/app/config:ro
       - ./data/en:/app/data/en:ro
+      - ./data/knowledge/chunks.json:/app/data/knowledge/chunks.json:ro
       - ./intergrowth_preterm_equations.py:/app/intergrowth_preterm_equations.py:ro
     environment:
       - PYTHONUNBUFFERED=1
       - MPLBACKEND=Agg
-      - NESTLING_LOAD_MODELS=${NESTLING_LOAD_MODELS:-0}
-      # Point at Bonsai when profile llm is up; harmless if bonsai is down (RAG falls back)
-      - NESTLING_BONSAI_URL=${NESTLING_BONSAI_URL:-http://bonsai:8080}
-      - NESTLING_USE_BONSAI=${NESTLING_USE_BONSAI:-1}
-      - NESTLING_BONSAI_MODEL=${NESTLING_BONSAI_MODEL:-Bonsai-27B-Q1_0}
+      - HF_HOME=/app/data/hf_cache
+      - TRANSFORMERS_CACHE=/app/data/hf_cache
+      - SENTENCE_TRANSFORMERS_HOME=/app/data/hf_cache
+      - NESTLING_LOAD_MODELS=0
+      - NESTLING_LLM_URL=http://llm:8000
+      - NESTLING_VISION_LLM_URL=http://llm:8000
+      - NESTLING_USE_LLM=1
+      - NESTLING_LLM_MODEL=Qwen/Qwen3.5-4B
+      - NESTLING_VISION_MODEL=Qwen/Qwen3.5-4B
+      - NESTLING_LLM_MODEL_PATH=
+      - NESTLING_USE_DENSE=1
+      - NESTLING_EMBEDDING_MODEL=BAAI/bge-m3
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
       interval: 20s
-      timeout: 10s
+      timeout: 15s
       retries: 10
-      start_period: 60s
+      start_period: 90s
 
-  bonsai:
+  llm:
     profiles: ["llm"]
     build:
       context: .
-      dockerfile: docker/bonsai/Dockerfile
+      dockerfile: docker/llm/Dockerfile
     ports:
-      - "8080:8080"
+      - "8001:8000"
     volumes:
-      - bonsai_models:/models
+      - ${NESTLING_HF_CACHE_HOST:-C:/Users/mhf/.cache/huggingface}:/root/.cache/huggingface:ro
     environment:
-      - MODELS_DIR=/models
-      - BONSAI_HF_REPO=prism-ml/Bonsai-27B-gguf
-      - BONSAI_GGUF=Bonsai-27B-Q1_0.gguf
-      - BONSAI_MMPROJ=Bonsai-27B-mmproj-Q8_0.gguf
-      - BONSAI_ENABLE_VISION=1
-      - BONSAI_NGL=${BONSAI_NGL:-0}
-      - BONSAI_CTX=${BONSAI_CTX:-4096}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+      - NESTLING_LLM_MODEL=Qwen/Qwen3.5-4B
+      - NESTLING_LLM_USE_MODEL_ID=0
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - VLLM_PORT=8000
+      # Hardcoded for 8GB GPU — do not raise util above free VRAM fraction.
+      - VLLM_MAX_MODEL_LEN=1536
+      - VLLM_GPU_MEMORY_UTILIZATION=0.86
+      - VLLM_TENSOR_PARALLEL_SIZE=1
+      - VLLM_ENFORCE_EAGER=1
+      - VLLM_MAX_NUM_SEQS=1
+      - VLLM_QUANTIZATION=fp8
+      - VLLM_KV_CACHE_DTYPE=fp8
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:8000/v1/models >/dev/null"]
       interval: 30s
       timeout: 10s
-      retries: 40
-      start_period: 1200s
+      retries: 60
+      start_period: 900s
 
 volumes:
   nestling_children:
   nestling_overlays:
   nestling_uploads:
   nestling_knowledge:
-  bonsai_models:
+  nestling_hf_cache:

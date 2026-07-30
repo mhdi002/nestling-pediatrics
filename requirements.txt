@@ -1,6 +1,5 @@
-# Full install including the only allowed HF models:
+# Full install including optional HF tool-calling model:
 #   Salesforce/xLAM-1b-fc-r
-#   PleIAs/Pleias-RAG-1B
 -r requirements-core.txt
 transformers>=4.41.0
 torch>=2.1.0

@@ -2,9 +2,9 @@
 """
 Parent assistant orchestrator.
 
-Models (ONLY these two — user-specified):
-  - Salesforce/xLAM-1b-fc-r  → tool / function calling
-  - PleIAs/Pleias-RAG-1B     → RAG answers with citations
+Models:
+  - Local Qwen (OpenAI-compatible vLLM sidecar) → RAG answers + normal chat + vision
+  - Salesforce/xLAM-1b-fc-r (optional) → tool / function calling
 
 Deterministic clinical tools compute all growth/screening numbers (no LLM math).
 Full chat session memory persists multi-turn slots + messages.
@@ -17,14 +17,33 @@ import os
 import re
 from typing import Any
 
-from assistant.config import EN_DIR, XLAM_MODEL_ID
+from assistant.config import EN_DIR, KNOWLEDGE_DIR
 from assistant.memory.chat_memory import ChatMemory
 from assistant.memory.child_db import ChildMemoryDB
 from assistant.rag.stores import ChildRAG, MedicalRAG
+from assistant.refdata import weeks_per_month
 from assistant.runtime_translate import translate_en_to_fa, translate_for_models
-from assistant.tools.clinical import TOOL_SPECS, dispatch_tool
+from assistant.settings import get_settings
+from assistant.tools.clinical import TOOL_SPECS, _term_age_months_from_weeks, dispatch_tool
 from assistant.tools.who_term_equations import classify_maturity
-
+from assistant.agent.slots import extract_growth_slots
+from assistant.agent.router import route_message
+from assistant.agent.intents import (  # noqa: F401
+    AFFIRM_RE,
+    ANALYZE_GROWTH_RE,
+    BARE_SHOW_RE,
+    CONCERN_RE,
+    GROWTH_COMPUTE_RE,
+    HELP_RE,
+    HISTORY_RE,
+    MEASURE_EXPLAIN_RE,
+    MEDICAL_FOLLOWUP_RE,
+    MEDICAL_RE,
+    SCREEN_RE,
+    SHOW_CHART_RE,
+    TALK_WORRY_RE,
+    classify_intent,
+)
 
 TASK_INSTRUCTION = """
 You are an expert in composing functions for a pediatric parent assistant.
@@ -40,9 +59,144 @@ The output MUST strictly adhere to the following JSON format, and NO other text 
 {
  "tool_calls": [
  {"name": "func_name1", "arguments": {"argument1": "value1", "argument2": "value2"}}
- ]
+]
 }
 """.strip()
+
+
+def _infer_last_topic(intents: set[str], query: str = "") -> str:
+    """Free-text topic slug for multi-turn continuation (not a closed enum)."""
+    from assistant.agent.intents import topic_slug_from_query
+
+    q = query or ""
+    if "medical" in intents or "screening" in intents:
+        return topic_slug_from_query(q)
+    if "growth_analysis" in intents:
+        return "growth_analysis"
+    if "growth" in intents:
+        return "growth"
+    if "history" in intents:
+        return "history"
+    if "help" in intents:
+        return "help"
+    if "reassure" in intents:
+        return "reassure"
+    if "chat" in intents:
+        return "chat"
+    return topic_slug_from_query(q) or next(iter(sorted(intents)), "chat")
+
+
+def _age_months_from_dob(date_of_birth: str | None) -> float | None:
+    """Chronological age in months from ISO date_of_birth (YYYY-MM-DD)."""
+    if not date_of_birth:
+        return None
+    try:
+        from datetime import date, datetime
+
+        raw = str(date_of_birth).strip()[:10]
+        dob = datetime.strptime(raw, "%Y-%m-%d").date()
+        today = date.today()
+        if dob > today:
+            return None
+        days = (today - dob).days
+        return max(0.0, days / 30.4375)
+    except Exception:
+        return None
+
+
+def resolve_known_age_months(slots: dict, child_id: str | None, db: ChildMemoryDB) -> float | None:
+    """
+    Chronological age (months) for medical/feeding/speech RAG.
+
+    Prefer last plotted chronological age, explicit age_months, then DOB.
+    Weeks are ambiguous (PMA vs life-weeks); only convert with chart awareness and
+    never treat postnatal weeks-of-life (age_months * wpm) as PMA minus GA.
+    """
+    wpm = weeks_per_month()
+
+    # 1) Last successful growth plot (authoritative chronological months)
+    if slots.get("last_age_months") is not None:
+        try:
+            return float(slots["last_age_months"])
+        except (TypeError, ValueError):
+            pass
+
+    # 2) Explicit chronological months from parent / prior slots
+    if slots.get("age_months") is not None:
+        try:
+            return float(slots["age_months"])
+        except (TypeError, ValueError):
+            pass
+
+    child: dict = {}
+    if child_id:
+        child = db.get_child(child_id) or {}
+        dob_age = _age_months_from_dob(child.get("date_of_birth"))
+        if dob_age is not None:
+            return float(dob_age)
+
+        hist = db.growth_history(child_id) or []
+        if hist:
+            last = hist[-1]
+            if last.get("age_months") is not None:
+                try:
+                    return float(last["age_months"])
+                except (TypeError, ValueError):
+                    pass
+
+    weeks = slots.get("weeks")
+    ga = slots.get("gestational_age_weeks")
+    if ga is None and child.get("gestational_age_weeks") is not None:
+        ga = child.get("gestational_age_weeks")
+    chart = slots.get("last_chart_standard") or slots.get("chart_standard")
+
+    if weeks is not None:
+        try:
+            w = float(weeks)
+        except (TypeError, ValueError):
+            w = None
+        if w is not None:
+            # INTERGROWTH PMA → chronological only when chart says preterm PMA
+            if chart == "intergrowth_preterm" and ga is not None:
+                try:
+                    return max(0.0, w - float(ga)) / wpm
+                except (TypeError, ValueError):
+                    pass
+            # WHO / term / unknown: weeks are postnatal or near-term PMA band
+            if chart == "who_term" or (ga is not None and float(ga) >= 37):
+                return float(_term_age_months_from_weeks(w, float(ga) if ga is not None else None))
+            # Ambiguous weeks without preterm chart: do NOT subtract GA (avoids
+            # turning 59 life-weeks ≈ 13.5m into ~7m when GA≈28–32).
+            if w < 27:
+                return w / wpm
+            return float(_term_age_months_from_weeks(w, None))
+
+    if child_id:
+        hist = db.growth_history(child_id) or []
+        if hist:
+            last = hist[-1]
+            if last.get("weeks") is not None:
+                cga = child.get("gestational_age_weeks")
+                try:
+                    lw = float(last["weeks"])
+                except (TypeError, ValueError):
+                    return None
+                # Stored WHO points use life-weeks (age_months*wpm); INTERGROWTH uses PMA.
+                # Without an age_months column, prefer life-weeks interpretation when
+                # weeks/wpm is a plausible toddler age and PMA−GA would be much younger.
+                life_m = lw / wpm
+                if cga is not None:
+                    pma_chrono = max(0.0, lw - float(cga)) / wpm
+                    # If life-weeks reading is ~12m+ and PMA reading is << that, stored
+                    # weeks were almost certainly postnatal (WHO save), not PMA.
+                    if life_m >= 10 and pma_chrono < life_m * 0.75:
+                        return life_m
+                    if slots.get("last_chart_standard") == "intergrowth_preterm" or (
+                        cga is not None and float(cga) < 37 and 27 <= lw <= 64
+                    ):
+                        return pma_chrono
+                return float(_term_age_months_from_weeks(lw, float(cga) if cga is not None else None))
+    return None
 
 
 def convert_to_xlam_tool(tools: list[dict]) -> list[dict]:
@@ -75,13 +229,13 @@ class XLAMToolCaller:
         self.enabled = enabled
         self._model = None
         self._tok = None
-        self.model_id = XLAM_MODEL_ID
+        self.model_id = get_settings().nestling_tool_model
 
     def load(self):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        self._tok = AutoTokenizer.from_pretrained(XLAM_MODEL_ID, trust_remote_code=True)
+        self._tok = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.float16 if device == "cuda" else torch.float32
         kwargs = {
@@ -92,7 +246,7 @@ class XLAMToolCaller:
             kwargs["device_map"] = "auto"
         else:
             kwargs["device_map"] = "cpu"
-        self._model = AutoModelForCausalLM.from_pretrained(XLAM_MODEL_ID, **kwargs)
+        self._model = AutoModelForCausalLM.from_pretrained(self.model_id, **kwargs)
         self.enabled = True
 
     def propose(self, query: str, *, user_message: str | None = None, slots: dict | None = None) -> list[dict]:
@@ -158,301 +312,6 @@ def parse_tool_calls(text: str) -> list[dict]:
             return data.get("tool_calls", [])
         except Exception:
             return []
-
-
-def extract_growth_slots(text: str) -> dict:
-    """Extract any growth slots present in a message (partial OK). Soft parent language."""
-    text = re.split(r"\[SESSION_SLOTS\]|\[RECENT_CHAT\]", text or "", maxsplit=1)[0]
-    slots: dict[str, Any] = {}
-    if re.search(r"\b(male|boy|پسر(?:م|ه)?)\b", text, re.I):
-        slots["sex"] = "male"
-    elif re.search(r"\b(female|girl|دختر(?:م|ه)?)\b", text, re.I):
-        slots["sex"] = "female"
-    # Prefer explicit body measures; avoid matching "hc" inside unrelated words
-    if re.search(r"\b(head(?:\s*circumference)?|hc)\b|دور\s*سر", text, re.I):
-        slots["measure"] = "head_circumference"
-    elif re.search(r"\b(length|height|قد)\b", text, re.I):
-        slots["measure"] = "length"
-    elif re.search(r"\b(weight|وزن|کilo|کیلو)\b", text, re.I):
-        slots["measure"] = "weight"
-
-    # Age in months (chronological) — term WHO path
-    m = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:months?|mos?|ماه(?:ه|گی)?)",
-        text,
-        re.I,
-    )
-    if m:
-        slots["age_months"] = float(m.group(1))
-        # Also stash approx weeks for tools that still want a weeks field
-        slots["weeks"] = float(m.group(1)) * 4.345
-
-    # Weeks (PMA or chronological depending on maturity)
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:w(?:eeks?)?|هفته)", text, re.I)
-    if m and "age_months" not in slots:
-        slots["weeks"] = float(m.group(1))
-
-    # "age 32" / "سن ۳۲" without unit — PMA weeks if ≥27, else months
-    if "weeks" not in slots and "age_months" not in slots:
-        m = re.search(
-            r"\b(?:age|pma|pna|سن)\s*[:=]?\s*(\d+(?:\.\d+)?)\b",
-            text,
-            re.I,
-        )
-        if not m:
-            # Bare number only when message is basically just the age
-            m = re.search(r"^\s*(\d+(?:\.\d+)?)\s*$", text)
-        if m:
-            age_n = float(m.group(1))
-            if age_n >= 27:
-                slots["weeks"] = age_n
-            else:
-                slots["age_months"] = age_n
-                slots["weeks"] = age_n * 4.345
-
-    # Value with unit
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(kg|کیلو(?:گرم)?|cm|سانتی\s*متر)", text, re.I)
-    if not m:
-        m = re.search(r"value\s*[:=]\s*(\d+(?:\.\d+)?)", text, re.I)
-    if not m:
-        # Soft: "وزن ۳.۲" or "3.2 kilo"
-        m = re.search(r"(?:weight|وزن)\s*[:=]?\s*(\d+(?:\.\d+)?)", text, re.I)
-    if m:
-        slots["value"] = float(m.group(1))
-        if "measure" not in slots:
-            unit = (m.group(2) if m.lastindex and m.lastindex >= 2 else "") or ""
-            if re.search(r"cm|سانتی", unit, re.I):
-                slots["measure"] = "length"
-            else:
-                slots["measure"] = "weight"
-
-    # Always plot when parent shares a measurement (no need to say "overlay")
-    if re.search(r"\b(overlay|chart|plot|نمودار|رسم)\b", text, re.I):
-        slots["want_overlay"] = True
-    if slots.get("value") is not None and slots.get("measure") and (
-        slots.get("weeks") is not None or slots.get("age_months") is not None
-    ):
-        slots["want_overlay"] = True
-
-    if re.search(r"\b(preterm|نارس)\b", text, re.I):
-        slots["chart_standard"] = "intergrowth_preterm"
-    elif re.search(r"\b(term|طبیعی|ترم)\b", text, re.I):
-        slots["chart_standard"] = "who_term"
-    return slots
-
-
-MEASURE_EXPLAIN_RE = re.compile(
-    r"\b(?:what(?:'s| is| do you mean(?: by)?)?)\s+(?:the\s+)?measur|"
-    r"\bby the measur|"
-    r"\bmeasur(?:e|es|ement)?\s+you mean|"
-    r"\bmesure|"
-    r"منظورت(?:ان)?\s*از\s*(?:اندازه|مقیاس|measure)|اندازه\s*یعنی",
-    re.I,
-)
-SHOW_CHART_RE = re.compile(
-    r"\b(?:show|see|open|display|plot|draw)\b.{0,40}\bchart\b|"
-    r"\b(?:child(?:'s)?|baby(?:'s)?|my)\s+chart\b|"
-    r"نمودار|چارت|چارتش|نشان\s*بده.*(?:نمودار|چارت)|(?:نمودار|چارت).{0,12}(?:نشون|نشان)",
-    re.I,
-)
-BARE_SHOW_RE = re.compile(r"^\s*(?:show(?:\s+it)?|نمایش(?:\s*بده)?)\s*[!.]?\s*$", re.I)
-AFFIRM_RE = re.compile(
-    r"^\s*(?:so\s+)?(?:it'?s|its)\s+(?:ok(?:ay|ey)?|fine|alright|good)\b|"
-    r"^\s*(?:ok(?:ay|ey)?|alright|thanks|thank you|got it)\s*[!.]?\s*$|"
-    r"^\s*(?:پس\s*)?(?:خوبه|اوکی|باشه|ممنون)\s*[!.]?\s*$",
-    re.I,
-)
-ANALYZE_GROWTH_RE = re.compile(
-    r"\b(?:analy[sz]e|interpret|explain)\b(?:\s+\w+){0,4}\s*(?:that|this|it|chart|result|growth|number|centile)?|"
-    r"^\s*analy[sz]e\s*[!.]?\s*$|"
-    r"\bwhat does (?:that|this|it|the (?:chart|result|number)) mean\b|"
-    r"\b(?:is|am i|are we).{0,30}(?:on|in)\s+(?:a\s+|the\s+)?(?:good\s+|right\s+|correct\s+)?track\b|"
-    r"\b(?:good|right|correct)\s+track\b|"
-    r"\bon\s+track\b|"
-    r"\bis (?:he|she|my (?:baby|child|son|daughter)|the (?:baby|child))\s+"
-    r"(?:ok|okay|okey|fine|normal|healthy|alright|good)\b|"
-    r"\bis (?:my |the )?(?:baby|child|he|she|son|daughter).{0,30}"
-    r"(?:ok|okay|okey|fine|normal|healthy|good|alright|growing well)\b|"
-    r"\bhow is (?:my |the )?(?:baby|child|growth|weight)\b|"
-    r"تحلیل|تفسیر|یعنی\s*چی|وضعیت\s*رشد|مسیر\s*خوب|روی\s*خط|"
-    r"رشدش\s*خوبه|وزنش\s*خوبه|خوبه\s*\?|"
-    r"حالش\s*خوبه|اوکی\s*هست",
-    re.I,
-)
-TALK_WORRY_RE = re.compile(
-    r"\b(?:talk(?:ing)?|speech|language)\b.{0,30}\b(?:worr|concern|delay|ability)|"
-    r"\b(?:worr|concern).{0,30}\b(?:talk(?:ing)?|speech|language|ability)|"
-    r"cant?\s+talk|can'?t\s+talk|chald|child\s+cant|"
-    r"نگران.{0,20}(?:حرف|گفتار|صحبت)|(?:حرف|گفتار).{0,20}نگران",
-    re.I,
-)
-
-
-HELP_RE = re.compile(
-    r"^\s*(hi|hello|hey|salam|سلام|درود)(?:\s*[!.]*)?\s*$|"
-    r"^\s*(?:hi|hello|hey)[,!.\s]+(?:how can you help(?: me)?|what can you do)\s*\??\s*$|"
-    r"^\s*(how can you help(?: me)?|what can you do|who are you)\s*\??\s*$|"
-    r"^\s*(help(?: me)?|کمک(?:\s*کن)?)\s*\??\s*$",
-    re.I,
-)
-HISTORY_RE = re.compile(
-    r"\b(last|previous|history|remember|remind(?:\s+me)?|summary|"
-    r"child profile|show (?:my )?(?:child|baby)(?: profile| data| info| growth| record)?|"
-    r"who (?:is|did) I select|what do you know about (?:my )?(?:child|baby)|"
-    r"child(?:'s)? (?:data|info|information|record|profile)|"
-    r"my child(?:'s)? (?:last |growth |result|summary|profile|data)|"
-    r"what (?:was|were) my|"
-    r"we just (?:plotted|measured|saved|checked))\b|"
-    r"قبلی|تاریخچه|آخرین|یادت|یادآوری|پرونده(?:\s*فرزند)?|اطلاعات (?:فرزند|کودک)|"
-    r"وضعیت فرزندم را نشان بده|پروفایل|پروفیل|نشون\s*میدی|نشان\s*می\s*دهی|"
-    r"بچم(?:و| را)?\s*(?:نشون|نشان)|فرزندم(?:و| را)?\s*(?:نشون|نشان)",
-    re.I,
-)
-CONCERN_RE = re.compile(
-    r"\b(can'?t talk|cannot talk|doesn'?t talk|not talking|speech delay|late (?:to )?talk|"
-    r"won'?t speak|no words|language delay|developmental (?:delay|concern)|"
-    r"worried|problem|wrong|abnormal|delay|"
-    r"fever|rash|vomit|cough|cry(?:ing)? a lot)\b|"
-    r"حرف\s*نمی\s*زن|حرف نمیزن|صحبت نمی|گفتار|تاخیر|نگران|مشکل|چی\s*کار|چه\s*کار|"
-    r"چرا\s*.*(?:حرف|صحبت)|نمیتواند\s*حرف|کی\s*حرف|چه\s*موقع\s*حرف|کی\s*صحبت",
-    re.I,
-)
-MEDICAL_RE = re.compile(
-    r"\b(iron|sleep|vitamin|breast|feed|feeding|nutrition|vaccine|fever|colic|"
-    r"complementary|weaning|sids|milestone|development|speech|talk(?:ing)?|language|"
-    r"آهن|خواب|شیر|رشد|تغذیه|واکسن|حرف|گفتار|صحبت)\b|"
-    r"\btell me about\b|\bwhat about\b|\bexplain\b|\bwhy (?:is|does|can'?t)\b|"
-    r"مشکل چی|چی کار کنم|چه باید|کی\s*حرف|چه\s*موقع",
-    re.I,
-)
-GROWTH_COMPUTE_RE = re.compile(
-    r"\b(overlay|plot|percentile|z-?score|compute|calculate|check growth|"
-    r"on the chart|growth chart|show(?:\s+me)?(?:\s+the)?\s+chart|the chart|نمودار)\b|"
-    r"\b(?:show|see|open|display).{0,40}\bchart\b|"
-    r"\b(?:child(?:'s)?|baby(?:'s)?)\s+chart\b|"
-    r"\b(weight|length|height|head circumference|وزن|قد|دور\s*سر)\b.+\b\d+(?:\.\d+)?|"
-    r"\b\d+(?:\.\d+)?\s*(?:kg|cm|کیلو(?:گرم)?)\b|"
-    r"\b\d+(?:\.\d+)?\s*(?:w|weeks?|هفته)\b.+\b\d+(?:\.\d+)?|"
-    r"\b(?:age|pma|pna|سن)\s*[:=]?\s*\d+|"
-    r"\bvalue\s*[:=]|"
-    r"چارت|نمودار|چارتش",
-    re.I,
-)
-SCREEN_RE = re.compile(r"\b(asq|m-?chat|autism screen|غربال|سنین و مراحل)\b", re.I)
-
-
-def classify_intent(user_message: str, prior_slots: dict | None = None) -> set[str]:
-    """Classify the *current* user turn only (never history)."""
-    msg = (user_message or "").strip()
-    intents: set[str] = set()
-    if not msg:
-        return {"help"}
-
-    concern = bool(CONCERN_RE.search(msg)) or bool(TALK_WORRY_RE.search(msg))
-    measure_q = bool(MEASURE_EXPLAIN_RE.search(msg))
-    show_chart = bool(SHOW_CHART_RE.search(msg))
-    bare_show = bool(BARE_SHOW_RE.search(msg))
-    affirm = bool(AFFIRM_RE.search(msg))
-    analyze = bool(ANALYZE_GROWTH_RE.search(msg))
-
-    # Pure greeting / capability question only
-    if (
-        HELP_RE.search(msg)
-        and not concern
-        and not GROWTH_COMPUTE_RE.search(msg)
-        and not measure_q
-        and not show_chart
-        and not analyze
-    ):
-        intents.add("help")
-        return intents
-
-    if analyze:
-        intents.add("growth_analysis")
-        return intents
-
-    if affirm and not concern and not show_chart and not GROWTH_COMPUTE_RE.search(msg):
-        intents.add("reassure")
-        return intents
-
-    if measure_q or show_chart:
-        intents.add("growth")
-
-    if bare_show and prior_slots and (
-        prior_slots.get("want_overlay")
-        or prior_slots.get("value") is not None
-        or prior_slots.get("child_id")
-    ):
-        intents.add("growth")
-
-    if (concern or MEDICAL_RE.search(msg) or TALK_WORRY_RE.search(msg)) and not show_chart:
-        if not re.search(
-            r"\b(?:show|open|view)\s+my\s+child\b|child profile|پرونده|اطلاعات فرزند",
-            msg,
-            re.I,
-        ):
-            intents.add("medical")
-        if re.search(r"talk|speech|language|حرف|گفتار|صحبت|chald", msg, re.I):
-            intents.add("screening")
-
-    if (
-        HISTORY_RE.search(msg)
-        and not concern
-        and not GROWTH_COMPUTE_RE.search(msg)
-        and not measure_q
-        and not show_chart
-        and not bare_show
-    ):
-        intents.add("history")
-
-    if GROWTH_COMPUTE_RE.search(msg):
-        intents.add("growth")
-    if SCREEN_RE.search(msg):
-        intents.add("screening")
-
-    slots = extract_growth_slots(msg)
-    # Continue a chart only when THIS turn adds real growth facts (not just boy/girl
-    # from a sentence like «پسرم کی حرف میزنه»).
-    growth_progress = any(k in slots for k in ("measure", "weeks", "age_months", "value"))
-    if slots.get("want_overlay"):
-        intents.add("growth")
-        intents.discard("slot_update")
-    elif (
-        prior_slots
-        and prior_slots.get("want_overlay")
-        and growth_progress
-        and not concern
-        and "medical" not in intents
-    ):
-        intents.add("growth")
-        intents.discard("slot_update")
-
-    # Care / speech questions must never reuse leftover chart tools
-    if ("medical" in intents or "screening" in intents or concern) and not (
-        show_chart or bare_show or slots.get("want_overlay") or GROWTH_COMPUTE_RE.search(msg)
-    ):
-        intents.discard("growth")
-
-    if "growth" in intents and (show_chart or bare_show or slots.get("want_overlay")):
-        intents.discard("history")
-
-    if "history" in intents and show_chart:
-        intents.discard("history")
-
-    if (
-        slots
-        and not intents.intersection(
-            {"growth", "medical", "history", "screening", "help", "reassure", "growth_analysis"}
-        )
-        and not concern
-        and not measure_q
-        and len(msg.split()) <= 6
-        and set(slots) - {"want_overlay", "chart_standard", "sex"}
-    ):
-        intents.add("slot_update")
-    if not intents:
-        intents.add("chat")
-    return intents
 
 
 def interpret_track_status(track_status: str | None, centile: float | None, *, fa: bool = False) -> str:
@@ -555,6 +414,11 @@ def hydrate_slots_from_child(db: ChildMemoryDB, child_id: str | None, slots: dic
         elif maturity == "preterm":
             slots.setdefault("chart_standard", "intergrowth_preterm")
 
+    dob_age = _age_months_from_dob(child.get("date_of_birth"))
+    if dob_age is not None:
+        slots.setdefault("age_months", float(dob_age))
+        slots.setdefault("last_age_months", float(dob_age))
+
     history = db.growth_history(child_id) or []
     if not history:
         return slots
@@ -573,6 +437,37 @@ def hydrate_slots_from_child(db: ChildMemoryDB, child_id: str | None, slots: dic
         slots.setdefault("value", float(preferred["value"]))
     if preferred.get("weeks") is not None:
         slots.setdefault("weeks", float(preferred["weeks"]))
+    if preferred.get("age_months") is not None:
+        slots.setdefault("age_months", float(preferred["age_months"]))
+        slots.setdefault("last_age_months", float(preferred["age_months"]))
+    elif preferred.get("weeks") is not None and "age_months" not in slots:
+        # Prefer chronological months; avoid GA-subtracting WHO life-weeks.
+        try:
+            lw = float(preferred["weeks"])
+            wpm = weeks_per_month()
+            cga = (
+                float(slots["gestational_age_weeks"])
+                if slots.get("gestational_age_weeks") is not None
+                else (
+                    float(child["gestational_age_weeks"])
+                    if child.get("gestational_age_weeks") is not None
+                    else None
+                )
+            )
+            life_m = lw / wpm
+            if cga is not None and float(cga) < 37 and 27 <= lw <= 64:
+                pma_chrono = max(0.0, lw - float(cga)) / wpm
+                # WHO saves store life-weeks; INTERGROWTH stores PMA.
+                if life_m >= 10 and pma_chrono < life_m * 0.75:
+                    chrono = life_m
+                else:
+                    chrono = pma_chrono
+            else:
+                chrono = float(_term_age_months_from_weeks(lw, cga))
+            slots["age_months"] = chrono
+            slots.setdefault("last_age_months", chrono)
+        except (TypeError, ValueError):
+            pass
     slots["want_overlay"] = True
     return slots
 
@@ -623,10 +518,12 @@ def rule_based_tool_calls(
                 "measure": slots["measure"],
                 "value": slots["value"],
             }
-            if "weeks" in slots:
-                args["weeks"] = slots["weeks"]
+            # Prefer chronological age_months. Only pass weeks as PMA when months absent
+            # (slot weeks often = age_months * wpm and must not be treated as PMA).
             if "age_months" in slots:
                 args["age_months"] = slots["age_months"]
+            elif "weeks" in slots:
+                args["weeks"] = slots["weeks"]
             if slots.get("gestational_age_weeks") is not None:
                 args["gestational_age_weeks"] = slots["gestational_age_weeks"]
             if slots.get("chart_standard"):
@@ -640,10 +537,10 @@ def rule_based_tool_calls(
                 "sex": slots["sex"],
                 "measure": slots["measure"],
             }
-            if "weeks" in slots:
-                args["weeks"] = slots["weeks"]
             if "age_months" in slots:
                 args["age_months"] = slots["age_months"]
+            elif "weeks" in slots:
+                args["weeks"] = slots["weeks"]
             if slots.get("gestational_age_weeks") is not None:
                 args["gestational_age_weeks"] = slots["gestational_age_weeks"]
             if slots.get("chart_standard"):
@@ -665,19 +562,43 @@ class ParentAssistant:
         db: ChildMemoryDB | None = None,
         chat_memory: ChatMemory | None = None,
         use_xlam: bool | None = None,
+        use_llm: bool | None = None,
+        *,
         use_pleias: bool | None = None,
     ):
         self.db = db or ChildMemoryDB()
         self.chat_memory = chat_memory or ChatMemory()
         self.medical = MedicalRAG()
         self.child_rag = ChildRAG()
-        # Default: load models when NESTLING_LOAD_MODELS=1
+        # xLAM loads only when NESTLING_LOAD_MODELS=1.
+        # Generative RAG uses the vLLM/Qwen sidecar when NESTLING_USE_LLM is on.
         load = os.environ.get("NESTLING_LOAD_MODELS", "0") == "1"
-        self.use_pleias = use_pleias if use_pleias is not None else load
+        if use_llm is None:
+            if use_pleias is not None:
+                use_llm = bool(use_pleias)
+            else:
+                from assistant.llm.qwen_client import llm_enabled
+
+                use_llm = llm_enabled()
+        self.use_llm = bool(use_llm)
+        self.use_pleias = self.use_llm  # backward compat for callers/tests
         self.tool_caller = XLAMToolCaller(enabled=False)
         if use_xlam if use_xlam is not None else load:
             self.tool_caller.load()
         self.medical.load()
+        # Rebuild if volume index is missing curated feeding guidance (stale named volume).
+        try:
+            feed_docs = sum(
+                1 for d in self.medical.store.docs if "feeding" in str(d.get("id", "")).lower()
+            )
+            if feed_docs == 0:
+                chunks = KNOWLEDGE_DIR / "chunks.json"
+                if chunks.is_file():
+                    n = self.refresh_medical_index()
+                    if n:
+                        self.medical.load()
+        except Exception:
+            pass
         self.child_rag.load()
 
     def refresh_medical_index(self):
@@ -689,10 +610,10 @@ class ParentAssistant:
         return len(docs)
 
     def ask_medical(self, query: str) -> dict:
-        return self.medical.answer(query, use_pleias=self.use_pleias)
+        return self.medical.answer(query, use_llm=self.use_llm)
 
     def ask_child(self, child_id: str, query: str) -> dict:
-        return self.child_rag.answer(query, child_id=child_id, use_pleias=self.use_pleias)
+        return self.child_rag.answer(query, child_id=child_id, use_llm=self.use_llm)
 
     def analyze_parent_photo(
         self,
@@ -702,46 +623,63 @@ class ParentAssistant:
         prompt: str = "",
         ui_lang: str | None = None,
     ) -> dict:
-        """Vision + RAG path for parent-sent photos (rash/wound). Never diagnoses."""
-        from assistant.llm.bonsai_client import bonsai_enabled, get_bonsai
+        """Vision + RAG path for parent-sent photos. Never diagnoses."""
+        from assistant.llm.qwen_client import get_qwen, llm_enabled
         from assistant.parent_voice import medical_chat_answer
         from assistant.runtime_translate import ensure_pure_lang, translate_for_models
 
+        caption = (prompt or "").strip()
+        neutral = "What can you tell me about this photo?"
         reply_lang, en_prompt = translate_for_models(
-            prompt or "Please look at this photo of my child's skin.",
+            caption or neutral,
             ui_lang=ui_lang,
         )
-        rag_q = (
-            f"{en_prompt} pediatric rash palm sole blister hand foot mouth wound redness fever"
-        )
+        rag_q = en_prompt
         rag = self.ask_medical(rag_q)
         context = rag.get("context") or rag.get("answer") or ""
         vision_text = ""
         mode = "rag_only"
         model = rag.get("model")
-        if bonsai_enabled():
+        if llm_enabled():
             try:
-                client = get_bonsai()
-                if client.ready:
-                    vision_text = client.analyze_image(
-                        image_bytes,
-                        mime=mime,
-                        prompt=en_prompt,
-                        context=context,
+                client = get_qwen()
+                if client.vision_ready:
+                    user_q = (
+                        f"Parent note: {caption}. " if caption else "Parent sent a photo without text. "
+                    ) + (
+                        "Describe likely benign possibilities and red flags for urgent care. "
+                        "Educational guidance only."
                     )
-                    mode = "bonsai-vision+rag"
-                    model = "prism-ml/Bonsai-27B-gguf+mmproj"
+                    grounded_prompt = (
+                        f"{user_q}\n\nCare notes context:\n{context}\n\n"
+                        "Keep response concise and parent-friendly."
+                    )
+                    vision_text = client.analyze_image(
+                        image_bytes=image_bytes,
+                        prompt=grounded_prompt,
+                        mime=mime,
+                        max_tokens=700,
+                    )
+                    mode = "vision+rag"
+                    model = get_settings().nestling_vision_model
             except Exception as exc:
                 vision_text = ""
                 mode = f"rag_fallback:{exc}"
         if not vision_text:
-            vision_text = (
-                "I received your photo. Without the vision model online I cannot see pixels yet, "
-                "but here is calm guidance from our care notes based on common pediatric skin concerns "
-                "(rashes on palms/soles can include viral illnesses such as hand-foot-and-mouth). "
-                f"{rag.get('answer') or ''}"
-            )
-            mode = "rag_no_vision"
+            if caption:
+                vision_text = (
+                    "Vision model is not ready, so I am using your description only "
+                    f"({caption}) here is guidance from our care notes. "
+                    f"{rag.get('answer') or ''}"
+                )
+                mode = "caption+rag_extractive"
+            else:
+                vision_text = (
+                    "I received your photo. Vision service is not ready right now, so please "
+                    "describe what you see or what you would like help with. "
+                    f"Here is calm guidance from our care notes. {rag.get('answer') or ''}"
+                )
+                mode = "rag_no_vision"
         spoken = medical_chat_answer(vision_text, fa=(reply_lang == "fa"))
         if reply_lang == "fa":
             spoken = ensure_pure_lang(spoken, "fa")
@@ -783,7 +721,7 @@ class ParentAssistant:
         return {
             "query": query,
             "tool_calls": results,
-            "tool_model": XLAM_MODEL_ID if self.tool_caller.enabled else "deterministic_router",
+            "tool_model": self.tool_caller.model_id if self.tool_caller.enabled else "deterministic_router",
             "intents": sorted(intents),
         }
 
@@ -814,7 +752,7 @@ class ParentAssistant:
         if overlay.get("ok"):
             store_weeks = overlay.get("weeks")
             if store_weeks is None and overlay.get("age_months") is not None:
-                store_weeks = float(overlay["age_months"]) * 4.345
+                store_weeks = float(overlay["age_months"]) * weeks_per_month()
             self.db.add_growth(
                 child_id,
                 weeks=store_weeks if store_weeks is not None else (weeks or 0),
@@ -823,6 +761,11 @@ class ParentAssistant:
                 z_score=overlay.get("z_score"),
                 centile=overlay.get("centile"),
                 track_status=overlay.get("track_status"),
+                age_months=(
+                    float(overlay["age_months"])
+                    if overlay.get("age_months") is not None
+                    else age_months
+                ),
             )
             self.refresh_child_index(child_id)
         return overlay
@@ -913,10 +856,14 @@ class ParentAssistant:
         if child_id:
             session_slots.setdefault("child_id", child_id)
         slots = self.chat_memory.merge_slots(session_id, new_slots)
-        # Classify on both original + English so Persian concerns are not lost in MT
-        intents = classify_intent(en_message, prior_slots=session_slots) | classify_intent(
-            user_message, prior_slots=session_slots
+        # Hybrid router (YAML rules + regex; optional LLM when sidecar is up)
+        decision = route_message(
+            user_message, prior_slots=session_slots, en_message=en_message
         )
+        intents = set(decision.intents)
+        for k, v in (decision.slots or {}).items():
+            if v is not None and v != "" and k not in slots:
+                slots = self.chat_memory.merge_slots(session_id, {k: v})
         show_chart = bool(SHOW_CHART_RE.search(user_message) or SHOW_CHART_RE.search(en_message))
         bare_show = bool(BARE_SHOW_RE.search(user_message) or BARE_SHOW_RE.search(en_message))
         if bare_show and child_id and (self.db.growth_history(child_id) or []):
@@ -928,13 +875,22 @@ class ParentAssistant:
             intents.discard("help")
         if "growth" in intents and "help" in intents:
             intents.discard("help")
+        # Medical / screening always beats vague chat + leftover growth analysis
+        if "medical" in intents or "screening" in intents:
+            intents.discard("chat")
+            intents.discard("reassure")
+            if not show_chart and not bare_show and not GROWTH_COMPUTE_RE.search(
+                en_message
+            ) and not GROWTH_COMPUTE_RE.search(user_message):
+                intents.discard("growth_analysis")
+                intents.discard("growth")
         if "growth" in intents:
             intents.discard("slot_update")
             intents.discard("chat")
             intents.discard("history")
-        if "reassure" in intents:
+        if "reassure" in intents and "medical" not in intents:
             intents = {"reassure"}
-        if "growth_analysis" in intents:
+        if "growth_analysis" in intents and "medical" not in intents:
             intents = {"growth_analysis"}
             # Analysis explains existing results — never replot unless they asked to show the chart
         # Never run chart tools on care/speech turns
@@ -948,6 +904,8 @@ class ParentAssistant:
             and not GROWTH_COMPUTE_RE.search(en_message)
         ):
             intents.discard("growth")
+            intents.discard("growth_analysis")
+            intents.discard("chat")
 
         # Re-plot from saved child measurements when parent asks to show the chart
         if "growth" in intents and child_id and (
@@ -963,8 +921,42 @@ class ParentAssistant:
             turn_growth.setdefault(k, v)
         new_measurement_turn = "value" in turn_growth
 
+        # Inject rolling conversation memory into the tool/RAG turn (was unused before).
+        from assistant.settings import get_settings
+
+        _s = get_settings()
+        mem_ctx = self.chat_memory.build_context(
+            session_id,
+            window=_s.nestling_history_window,
+            summary_trigger=_s.nestling_summary_trigger_turns,
+        )
+        ctx_parts = []
+        if mem_ctx.get("summary"):
+            ctx_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
+        if mem_ctx.get("recent_text"):
+            ctx_parts.append(f"[RECENT_CHAT]\n{mem_ctx['recent_text']}")
+        contextual_query = en_message
+        if ctx_parts:
+            contextual_query = "\n\n".join(ctx_parts) + f"\n\n[CURRENT_USER]\n{en_message}"
+
+        # Persist typed facts from slots (provenance for later recall)
+        for fact_key in (
+            "sex",
+            "measure",
+            "weeks",
+            "age_months",
+            "value",
+            "gestational_age_weeks",
+            "chart_standard",
+            "child_id",
+        ):
+            if slots.get(fact_key) is not None:
+                self.chat_memory.upsert_fact(
+                    session_id, fact_key, slots[fact_key], provenance="slot"
+                )
+
         tool_block = self.run_tools(
-            en_message,
+            contextual_query,
             slots=slots,
             user_message=en_message,
             intents=intents,
@@ -973,23 +965,24 @@ class ParentAssistant:
             res = tc.get("result") or {}
             if res.get("ok") and tc["name"] in {"growth_percentile", "overlay_growth_on_chart"}:
                 # Remember last plotted result for follow-up analysis questions
-                slots = self.chat_memory.merge_slots(
-                    session_id,
-                    {
-                        "last_centile": res.get("centile"),
-                        "last_z_score": res.get("z_score"),
-                        "last_track_status": res.get("track_status"),
-                        "last_measure": res.get("measure"),
-                        "last_value": res.get("value"),
-                        "last_age_months": res.get("age_months"),
-                        "last_chart_standard": res.get("chart_standard"),
-                        "want_overlay": True,
-                    },
-                )
+                age_m = res.get("age_months")
+                slot_update = {
+                    "last_centile": res.get("centile"),
+                    "last_z_score": res.get("z_score"),
+                    "last_track_status": res.get("track_status"),
+                    "last_measure": res.get("measure"),
+                    "last_value": res.get("value"),
+                    "last_chart_standard": res.get("chart_standard"),
+                    "want_overlay": True,
+                }
+                if age_m is not None:
+                    slot_update["last_age_months"] = age_m
+                    slot_update["age_months"] = age_m
+                slots = self.chat_memory.merge_slots(session_id, slot_update)
                 if child_id and res.get("value") is not None and new_measurement_turn:
                     store_weeks = res.get("weeks")
-                    if store_weeks is None and res.get("age_months") is not None:
-                        store_weeks = float(res["age_months"]) * 4.345
+                    if store_weeks is None and age_m is not None:
+                        store_weeks = float(age_m) * weeks_per_month()
                     self.db.add_growth(
                         child_id,
                         weeks=store_weeks if store_weeks is not None else 0.0,
@@ -998,6 +991,7 @@ class ParentAssistant:
                         z_score=res.get("z_score"),
                         centile=res.get("centile"),
                         track_status=res.get("track_status"),
+                        age_months=float(age_m) if age_m is not None else None,
                     )
                     self.refresh_child_index(child_id)
 
@@ -1009,12 +1003,16 @@ class ParentAssistant:
             "tools": tool_block,
             "ui_lang": reply_lang,
             "models": {
-                "tool_calling": XLAM_MODEL_ID,
+                "tool_calling": self.tool_caller.model_id,
                 "tool_calling_loaded": bool(self.tool_caller.enabled),
-                "rag": "PleIAs/Pleias-RAG-1B",
-                "rag_loaded": bool(self.use_pleias),
+                "rag": get_settings().nestling_llm_model,
+                "rag_loaded": bool(self.use_llm),
             },
         }
+
+        # Snapshot prior thread before we overwrite topic for this turn.
+        prior_med = str(slots.get("last_medical_query") or "").strip()
+        prior_topic = str(slots.get("last_topic") or "").lower()
 
         if "growth_analysis" in intents:
             snap = latest_growth_snapshot(self.db, child_id, slots)
@@ -1024,7 +1022,121 @@ class ParentAssistant:
                 out["growth_analysis"] = {"missing": True}
 
         if "medical" in intents:
-            out["medical_rag"] = self.ask_medical(en_message)
+            # Soft follow-ups retrieve against last_medical_query; new concerns use
+            # the current message. No closed topic taxonomy.
+            from assistant.agent.intents import (
+                AFFIRM_RE as _AFFIRM,
+                ANALYZE_GROWTH_RE as _ANALYZE,
+                MEDICAL_FOLLOWUP_RE as _MED_FU,
+                _is_soft_followup,
+            )
+
+            memory_parts: list[str] = []
+            if mem_ctx.get("summary"):
+                memory_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
+            if mem_ctx.get("recent_text"):
+                recent = mem_ctx["recent_text"]
+                if len(recent) > 1200:
+                    recent = recent[-1200:]
+                memory_parts.append(f"[RECENT_CHAT]\n{recent}")
+
+            followup_hit = bool(_MED_FU.search(en_message) or _MED_FU.search(user_message or ""))
+            affirm = bool(_AFFIRM.search(en_message) or _AFFIRM.search(user_message or ""))
+            analyze = bool(_ANALYZE.search(en_message) or _ANALYZE.search(user_message or ""))
+            soft = _is_soft_followup(
+                en_message,
+                followup_hit=followup_hit,
+                affirm=affirm,
+                analyze=analyze,
+                prior_query=prior_med,
+            )
+            continuing = bool(prior_med and soft)
+
+            # CURRENT_USER drives MedicalRAG — soft follow-ups keep prior domain via
+            # last_medical_query; hard switches use the new user message alone.
+            if continuing:
+                user_parts = [f"{prior_med}\nFollow-up: {en_message}"]
+                if user_message and user_message.strip() and user_message.strip() != en_message.strip():
+                    user_parts.append(f"Follow-up (original): {user_message.strip()}")
+            else:
+                user_parts = [en_message]
+                if user_message and user_message.strip() and user_message.strip() != en_message.strip():
+                    user_parts.append(user_message.strip())
+
+            known_age = resolve_known_age_months(slots, child_id, self.db)
+            if known_age is not None:
+                # Persist so follow-ups and feeding bands stay consistent
+                slots = self.chat_memory.merge_slots(
+                    session_id,
+                    {"age_months": known_age, "last_age_months": known_age},
+                )
+            user_block = "\n".join(user_parts)
+            if known_age is not None:
+                user_block += (
+                    f"\nKnown chronological age: {known_age:.1f} months. "
+                    f"Use ONLY this age for care guidance. "
+                    f"Never invent a different age from care-note titles (e.g. do not say "
+                    f"7-month-old if this age is ~13 months)."
+                )
+            if slots.get("sex"):
+                user_block += f"\nKnown child sex: {slots['sex']}."
+            ga = slots.get("gestational_age_weeks")
+            if ga is not None:
+                try:
+                    if float(ga) < 37:
+                        user_block += (
+                            f"\nBorn preterm at {float(ga):.0f} weeks GA; "
+                            f"use chronological age above for age-based care guidance."
+                        )
+                except (TypeError, ValueError):
+                    pass
+
+            med_query = ""
+            if memory_parts:
+                med_query = "\n\n".join(memory_parts) + "\n\n"
+            med_query += f"[CURRENT_USER]\n{user_block}"
+            out["medical_rag"] = self.ask_medical(med_query)
+
+        # Persist thread topic so the *next* turn can continue medical care.
+        # Soft follow-ups keep prior last_medical_query; new concerns replace it.
+        from assistant.agent.intents import (
+            AFFIRM_RE as _AFFIRM2,
+            ANALYZE_GROWTH_RE as _ANALYZE2,
+            MEDICAL_FOLLOWUP_RE as _MED_FU2,
+            _NON_CARE_TOPICS,
+            _is_soft_followup as _soft_fu,
+            topic_slug_from_query,
+        )
+
+        topic = _infer_last_topic(intents, en_message)
+        thread_slots: dict[str, Any] = {
+            "last_intents": sorted(intents),
+        }
+        prior_care = prior_topic if prior_topic not in _NON_CARE_TOPICS else ""
+        fu_hit = bool(_MED_FU2.search(en_message) or _MED_FU2.search(user_message or ""))
+        soft_turn = _soft_fu(
+            en_message,
+            followup_hit=fu_hit,
+            affirm=bool(_AFFIRM2.search(en_message)),
+            analyze=bool(_ANALYZE2.search(en_message)),
+            prior_query=prior_med,
+        )
+        if "medical" in intents or "screening" in intents:
+            if soft_turn and prior_med and prior_care:
+                thread_slots["last_topic"] = prior_care
+                thread_slots["last_medical_query"] = prior_med[:500]
+            else:
+                thread_slots["last_topic"] = topic_slug_from_query(en_message) or topic
+                thread_slots["last_medical_query"] = en_message.strip()[:500]
+        elif topic == "chat" and prior_care:
+            # Don't wipe an open care thread on a stray chat miss.
+            thread_slots["last_topic"] = prior_care
+            if prior_med:
+                thread_slots["last_medical_query"] = prior_med[:500]
+        else:
+            thread_slots["last_topic"] = topic
+        slots = self.chat_memory.merge_slots(session_id, thread_slots)
+        out["slots"] = slots
         # Prefer deterministic child summary tool; skip noisy child-RAG dump when summary exists
         if child_id and "history" in intents:
             has_summary = any(
@@ -1035,6 +1147,12 @@ class ParentAssistant:
                 out["child_rag"] = self.ask_child(child_id, en_message)
 
         missing = []
+        needs_ga = any(
+            (tc.get("result") or {}).get("needs_gestational_age")
+            for tc in tool_block.get("tool_calls") or []
+        )
+        if needs_ga:
+            missing.append("gestational_age_weeks (or say preterm/term)")
         if "growth" in intents:
             for key in ("sex", "measure"):
                 if key not in slots:
@@ -1044,6 +1162,12 @@ class ParentAssistant:
             if "value" not in slots:
                 missing.append("value")
         out["missing_slots"] = missing
+        out["needs_gestational_age"] = needs_ga
+        out["memory"] = {
+            "summary": mem_ctx.get("summary") or "",
+            "recent_turns": len((mem_ctx.get("recent_text") or "").splitlines()),
+            "facts": list((mem_ctx.get("facts") or {}).keys()),
+        }
         out["explain_measure"] = bool(
             MEASURE_EXPLAIN_RE.search(user_message) or MEASURE_EXPLAIN_RE.search(en_message)
         )
@@ -1111,8 +1235,30 @@ class ParentAssistant:
             or slots.get("value") is not None
             or out.get("growth_analysis")
         )
+        active_medical = bool(
+            slots.get("last_medical_query")
+            and str(slots.get("last_topic") or "").lower()
+            not in {
+                "growth",
+                "growth_analysis",
+                "help",
+                "chat",
+                "history",
+                "reassure",
+                "slot_update",
+                "",
+            }
+        ) or bool(set(slots.get("last_intents") or []) & {"medical", "screening"})
 
-        if "reassure" in intents:
+        if out.get("needs_gestational_age"):
+            parts.append(
+                "برای انتخاب درست نمودار رشد (نارس / طبیعی) سن بارداری هنگام تولد را بگویید "
+                "(مثلاً ۳۲ هفته)، یا بنویسید نارس / طبیعی."
+                if fa
+                else "To pick the right growth chart (preterm vs term), please share gestational age "
+                "at birth (e.g. 32 weeks), or say preterm / term."
+            )
+        elif "reassure" in intents:
             parts.append(
                 "بله — با توجه به حرف‌تان، فعلاً جای نگرانی فوری به نظر نمی‌رسد. "
                 "کنار شما هستم؛ اگر چیزی عوض شد بگویید."
@@ -1211,6 +1357,7 @@ class ParentAssistant:
             "chat" in intents
             and not out.get("tools", {}).get("tool_calls")
             and not out.get("medical_rag")
+            and not active_medical
         ):
             parts.append(open_chat_turn(fa=fa, has_growth=has_growth))
 
@@ -1252,6 +1399,9 @@ class ParentAssistant:
                 summary = res.get("summary") or ""
                 parts.append(child_summary_chat(summary, fa=fa))
             elif res.get("ok") is False and res.get("detail"):
+                # Avoid double-speaking when we already asked for gestational age
+                if out.get("needs_gestational_age") and res.get("needs_gestational_age"):
+                    continue
                 parts.append(
                     ("متأسفم، مشکلی پیش آمد: " if fa else "Sorry, something went wrong: ")
                     + str(res["detail"])
@@ -1268,9 +1418,16 @@ class ParentAssistant:
 
         if out.get("medical_rag"):
             ans = out["medical_rag"].get("answer", "")
+            mode = (out["medical_rag"].get("mode") or "").lower()
             if fa and ans:
                 ans = translate_en_to_fa(ans)
-            parts.append(medical_chat_answer(ans, fa=fa))
+            parts.append(
+                medical_chat_answer(
+                    ans,
+                    fa=fa,
+                    from_llm="openai" in mode or "llm" in mode,
+                )
+            )
 
         if "screening" in intents and "medical" in intents:
             parts.append(
@@ -1286,7 +1443,16 @@ class ParentAssistant:
                 seen.add(p)
                 uniq.append(p)
         if not uniq:
-            uniq.append(open_chat_turn(fa=fa, has_growth=has_growth))
+            if active_medical and not out.get("medical_rag"):
+                uniq.append(
+                    "بله — درباره همان موضوع مراقبتی ادامه می‌دهیم. کمی بیشتر بگویید "
+                    "(مثلاً چه کلمه‌هایی می‌گوید یا چه چیزی نگران‌تان کرده)."
+                    if fa
+                    else "Happy to keep going on that care topic — tell me a bit more "
+                    "(for example what words she says, or what still worries you)."
+                )
+            else:
+                uniq.append(open_chat_turn(fa=fa, has_growth=has_growth))
         return "\n\n".join(uniq)
 
 

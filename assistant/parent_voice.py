@@ -22,7 +22,7 @@ def _first_sentences(text: str, max_sentences: int = 3, max_chars: int = 520) ->
     return " ".join(out)
 
 
-def medical_chat_answer(raw: str, *, fa: bool = False) -> str:
+def medical_chat_answer(raw: str, *, fa: bool = False, from_llm: bool = False) -> str:
     """Turn RAG extract / model text into a short parent chat reply."""
     text = (raw or "").strip()
     if not text:
@@ -33,24 +33,35 @@ def medical_chat_answer(raw: str, *, fa: bool = False) -> str:
     # Strip dump headers / citation bullets
     text = re.sub(r"(?i)^based on retrieved sources:\s*", "", text)
     text = re.sub(r"(?i)^بر اساس منابع بازیابی شده:\s*", "", text)
+    text = re.sub(r"(?i)^from our care notes[^:]*:\s*", "", text)
     text = re.sub(r"(?m)^-\s*\([^)]+\)\s*", "", text)
     text = re.sub(r"(?m)^-\s*[^:]+:\s*", "", text)
     text = re.sub(r"(?i)\n?for diagnosis or treatment decisions.*?$", "", text)
     text = re.sub(r"(?i)\n?برای تصمیم.?گیری.*?$", "", text)
+    text = re.sub(r"(?i)\[LLM unavailable:.*?\]", "", text)
     text = re.sub(r"^#+\s*", "", text)
-    body = _first_sentences(text, max_sentences=4, max_chars=650)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if from_llm:
+        # Keep generative answers intact (light trim only)
+        body = text[:1200].strip() if len(text) > 1200 else text
+        if fa:
+            return f"{body}\n\nبرای تشخیص یا درمان حتماً با متخصص کودکان مشورت کنید."
+        return f"{body}\n\nFor diagnosis or treatment, please check with your pediatrician."
+
+    body = _first_sentences(text, max_sentences=3, max_chars=480)
     if not body:
-        body = text[:500]
+        body = text[:420]
 
     if fa:
         return (
             f"{body}\n\n"
-            "اگر بخواهید، می‌توانم ساده‌تر توضیح بدهم، یا درباره رشد/خواب/آهن بپرسیم. "
+            "اگر بخواهید، می‌توانم ساده‌تر توضیح بدهم. "
             "برای تشخیص یا درمان حتماً با متخصص کودکان مشورت کنید."
         )
     return (
         f"{body}\n\n"
-        "Want me to simplify that, or talk about growth, sleep, or feeding next? "
+        "Want me to simplify that, or talk about something else next? "
         "For diagnosis or treatment, please check with your pediatrician."
     )
 
@@ -147,12 +158,12 @@ def open_chat_turn(*, fa: bool = False, has_growth: bool = False) -> str:
     if has_growth:
         if fa:
             return (
-                "اینجام و گوش می‌دهم. اگر درباره همان اندازه‌ای است که دیدیم بگویید «تحلیلش کن»؛ "
-                "وگرنه از خواب، آهن، تغذیه یا حرف زدن بگویید — هرچه ذهنتان را گرفته."
+                "گوش می‌دهم. می‌توانیم درباره همان اندازه‌گیری حرف بزنیم، "
+                "یا هر نگرانی مراقبتی مثل زخم، خواب، آهن یا تغذیه را بگویید."
             )
         return (
-            "I’m here and listening. If it’s about the measurement we just looked at, say “analyze that”; "
-            "otherwise tell me about sleep, iron, feeding, talking — whatever’s on your mind."
+            "I’m listening. We can revisit the measurement we just looked at, "
+            "or ask about any care concern — a scar or wound, sleep, iron, feeding, talking."
         )
     if fa:
         return (

@@ -1,11 +1,8 @@
 """
-WHO Child Growth Standards (0–24 months) — term / طبیعی infants.
+WHO Child Growth Standards (0–24 months) — term infants.
 
-LMS parameters from WHO Child Growth Standards (weight-for-age, length-for-age,
-head circumference-for-age). Used when gestational age at birth ≥ 37 weeks.
-
+LMS parameters loaded from config/who_lms.json (verbatim from prior inline tables).
 Z = ((value/M)^L - 1) / (L*S)  when L≠0;  else ln(value/M)/S
-Centile via normal CDF.
 """
 
 from __future__ import annotations
@@ -13,113 +10,99 @@ from __future__ import annotations
 import math
 from typing import Literal
 
+from assistant.refdata import who_lms as _who_lms_cfg
+
 Sex = Literal["male", "female"]
 Measure = Literal["weight", "length", "head_circumference"]
 
-# Monthly LMS: age_months -> (L, M, S). Compact published WHO anchors.
-# Sources: WHO Child Growth Standards (2006).
-
-_WHO_WFA_M: dict[float, tuple[float, float, float]] = {
-    0: (-0.0631, 3.3464, 0.14602),
-    1: (0.0348, 4.4709, 0.13395),
-    2: (0.1296, 5.5675, 0.12385),
-    3: (0.1967, 6.3762, 0.11727),
-    4: (0.2374, 7.0023, 0.11316),
-    5: (0.2601, 7.5105, 0.11080),
-    6: (0.2701, 7.9340, 0.10958),
-    9: (0.2497, 8.9328, 0.10919),
-    12: (0.2036, 9.6479, 0.10859),
-    18: (0.0804, 10.9046, 0.10837),
-    24: (-0.0391, 12.1515, 0.10959),
-}
-
-_WHO_WFA_F: dict[float, tuple[float, float, float]] = {
-    0: (-0.0631, 3.2322, 0.14171),
-    1: (0.0018, 4.1871, 0.13724),
-    2: (0.0544, 5.1282, 0.13002),
-    3: (0.0944, 5.8458, 0.12619),
-    4: (0.1199, 6.4237, 0.12402),
-    5: (0.1339, 6.8985, 0.12274),
-    6: (0.1395, 7.2970, 0.12204),
-    9: (0.1258, 8.2254, 0.12181),
-    12: (0.0902, 8.9481, 0.12215),
-    18: (-0.0116, 10.1220, 0.12337),
-    24: (-0.1257, 11.4800, 0.12579),
-}
-
-_WHO_LFA_M: dict[float, tuple[float, float, float]] = {
-    0: (1.0, 49.8842, 0.03795),
-    1: (1.0, 54.7244, 0.03557),
-    2: (1.0, 58.4249, 0.03424),
-    3: (1.0, 61.4292, 0.03328),
-    4: (1.0, 63.8860, 0.03291),
-    5: (1.0, 65.9026, 0.03291),
-    6: (1.0, 67.6236, 0.03305),
-    9: (1.0, 72.0, 0.0335),
-    12: (1.0, 75.7488, 0.03448),
-    18: (1.0, 82.0, 0.0355),
-    24: (1.0, 87.0, 0.0360),
-}
-
-_WHO_LFA_F: dict[float, tuple[float, float, float]] = {
-    0: (1.0, 49.1477, 0.03790),
-    1: (1.0, 53.6872, 0.03640),
-    2: (1.0, 57.0673, 0.03568),
-    3: (1.0, 59.8029, 0.03520),
-    4: (1.0, 62.0899, 0.03486),
-    5: (1.0, 64.0301, 0.03463),
-    6: (1.0, 65.7311, 0.03448),
-    9: (1.0, 70.0, 0.0348),
-    12: (1.0, 74.0, 0.0352),
-    18: (1.0, 80.5, 0.0360),
-    24: (1.0, 85.5, 0.0365),
-}
-
-_WHO_HC_M: dict[float, tuple[float, float, float]] = {
-    0: (1.0, 34.4618, 0.03686),
-    1: (1.0, 37.2759, 0.03135),
-    2: (1.0, 39.1285, 0.02976),
-    3: (1.0, 40.5135, 0.02904),
-    6: (1.0, 43.3, 0.0285),
-    12: (1.0, 46.1, 0.0280),
-    24: (1.0, 48.4, 0.0275),
-}
-
-_WHO_HC_F: dict[float, tuple[float, float, float]] = {
-    0: (1.0, 33.8787, 0.03496),
-    1: (1.0, 36.5462, 0.03054),
-    2: (1.0, 38.2521, 0.02933),
-    3: (1.0, 39.5324, 0.02882),
-    6: (1.0, 42.2, 0.0282),
-    12: (1.0, 44.9, 0.0278),
-    24: (1.0, 47.2, 0.0272),
-}
-
 
 def _tables(sex: Sex, measure: Measure) -> dict[float, tuple[float, float, float]]:
-    male = sex == "male"
-    if measure == "weight":
-        return _WHO_WFA_M if male else _WHO_WFA_F
-    if measure == "length":
-        return _WHO_LFA_M if male else _WHO_LFA_F
-    return _WHO_HC_M if male else _WHO_HC_F
+    raw = _who_lms_cfg()["tables"][measure][sex]
+    out: dict[float, tuple[float, float, float]] = {}
+    for age_s, row in raw.items():
+        out[float(age_s)] = (float(row["L"]), float(row["M"]), float(row["S"]))
+    return out
 
 
-def _interp_lms(table: dict[float, tuple[float, float, float]], months: float) -> tuple[float, float, float]:
-    months = max(0.0, min(24.0, float(months)))
+def _anchor_sources(sex: Sex, measure: Measure) -> dict[float, str]:
+    raw = _who_lms_cfg()["tables"][measure][sex]
+    return {float(age_s): str(row.get("source", "unknown")) for age_s, row in raw.items()}
+
+
+def age_bounds() -> tuple[float, float]:
+    cfg = _who_lms_cfg()
+    return float(cfg["age_months_min"]), float(cfg["age_months_max"])
+
+
+class AgeOutOfRangeError(ValueError):
+    """WHO LMS tables only cover a fixed age window."""
+
+
+def _interp_lms(
+    table: dict[float, tuple[float, float, float]],
+    months: float,
+    *,
+    strict: bool = True,
+) -> tuple[float, float, float, dict]:
+    """
+    Linear interpolate L, M, S.
+    When strict=True (default), ages outside [min,max] raise AgeOutOfRangeError
+    instead of silently clamping.
+    """
+    lo, hi = age_bounds()
+    months_f = float(months)
+    meta: dict = {"interpolated": False, "clamped": False, "anchors": []}
+    if months_f < lo - 1e-9 or months_f > hi + 1e-9:
+        if strict:
+            raise AgeOutOfRangeError(
+                f"WHO term charts support ages {lo}–{hi} months; got {months_f}."
+            )
+        months_f = max(lo, min(hi, months_f))
+        meta["clamped"] = True
+
     keys = sorted(table.keys())
-    if months <= keys[0]:
-        return table[keys[0]]
-    if months >= keys[-1]:
-        return table[keys[-1]]
+    if months_f <= keys[0]:
+        meta["anchors"] = [keys[0]]
+        L, M, S = table[keys[0]]
+        return L, M, S, meta
+    if months_f >= keys[-1]:
+        meta["anchors"] = [keys[-1]]
+        L, M, S = table[keys[-1]]
+        return L, M, S, meta
     for i in range(len(keys) - 1):
         a, b = keys[i], keys[i + 1]
-        if a <= months <= b:
-            t = (months - a) / (b - a) if b != a else 0.0
+        if a <= months_f <= b:
+            t = (months_f - a) / (b - a) if b != a else 0.0
             La, Ma, Sa = table[a]
             Lb, Mb, Sb = table[b]
-            return (La + t * (Lb - La), Ma + t * (Mb - Ma), Sa + t * (Sb - Sa))
-    return table[keys[-1]]
+            meta["interpolated"] = abs(t) > 1e-12 and abs(t - 1.0) > 1e-12
+            meta["anchors"] = [a, b]
+            return (La + t * (Lb - La), Ma + t * (Mb - Ma), Sa + t * (Sb - Sa), meta)
+    L, M, S = table[keys[-1]]
+    meta["anchors"] = [keys[-1]]
+    return L, M, S, meta
+
+
+def precision_meta(sex: Sex, measure: Measure, age_months: float) -> dict:
+    """Provenance / precision note for API responses."""
+    _, _, _, meta = _interp_lms(_tables(sex, measure), age_months, strict=True)
+    sources = _anchor_sources(sex, measure)
+    anchor_sources = [sources.get(a, "unknown") for a in meta["anchors"]]
+    note_parts = []
+    if meta["interpolated"]:
+        note_parts.append(
+            f"LMS interpolated between months {meta['anchors'][0]} and {meta['anchors'][1]}"
+        )
+    if any(s == "rounded_approximation" for s in anchor_sources):
+        note_parts.append(
+            "one or more LMS anchors are rounded approximations (not full WHO monthly tables)"
+        )
+    return {
+        "interpolated": meta["interpolated"],
+        "anchors": meta["anchors"],
+        "anchor_sources": anchor_sources,
+        "precision_note": "; ".join(note_parts) if note_parts else None,
+    }
 
 
 def _norm_cdf(z: float) -> float:
@@ -179,7 +162,7 @@ def _norm_ppf(p: float) -> float:
 
 
 def z_score(sex: Sex, measure: Measure, age_months: float, value: float) -> float:
-    L, M, S = _interp_lms(_tables(sex, measure), age_months)
+    L, M, S, _ = _interp_lms(_tables(sex, measure), age_months)
     y = float(value)
     if y <= 0:
         raise ValueError("value must be positive")
@@ -193,18 +176,21 @@ def centile_from_measurement(sex: Sex, measure: Measure, age_months: float, valu
 
 
 def percentile(sex: Sex, measure: Measure, age_months: float, p: float) -> float:
-    L, M, S = _interp_lms(_tables(sex, measure), age_months)
+    L, M, S, _ = _interp_lms(_tables(sex, measure), age_months)
     z = _norm_ppf(float(p) / 100.0)
     if abs(L) < 1e-9:
         return M * math.exp(S * z)
     return M * ((1.0 + L * S * z) ** (1.0 / L))
 
 
-CHART_PERCENTILES = (3, 10, 50, 90, 97)
+CHART_PERCENTILES = tuple(_who_lms_cfg().get("chart_percentiles", (3, 10, 50, 90, 97)))
 
 
 def classify_maturity(gestational_age_weeks: float | None) -> str:
-    """Return 'preterm' (نارس) if GA < 37, else 'term' (طبیعی). Unknown → preterm-safe INTERGROWTH if PMA given."""
+    """Return 'preterm' if GA < 37, 'term' if GA ≥ 37, 'unknown' if GA missing."""
     if gestational_age_weeks is None:
         return "unknown"
-    return "preterm" if float(gestational_age_weeks) < 37.0 else "term"
+    from assistant.refdata import clinical_bounds
+
+    thr = float(clinical_bounds().get("preterm_ga_threshold_weeks", 37))
+    return "preterm" if float(gestational_age_weeks) < thr else "term"

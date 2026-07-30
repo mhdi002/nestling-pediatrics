@@ -16,26 +16,28 @@ sys.path.insert(0, str(ROOT))
 
 import intergrowth_preterm_equations as ig
 from assistant.tools import who_term_equations as who
-from assistant.config import (
-    ASQ_DEFAULT_CUTOFF,
-    ASQ_SCORE_NOT_YET,
-    ASQ_SCORE_SOMETIMES,
-    ASQ_SCORE_YES,
-    EN_DIR,
-    EXTRACTED,
-    OVERLAY_DIR,
-)
+from assistant.config import EN_DIR, EXTRACTED, OVERLAY_DIR
+from assistant.refdata import asq_scoring, clinical_bounds, mchat_config, weeks_per_month
 
 AnswerASQ = Literal["yes", "sometimes", "not_yet", "بله", "گاهی", "هنوز نه", "No", "Yes", "Sometimes", "Not yet"]
 
-# Clinical input bounds (never invent; reject out-of-range)
-WEEKS_MIN = ig.AGE_WEEKS_MIN  # 27
-WEEKS_MAX = ig.AGE_WEEKS_MAX  # 64
+
+def _bounds() -> dict[str, Any]:
+    return clinical_bounds()
+
+
+def _wpm() -> float:
+    return weeks_per_month()
+
+
+# Clinical input bounds (from config/clinical_bounds.json)
+_b0 = _bounds()
+WEEKS_MIN = float(_b0.get("intergrowth_weeks_min", ig.AGE_WEEKS_MIN))
+WEEKS_MAX = float(_b0.get("intergrowth_weeks_max", ig.AGE_WEEKS_MAX))
 VALUE_RANGES = {
-    "weight": (0.2, 20.0),  # kg
-    "length": (20.0, 90.0),  # cm
-    "head_circumference": (15.0, 55.0),  # cm
+    k: (float(v[0]), float(v[1])) for k, v in _b0["value_ranges"].items()
 }
+WEEKS_PER_MONTH = _wpm()
 
 # Optional ChildMemoryDB injected by ParentAssistant for get_child_summary
 _CHILD_DB = None
@@ -128,33 +130,59 @@ def _norm_asq_answer(ans: str) -> str:
     return mapping[a]
 
 
-def score_asq_domain(answers: list[str]) -> dict[str, Any]:
-    """Score one ASQ domain. Official points: Yes=10, Sometimes=5, Not yet=0."""
+def _asq_cutoff(domain: str | None = None, age_months: int | None = None) -> tuple[float, str]:
+    cfg = asq_scoring()
+    source = str(cfg.get("cutoff_source", "unverified_default"))
+    domain_cutoffs = cfg.get("domain_cutoffs") or {}
+    if age_months is not None and domain:
+        key = f"{int(age_months)}m"
+        by_age = domain_cutoffs.get(key) or domain_cutoffs.get(str(age_months))
+        if isinstance(by_age, dict) and domain in by_age:
+            return float(by_age[domain]), source
+    return float(cfg.get("default_cutoff", 30)), source
+
+
+def score_asq_domain(
+    answers: list[str],
+    *,
+    domain: str | None = None,
+    age_months: int | None = None,
+) -> dict[str, Any]:
+    """Score one ASQ domain. Points: Yes/Sometimes/Not yet from config/asq_scoring.json."""
     if not isinstance(answers, list) or not answers:
         return tool_error("score_asq_domain", "answers must be a non-empty list of Yes/Sometimes/Not yet.")
+    cfg = asq_scoring()
+    yes_pts = int(cfg["score_yes"])
+    sometimes_pts = int(cfg["score_sometimes"])
+    not_yet_pts = int(cfg["score_not_yet"])
     points = []
     try:
         for ans in answers:
             key = _norm_asq_answer(ans)
             points.append(
-                {"yes": ASQ_SCORE_YES, "sometimes": ASQ_SCORE_SOMETIMES, "not_yet": ASQ_SCORE_NOT_YET}[key]
+                {"yes": yes_pts, "sometimes": sometimes_pts, "not_yet": not_yet_pts}[key]
             )
     except ValueError as exc:
         return tool_error("score_asq_domain", str(exc))
     total = sum(points)
-    cutoff = ASQ_DEFAULT_CUTOFF
+    cutoff, cutoff_source = _asq_cutoff(domain=domain, age_months=age_months)
     return {
         "ok": True,
         "item_scores": points,
         "total": total,
-        "max": 10 * len(answers),
+        "max": yes_pts * len(answers),
         "cutoff": cutoff,
+        "cutoff_source": cutoff_source,
         "below_cutoff": total < cutoff,
         "interpretation": "below_cutoff_refer" if total < cutoff else "above_cutoff_monitor",
     }
 
 
-def score_asq_questionnaire(domain_answers: dict[str, list[str]]) -> dict[str, Any]:
+def score_asq_questionnaire(
+    domain_answers: dict[str, list[str]],
+    *,
+    age_months: int | None = None,
+) -> dict[str, Any]:
     """
     domain_answers: {domain_id: [answers...]} for communication, gross_motor, etc.
     Overall section is yes/no concern items — stored separately, not point-scored here.
@@ -163,10 +191,11 @@ def score_asq_questionnaire(domain_answers: dict[str, list[str]]) -> dict[str, A
         return tool_error("score_asq_questionnaire", "domain_answers must be a non-empty object.")
     domains = {}
     referrals = []
+    cutoff_source = asq_scoring().get("cutoff_source", "unverified_default")
     for dom, answers in domain_answers.items():
         if dom == "overall":
             continue
-        result = score_asq_domain(answers)
+        result = score_asq_domain(answers, domain=dom, age_months=age_months)
         if result.get("ok") is False:
             return {**result, "tool": "score_asq_questionnaire", "domain": dom}
         domains[dom] = result
@@ -178,26 +207,31 @@ def score_asq_questionnaire(domain_answers: dict[str, list[str]]) -> dict[str, A
         "domains": domains,
         "referral_domains": referrals,
         "needs_referral": bool(referrals),
+        "cutoff_source": cutoff_source,
+        "cutoff_note": asq_scoring().get("cutoff_note"),
+        "age_months": age_months,
         "summary": (
             f"ASQ scored {len(domains)} domains; "
             f"{'referral suggested for: ' + ', '.join(referrals) if referrals else 'no domain below cutoff'}"
+            + (f" [cutoffs: {cutoff_source}]" if cutoff_source != "official_asq3" else "")
         ),
     }
 
 
-# M-CHAT-R: items where NO is the risk answer (failed) vs YES is risk.
-# Standard M-CHAT-R reverse-scored items: 2,5,12 (Yes = fail). Others: No = fail.
-MCHAT_REVERSE = {2, 5, 12}
+# M-CHAT-R reverse-scored items (Yes = fail) — from config/mchat.json
+MCHAT_REVERSE = set(int(x) for x in mchat_config()["reverse_items"])
 
 
 def score_mchat(answers: dict[int, str]) -> dict[str, Any]:
     """
     answers: {question_id: 'yes'|'no'|'آری'|'خیر'}
-    Returns fail count and risk tier per common M-CHAT-R rules:
-      0–2 low risk, 3–7 medium, 8–20 high (then follow-up interview for medium).
+    Returns fail count and risk tier from config/mchat.json.
     """
     if not isinstance(answers, dict) or not answers:
         return tool_error("score_mchat", "answers must be a non-empty map of question_id → yes/no.")
+    cfg = mchat_config()
+    reverse = set(int(x) for x in cfg["reverse_items"])
+    tiers = cfg["risk_tiers"]
     fails = []
     try:
         for qid, ans in answers.items():
@@ -207,7 +241,7 @@ def score_mchat(answers: dict[int, str]) -> dict[str, Any]:
             if not yes and not no:
                 return tool_error("score_mchat", f"Invalid M-CHAT answer for Q{qid}: {ans!r}")
             q = int(qid)
-            if q in MCHAT_REVERSE:
+            if q in reverse:
                 failed = yes
             else:
                 failed = no
@@ -216,9 +250,9 @@ def score_mchat(answers: dict[int, str]) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         return tool_error("score_mchat", f"Invalid answers payload: {exc}")
     n = len(fails)
-    if n <= 2:
+    if n <= int(tiers["low_max"]):
         risk = "low"
-    elif n <= 7:
+    elif n <= int(tiers["medium_max"]):
         risk = "medium"
     else:
         risk = "high"
@@ -229,7 +263,8 @@ def score_mchat(answers: dict[int, str]) -> dict[str, Any]:
         "total_failed": n,
         "risk": risk,
         "summary": f"M-CHAT-R: {n} failed items → {risk} risk",
-        "note": "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer.",
+        "note": cfg.get("note")
+        or "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer.",
     }
 
 
@@ -245,14 +280,59 @@ def _term_age_months_from_weeks(
     Smaller week counts are treated as weeks since birth.
     """
     w = float(weeks)
+    wpm = _wpm()
+    band = _bounds().get("term_pma_band", [37, 45])
     if gestational_age_weeks is not None:
         ga = float(gestational_age_weeks)
         if w + 1e-9 >= ga:
-            return max(0.0, w - ga) / 4.345
-        return w / 4.345
-    if 37.0 <= w <= 45.0:
-        return max(0.0, w - 40.0) / 4.345
-    return w / 4.345
+            return max(0.0, w - ga) / wpm
+        return w / wpm
+    if float(band[0]) <= w <= float(band[1]):
+        return max(0.0, w - 40.0) / wpm
+    return w / wpm
+
+
+def corrected_age_months(
+    chronological_age_months: float,
+    gestational_age_weeks: float | None,
+) -> dict[str, Any]:
+    """
+    ASQ / developmental screening: for preterm infants (GA < 37), use corrected age
+    until ~24 months chronological. Returns both ages and which to use for form selection.
+    """
+    chrono = float(chronological_age_months)
+    thr = float(_bounds().get("preterm_ga_threshold_weeks", 37))
+    if gestational_age_weeks is None:
+        return {
+            "chronological_age_months": chrono,
+            "corrected_age_months": None,
+            "age_for_questionnaire": chrono,
+            "used_corrected": False,
+            "note": "Gestational age unknown — using chronological age for ASQ form selection.",
+        }
+    ga = float(gestational_age_weeks)
+    if ga >= thr:
+        return {
+            "chronological_age_months": chrono,
+            "corrected_age_months": chrono,
+            "age_for_questionnaire": chrono,
+            "used_corrected": False,
+            "gestational_age_weeks": ga,
+        }
+    weeks_early = max(0.0, 40.0 - ga)
+    corrected = max(0.0, chrono - weeks_early / _wpm())
+    return {
+        "chronological_age_months": chrono,
+        "corrected_age_months": corrected,
+        "age_for_questionnaire": corrected,
+        "used_corrected": True,
+        "gestational_age_weeks": ga,
+        "weeks_premature": weeks_early,
+        "note": (
+            f"Preterm (GA {ga}w): ASQ form selected by corrected age "
+            f"{corrected:.1f} mo (chronological {chrono:.1f} mo)."
+        ),
+    }
 
 
 def resolve_chart_route(
@@ -263,18 +343,45 @@ def resolve_chart_route(
 ) -> dict[str, Any]:
     """
     Pick preterm (نارس / INTERGROWTH PMA) vs term (طبیعی / WHO months).
-    Parent does not need to know the category — GA on the child profile decides.
+
+    Unknown GA: chronological age_months → assume WHO term (disclosed);
+    weeks without GA → refuse (PMA vs life-weeks ambiguous).
     """
+    assumed_term = False
     if chart_standard in {"intergrowth_preterm", "who_term"}:
         std = chart_standard
         maturity = "preterm" if std == "intergrowth_preterm" else "term"
     else:
         maturity = who.classify_maturity(gestational_age_weeks)
-        if maturity == "term":
+        if maturity == "unknown":
+            if age_months is not None and weeks is None:
+                std = "who_term"
+                maturity = "term"
+                assumed_term = True
+            elif weeks is not None:
+                return tool_error(
+                    "resolve_chart_route",
+                    "Gestational age at birth is required when age is given in weeks "
+                    "(could be postmenstrual age for a preterm baby, or weeks of life). "
+                    "Please provide gestational_age_weeks, say preterm/term, or set "
+                    "chart_standard to who_term or intergrowth_preterm.",
+                    needs_gestational_age=True,
+                )
+            else:
+                return tool_error(
+                    "resolve_chart_route",
+                    "Gestational age at birth is required to choose WHO (term) vs INTERGROWTH "
+                    "(preterm) charts. Please provide gestational_age_weeks, or set "
+                    "chart_standard explicitly to who_term or intergrowth_preterm.",
+                    needs_gestational_age=True,
+                )
+        elif maturity == "term":
             std = "who_term"
         else:
-            # preterm or unknown with PMA weeks → INTERGROWTH
             std = "intergrowth_preterm"
+
+    who_lo = float(_bounds().get("who_age_months_min", 0))
+    who_hi = float(_bounds().get("who_age_months_max", 24))
 
     if std == "who_term":
         if age_months is None and weeks is not None:
@@ -286,9 +393,12 @@ def resolve_chart_route(
             )
         if age_months is None:
             return tool_error("resolve_chart_route", "Missing age for WHO term chart.")
-        if not (0.0 <= float(age_months) <= 24.0):
-            return tool_error("resolve_chart_route", "WHO term charts support 0–24 months.")
-        return {
+        if not (who_lo <= float(age_months) <= who_hi):
+            return tool_error(
+                "resolve_chart_route",
+                f"WHO term charts support {who_lo}–{who_hi} months; got {age_months}.",
+            )
+        out = {
             "ok": True,
             "maturity": "term",
             "maturity_label_en": "term",
@@ -297,36 +407,99 @@ def resolve_chart_route(
             "age_months": float(age_months),
             "weeks": None,
         }
+        if assumed_term:
+            out["assumed_term"] = True
+            out["assumption_note"] = (
+                "Gestational age unknown; used WHO term charts. "
+                "If the baby was born before 37 weeks, provide gestational age for INTERGROWTH."
+            )
+        return out
 
-    # INTERGROWTH preterm — postmenstrual age
-    pma = weeks
-    if pma is None and age_months is not None and gestational_age_weeks is not None:
-        pma = float(gestational_age_weeks) + float(age_months) * 4.345
+    # INTERGROWTH preterm — postmenstrual age (PMA).
+    # Slot extraction often sets weeks = age_months * wpm (postnatal weeks of life).
+    # Those must NOT be treated as PMA; prefer chronological age_months when present.
+    wpm = _wpm()
+    ig_lo = float(_bounds().get("intergrowth_weeks_min", 27))
+    ig_hi = float(_bounds().get("intergrowth_weeks_max", 64))
+    chrono: float | None = float(age_months) if age_months is not None else None
+    pma: float | None = None
+
+    weeks_looks_postnatal = False
+    if (
+        age_months is not None
+        and weeks is not None
+        and abs(float(weeks) - float(age_months) * wpm) <= 0.75
+    ):
+        weeks_looks_postnatal = True
+
+    if chrono is not None and gestational_age_weeks is not None:
+        pma = float(gestational_age_weeks) + chrono * wpm
+    elif weeks is not None and not weeks_looks_postnatal:
+        pma = float(weeks)
+        if gestational_age_weeks is not None and chrono is None:
+            chrono = max(0.0, pma - float(gestational_age_weeks)) / wpm
+    elif weeks is not None and weeks_looks_postnatal and gestational_age_weeks is not None:
+        pma = float(gestational_age_weeks) + float(age_months) * wpm
+    elif chrono is not None and gestational_age_weeks is None and weeks is None:
+        return tool_error(
+            "resolve_chart_route",
+            "Preterm growth needs birth gestational age (or postmenstrual weeks).",
+            needs_gestational_age=True,
+        )
+
     if pma is None:
         return tool_error(
             "resolve_chart_route",
             "Preterm growth needs postmenstrual weeks (or age months + birth GA).",
         )
+
+    # Past INTERGROWTH window → WHO chronological age (still disclose preterm maturity).
+    if pma > ig_hi + 1e-9 and chrono is not None:
+        if not (who_lo <= float(chrono) <= who_hi):
+            return tool_error(
+                "resolve_chart_route",
+                f"Age {chrono:.1f} months is outside WHO {who_lo}–{who_hi} months "
+                f"(and PMA {pma:.1f}w exceeds INTERGROWTH {ig_hi}w).",
+            )
+        return {
+            "ok": True,
+            "maturity": "preterm",
+            "maturity_label_en": "preterm",
+            "maturity_label_fa": "نارس",
+            "chart_standard": "who_term",
+            "age_months": float(chrono),
+            "weeks": None,
+            "pma_weeks": float(pma),
+            "note": (
+                f"PMA {pma:.1f}w exceeds INTERGROWTH range ({ig_lo}–{ig_hi}w); "
+                f"using WHO charts at chronological {chrono:.1f} months."
+            ),
+        }
+
     weeks_n = _validate_weeks(pma)
     if isinstance(weeks_n, dict):
         return weeks_n
+    if chrono is None and gestational_age_weeks is not None:
+        chrono = max(0.0, float(weeks_n) - float(gestational_age_weeks)) / wpm
     return {
         "ok": True,
-        "maturity": "preterm" if maturity != "unknown" else "preterm_assumed",
+        "maturity": "preterm",
         "maturity_label_en": "preterm",
         "maturity_label_fa": "نارس",
         "chart_standard": "intergrowth_preterm",
         "weeks": weeks_n,
-        "age_months": None,
+        # Always expose chronological months for medical/feeding (never leave null).
+        "age_months": float(chrono) if chrono is not None else None,
     }
 
 
 def _track_status(c: float) -> str:
-    if c < 3:
+    ts = _bounds().get("track_status", {})
+    if c < float(ts.get("investigate_below", 3)):
         return "below_3rd_investigate"
-    if c > 97:
+    if c > float(ts.get("investigate_above", 97)):
         return "above_97th_investigate"
-    if c < 10 or c > 90:
+    if c < float(ts.get("monitor_below", 10)) or c > float(ts.get("monitor_above", 90)):
         return "outer_centile_monitor"
     return "within_10_90"
 
@@ -384,7 +557,11 @@ def growth_percentile(
             weeks_n = route["weeks"]
             chart = {pct: ig.percentile(sex_n, meas_n, weeks_n, pct) for pct in ig.CHART_PERCENTILES}
             ref = "Villar et al. Lancet Glob Health 2015; INTERGROWTH-21st (preterm)"
-            age_label = f"{weeks_n}w PMA"
+            chrono = route.get("age_months")
+            if chrono is not None:
+                age_label = f"{weeks_n}w PMA (~{float(chrono):.1f} mo chronological)"
+            else:
+                age_label = f"{weeks_n}w PMA"
     except Exception as exc:
         return tool_error("growth_percentile", f"Equation evaluation failed: {exc}")
 
@@ -403,6 +580,21 @@ def growth_percentile(
         "units": {"weight": "kg", "length": "cm", "head_circumference": "cm"}[meas_n],
         "reference": ref,
     }
+    if route.get("assumed_term"):
+        out["assumed_term"] = True
+        out["assumption_note"] = route.get("assumption_note")
+    if route.get("note"):
+        out["note"] = route["note"]
+    if route.get("pma_weeks") is not None:
+        out["pma_weeks"] = route["pma_weeks"]
+    if route["chart_standard"] == "who_term":
+        try:
+            pmeta = who.precision_meta(sex_n, meas_n, route["age_months"])
+            out["precision_note"] = pmeta.get("precision_note")
+            out["lms_anchors"] = pmeta.get("anchors")
+            out["lms_anchor_sources"] = pmeta.get("anchor_sources")
+        except Exception:
+            pass
     if value_n is not None:
         if route["chart_standard"] == "who_term":
             z = who.z_score(sex_n, meas_n, route["age_months"], value_n)
@@ -431,6 +623,99 @@ def growth_percentile(
         else:
             out["requested_percentile_value"] = ig.percentile(sex_n, meas_n, route["weeks"], p)
     return out
+
+
+def growth_percentile_curves(
+    sex: str,
+    measure: str,
+    chart_standard: str | None = None,
+    gestational_age_weeks: float | None = None,
+    age_max: float | None = None,
+) -> dict[str, Any]:
+    """
+    Percentile curve points (P3/10/50/90/97) for client SVG charts.
+
+    WHO term → ages in months; INTERGROWTH preterm → postmenstrual ages in weeks.
+    """
+    sex_n = _validate_sex(sex)
+    if isinstance(sex_n, dict):
+        return sex_n
+    meas_n = _validate_measure(measure)
+    if isinstance(meas_n, dict):
+        return meas_n
+
+    if chart_standard in {"intergrowth_preterm", "who_term"}:
+        std = chart_standard
+    else:
+        maturity = who.classify_maturity(gestational_age_weeks)
+        std = "intergrowth_preterm" if maturity == "preterm" else "who_term"
+
+    pcts = list(ig.CHART_PERCENTILES)
+    step = 0.5
+
+    if std == "who_term":
+        who_lo, who_hi = who.age_bounds()
+        hi = float(age_max) if age_max is not None else who_hi
+        hi = max(who_lo, min(hi, who_hi))
+        ages = [i * step for i in range(0, int(hi / step) + 1) if i * step <= hi + 1e-9]
+        if ages and ages[-1] < hi:
+            ages.append(hi)
+        try:
+            curves = {
+                str(int(p)): [float(who.percentile(sex_n, meas_n, a, p)) for a in ages]
+                for p in pcts
+            }
+        except Exception as exc:
+            return tool_error("growth_curves", f"WHO curve evaluation failed: {exc}")
+        return tool_ok(
+            "growth_curves",
+            {
+                "sex": sex_n,
+                "measure": meas_n,
+                "chart_standard": std,
+                "age_unit": "months",
+                "ages": ages,
+                "percentiles": pcts,
+                "curves": curves,
+                "units": "kg" if meas_n == "weight" else "cm",
+                "gestational_age_weeks": gestational_age_weeks,
+                "age_max": hi,
+                "reference": "WHO Child Growth Standards (0–24 months)",
+            },
+        )
+
+    # INTERGROWTH preterm — PMA weeks
+    lo, hi_default = WEEKS_MIN, WEEKS_MAX
+    hi = float(age_max) if age_max is not None else hi_default
+    hi = max(lo, min(hi, hi_default))
+    ages = [i * step for i in range(int(lo / step), int(hi / step) + 1) if i * step <= hi + 1e-9]
+    if ages and ages[-1] < hi:
+        ages.append(hi)
+    try:
+        curves = {
+            str(int(p)): [float(ig.percentile(sex_n, meas_n, a, p)) for a in ages]
+            for p in pcts
+        }
+    except Exception as exc:
+        return tool_error("growth_curves", f"INTERGROWTH curve evaluation failed: {exc}")
+    return tool_ok(
+        "growth_curves",
+        {
+            "sex": sex_n,
+            "measure": meas_n,
+            "chart_standard": std,
+            "age_unit": "weeks",
+            "ages": ages,
+            "percentiles": pcts,
+            "curves": curves,
+            "units": "kg" if meas_n == "weight" else "cm",
+            "gestational_age_weeks": gestational_age_weeks,
+            "age_max": hi,
+            "reference": (
+                "Villar et al., Lancet Glob Health 2015;3:e681-91 (INTERGROWTH-21st)"
+            ),
+        },
+    )
 
 
 def overlay_growth_on_chart(
@@ -520,12 +805,28 @@ def overlay_growth_on_chart(
 
         unit = assessment["units"]
         ax.set_ylabel(f"{assessment['measure']} ({unit})")
+        # Include value so parents can tell replots apart; we still replace older files.
+        title = f"{title} · {value:g} {unit}"
         ax.set_title(title)
         ax.legend(loc="upper left")
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        name = f"overlay_{child_id or 'child'}_{assessment['measure']}_{tag}.png".replace(" ", "")
+        measure_key = str(assessment["measure"]).replace(" ", "")
+        value_tag = f"{value:g}".replace(".", "p")
+        name = (
+            f"overlay_{child_id or 'child'}_{measure_key}_{tag}_{value_tag}.png"
+        ).replace(" ", "")
         path = OVERLAY_DIR / name
+        # Keep one live chart per child+measure — remove stale conflicting overlays.
+        if child_id:
+            prefix = f"overlay_{child_id}_{measure_key}_"
+            for old in OVERLAY_DIR.glob(f"{prefix}*.png"):
+                if old.name == path.name:
+                    continue
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
         fig.savefig(path, dpi=140)
         plt.close(fig)
     except Exception as exc:
@@ -558,21 +859,61 @@ def _resolve_asq_path(age_months: int) -> Path | None:
     return None
 
 
-def list_asq_questions(age_months: int) -> dict[str, Any]:
-    """Load ASQ question text for a given age (months) from data/en or extracted/."""
+def _nearest_asq_age(target_months: float) -> int | None:
+    """Pick closest available ASQ interval to target age in months."""
+    available: list[int] = []
+    for base in (EN_DIR / "asq", EXTRACTED / "asq"):
+        if not base.is_dir():
+            continue
+        for p in base.glob("*m.json"):
+            try:
+                available.append(int(p.name.replace("m.json", "")))
+            except ValueError:
+                continue
+    if not available:
+        return None
+    available = sorted(set(available))
+    return min(available, key=lambda a: abs(a - float(target_months)))
+
+
+def list_asq_questions(
+    age_months: int | float,
+    *,
+    gestational_age_weeks: float | None = None,
+    use_corrected_age: bool = True,
+) -> dict[str, Any]:
+    """Load ASQ question text. For preterm infants, select form by corrected age."""
     try:
-        age = int(age_months)
+        chrono = float(age_months)
     except (TypeError, ValueError):
         return tool_error("list_asq_questions", f"Invalid age_months: {age_months!r}")
-    if age < 1 or age > 72:
-        return tool_error("list_asq_questions", f"age_months out of range: {age}")
+    if chrono < 0 or chrono > 72:
+        return tool_error("list_asq_questions", f"age_months out of range: {chrono}")
 
-    path = _resolve_asq_path(age)
+    age_info: dict[str, Any] = {
+        "chronological_age_months": chrono,
+        "corrected_age_months": None,
+        "age_for_questionnaire": chrono,
+        "used_corrected": False,
+    }
+    if use_corrected_age and gestational_age_weeks is not None:
+        age_info = corrected_age_months(chrono, gestational_age_weeks)
+
+    form_age = _nearest_asq_age(float(age_info["age_for_questionnaire"]))
+    if form_age is None:
+        return tool_error(
+            "list_asq_questions",
+            f"No ASQ questionnaire found near {age_info['age_for_questionnaire']} months.",
+            **age_info,
+        )
+
+    path = _resolve_asq_path(form_age)
     if path is None:
         return tool_error(
             "list_asq_questions",
-            f"No ASQ questionnaire found for {age} months.",
-            age_months=age,
+            f"No ASQ questionnaire found for {form_age} months.",
+            age_months=form_age,
+            **age_info,
         )
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -601,7 +942,9 @@ def list_asq_questions(age_months: int) -> dict[str, Any]:
     return {
         "ok": True,
         "tool": "list_asq_questions",
-        "age_months": age,
+        "age_months": form_age,
+        "requested_age_months": chrono,
+        **age_info,
         "source": str(path),
         "title_en": data.get("title_en"),
         "domains": domains_out,
@@ -673,16 +1016,32 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
 
     growth = db.growth_history(cid)
     screens = db.screenings(cid)
-    latest_by_measure: dict[str, dict] = {}
+    latest_growth_by_measure: dict[str, dict] = {}
     for g in growth:
-        latest_by_measure[g["measure"]] = g
+        latest_growth_by_measure[g["measure"]] = g
 
     ga = child.get("gestational_age_weeks")
     maturity = "preterm" if ga is not None and float(ga) < 37 else ("term" if ga is not None else "unknown")
     overlays = []
     try:
-        for p in sorted(OVERLAY_DIR.glob(f"overlay_{cid}_*.png"), key=lambda x: x.stat().st_mtime, reverse=True)[:8]:
-            overlays.append({"filename": p.name, "url": f"/api/overlays/{p.name}"})
+        # Latest overlay per measure only (avoid confusing duplicate/conflicting charts).
+        latest_overlay_by_measure: dict[str, dict] = {}
+        for p in sorted(
+            OVERLAY_DIR.glob(f"overlay_{cid}_*.png"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        ):
+            # overlay_{cid}_{measure}_{tag}_{value}.png — measure is token after cid.
+            rest = p.name[len(f"overlay_{cid}_") :]
+            measure = rest.split("_", 1)[0] if rest else "chart"
+            if measure in latest_overlay_by_measure:
+                continue
+            latest_overlay_by_measure[measure] = {
+                "filename": p.name,
+                "url": f"/api/overlays/{p.name}",
+                "measure": measure,
+            }
+        overlays = list(latest_overlay_by_measure.values())[:8]
     except Exception:
         pass
 
@@ -691,7 +1050,7 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
         f"GA at birth: {ga} weeks → {maturity}",
         f"Growth points: {len(growth)}; screenings: {len(screens)}",
     ]
-    for measure, g in latest_by_measure.items():
+    for measure, g in latest_growth_by_measure.items():
         weeks = g.get("weeks")
         age_bits = []
         if weeks is not None:
@@ -699,7 +1058,7 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
                 w = float(weeks)
                 age_bits.append(f"{w:.1f} weeks since birth" if maturity == "term" else f"{w:.1f}w PMA")
                 if maturity == "term":
-                    age_bits.append(f"≈{w / 4.345:.1f} months")
+                    age_bits.append(f"≈{w / _wpm():.1f} months")
             except (TypeError, ValueError):
                 age_bits.append(f"{weeks}")
         age_txt = ", ".join(age_bits) if age_bits else "age unknown"
@@ -905,16 +1264,23 @@ def dispatch_tool(name: str, arguments: dict, db=None) -> dict:
                 "sex", "measure", "weeks", "value", "child_id", "history",
                 "gestational_age_weeks", "age_months", "chart_standard",
             }})
+        if name == "list_asq_questions":
+            return list_asq_questions(
+                args.get("age_months"),
+                gestational_age_weeks=args.get("gestational_age_weeks"),
+                use_corrected_age=args.get("use_corrected_age", True),
+            )
         if name == "score_asq_questionnaire":
-            return score_asq_questionnaire(args.get("domain_answers"))
+            return score_asq_questionnaire(
+                args.get("domain_answers"),
+                age_months=args.get("age_months"),
+            )
         if name == "score_mchat":
             raw = args.get("answers", {})
             if not isinstance(raw, dict):
                 return tool_error("score_mchat", "answers must be an object.")
             answers = {int(k): v for k, v in raw.items()}
             return score_mchat(answers)
-        if name == "list_asq_questions":
-            return list_asq_questions(args.get("age_months"))
         if name == "list_mchat_questions":
             return list_mchat_questions()
         if name == "get_child_summary":

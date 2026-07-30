@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=1000 \
     MPLBACKEND=Agg
 
 WORKDIR /app
@@ -19,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements-core.txt requirements.txt ./
 
-# Default image is slim (no torch). Build with --build-arg INSTALL_ML=1 for xLAM + Pleias.
+# Default image is slim (no torch). Build with --build-arg INSTALL_ML=1 for optional xLAM.
 ARG INSTALL_ML=0
 RUN if [ "$INSTALL_ML" = "1" ]; then \
       pip install -r requirements.txt ; \

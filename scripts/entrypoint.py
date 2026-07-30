@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -17,17 +18,37 @@ def _nonempty_dir(p: Path) -> bool:
     return p.is_dir() and any(p.iterdir())
 
 
+def _feeding_count(path: Path) -> int:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            return 0
+        return sum(1 for c in data if "feeding" in str(c.get("id", "")).lower())
+    except Exception:
+        return 0
+
+
 def _seed_knowledge() -> None:
-    """Named volume can mount empty over /app/data/knowledge — restore from image seed."""
+    """Named volume can mount empty/stale over /app/data/knowledge — restore curated chunks."""
     knowledge = ROOT / "data" / "knowledge"
     chunks = knowledge / "chunks.json"
     seed_chunks = SEED / "knowledge" / "chunks.json"
-    if chunks.exists():
-        return
+    knowledge.mkdir(parents=True, exist_ok=True)
+
     if seed_chunks.exists():
-        print("[entrypoint] seeding knowledge volume from image", flush=True)
-        knowledge.mkdir(parents=True, exist_ok=True)
+        seed_feed = _feeding_count(seed_chunks)
+        cur_feed = _feeding_count(chunks) if chunks.exists() else -1
+        # Prefer image seed when volume chunks are missing feeding guidance.
+        if not chunks.exists() or (seed_feed > 0 and cur_feed < seed_feed):
+            print(
+                f"[entrypoint] refreshing chunks.json from image seed "
+                f"(volume feeding={cur_feed}, seed feeding={seed_feed})",
+                flush=True,
+            )
+            shutil.copy2(seed_chunks, chunks)
         for item in (SEED / "knowledge").iterdir():
+            if item.name == "chunks.json":
+                continue
             dest = knowledge / item.name
             if dest.exists():
                 continue
@@ -35,10 +56,57 @@ def _seed_knowledge() -> None:
                 shutil.copytree(item, dest)
             else:
                 shutil.copy2(item, dest)
+    elif not chunks.exists():
+        print("[entrypoint] WARNING: no chunks.json and no image seed", flush=True)
+
+
+def _ensure_medical_index() -> None:
+    chunks = ROOT / "data" / "knowledge" / "chunks.json"
+    rag_docs = ROOT / "data" / "knowledge" / "rag_index" / "docs.json"
+    if not chunks.exists():
+        print("[entrypoint] WARNING: no chunks.json — medical RAG empty", flush=True)
+        return
+
+    needs_rebuild = not rag_docs.exists()
+    if not needs_rebuild:
+        try:
+            docs = json.loads(rag_docs.read_text(encoding="utf-8"))
+            feed_docs = sum(1 for d in docs if "feeding" in str(d.get("id", "")).lower())
+            feed_chunks = _feeding_count(chunks)
+            if feed_chunks > 0 and feed_docs < feed_chunks:
+                needs_rebuild = True
+                print(
+                    f"[entrypoint] RAG index stale "
+                    f"(index feeding={feed_docs}, chunks feeding={feed_chunks})",
+                    flush=True,
+                )
+            elif chunks.stat().st_mtime > rag_docs.stat().st_mtime + 1:
+                needs_rebuild = True
+                print("[entrypoint] chunks.json newer than RAG index — rebuilding", flush=True)
+        except Exception as exc:
+            needs_rebuild = True
+            print(f"[entrypoint] RAG index check failed ({exc}) — rebuilding", flush=True)
+
+    if needs_rebuild:
+        print("[entrypoint] building medical RAG index", flush=True)
+        try:
+            from assistant.agent.orchestrator import ParentAssistant
+
+            n = ParentAssistant().refresh_medical_index()
+            print(f"[entrypoint] indexed {n} medical chunks", flush=True)
+        except Exception as exc:
+            print(f"[entrypoint] RAG index skipped: {exc}", flush=True)
+    else:
+        print("[entrypoint] medical RAG index present", flush=True)
 
 
 def main() -> int:
     os.chdir(ROOT)
+    # Ensure repo root is importable before indexing (docker entrypoint).
+    root_s = str(ROOT)
+    if root_s not in sys.path:
+        sys.path.insert(0, root_s)
+    os.environ.setdefault("PYTHONPATH", root_s)
     print("[entrypoint] Nestling bootstrapping...", flush=True)
 
     (ROOT / "data" / "children").mkdir(parents=True, exist_ok=True)
@@ -68,21 +136,7 @@ def main() -> int:
     else:
         print("[entrypoint] data/en present", flush=True)
 
-    rag_docs = ROOT / "data" / "knowledge" / "rag_index" / "docs.json"
-    chunks = ROOT / "data" / "knowledge" / "chunks.json"
-    if not rag_docs.exists() and chunks.exists():
-        print("[entrypoint] building medical RAG index", flush=True)
-        try:
-            from assistant.agent.orchestrator import ParentAssistant
-
-            n = ParentAssistant().refresh_medical_index()
-            print(f"[entrypoint] indexed {n} medical chunks", flush=True)
-        except Exception as exc:
-            print(f"[entrypoint] RAG index skipped: {exc}", flush=True)
-    elif rag_docs.exists():
-        print("[entrypoint] medical RAG index present", flush=True)
-    else:
-        print("[entrypoint] WARNING: no chunks.json — medical RAG empty", flush=True)
+    _ensure_medical_index()
 
     argv = sys.argv[1:]
     if not argv:

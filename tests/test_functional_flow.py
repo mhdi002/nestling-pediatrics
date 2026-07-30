@@ -110,7 +110,7 @@ def test_multi_turn_growth_chat_boy_then_overlay():
             assert turn1["tools"]["tool_calls"] == []
             assert turn1["slots"].get("sex") == "male"
 
-            turn2 = asst.chat(sid, "weight 40 weeks 3.2 kg overlay")
+            turn2 = asst.chat(sid, "preterm weight 40 weeks 3.2 kg overlay")
             calls = turn2["tools"]["tool_calls"]
             assert len(calls) >= 1
             overlay = next(c for c in calls if c["name"] == "overlay_growth_on_chart")

@@ -3,8 +3,8 @@
 Dual RAG stores.
 
 Retrieval: BM25 (no extra neural models).
-Generation: PleIAs/Pleias-RAG-1B ONLY.
-Tool calling elsewhere: Salesforce/xLAM-1b-fc-r ONLY.
+Generation: local OpenAI-compatible LLM sidecar (or extractive fallback).
+Tool calling elsewhere: Salesforce/xLAM-1b-fc-r (optional) or deterministic router.
 """
 
 from __future__ import annotations
@@ -20,9 +20,180 @@ from assistant.config import (
     CHILD_INDEX_DIR,
     KNOWLEDGE_DIR,
     MEDICAL_INDEX_DIR,
-    PLEIAS_RAG_MODEL_ID,
 )
 from assistant.rag.embeddings import BM25Index
+
+# EN + FA feeding / nutrition cues for topic isolation (never confuse with growth charts).
+_FEEDING_KEYWORDS = (
+    "feed",
+    "feeding",
+    "food",
+    "foods",
+    "eat",
+    "eaten",
+    "eating",
+    "milk",
+    "breast",
+    "breastfeed",
+    "breastfeeding",
+    "formula",
+    "solid",
+    "solids",
+    "weaning",
+    "complementary",
+    "nutrition",
+    "تغذیه",
+    "غذا",
+    "خوراک",
+    "شیر",
+    "بخوره",
+    "بدم",
+)
+_FEEDING_RE = re.compile(
+    r"چی\s*(?:به(?:ش|ش)?\s*)?بدم|چه\s*غذایی|غذا\s*باید|بچم\s*غذا|به(?:ش|ش)?\s*چی\s*بدم",
+    re.I,
+)
+_GROWTH_CENTILE_DOC_RE = re.compile(
+    r"(centile|percentile|growth.?chart|intergrowth|صدک|نمودار\s*رشد)",
+    re.I,
+)
+# Metadata the orchestrator appends — must not drive topic classification.
+_TOPIC_META_LINE_RE = re.compile(
+    r"(?im)^(?:known chronological age:|known child (?:sex|age):|born preterm at).*$"
+)
+_MOTOR_KEYWORDS = (
+    "walk",
+    "walking",
+    "crawl",
+    "crawling",
+    "cruise",
+    "cruising",
+    "standing",
+    "gross motor",
+    "fine motor",
+    "motor skill",
+    "pull to stand",
+    "pulling to stand",
+    "راه رفتن",
+    "خزیدن",
+)
+
+
+def _topic_text_for_detection(text: str) -> str:
+    """Strip orchestrator age/sex metadata; soft-follow domain stays on the prior query."""
+    raw = text or ""
+    # Soft follow-ups: "prior\nFollow-up: is that okay?" — classify on prior domain.
+    if re.search(r"Follow-up(?: \(original\))?:", raw):
+        prior = re.split(r"\n?Follow-up(?: \(original\))?:\s*", raw, maxsplit=1)[0]
+        raw = prior.strip() or raw
+    raw = _TOPIC_META_LINE_RE.sub(" ", raw)
+    return raw.strip()
+
+
+def _is_feeding_query(text: str) -> bool:
+    raw = _topic_text_for_detection(text)
+    qlow = raw.lower()
+    if any(k in qlow for k in _FEEDING_KEYWORDS):
+        return True
+    return bool(_FEEDING_RE.search(raw))
+
+
+def _is_motor_query(text: str) -> bool:
+    qlow = _topic_text_for_detection(text).lower()
+    return any(k in qlow for k in _MOTOR_KEYWORDS)
+
+
+def _feeding_ids_for_age(age_m: float | None) -> tuple[str, ...]:
+    """Prefer age-banded curated feeding chunk ids."""
+    if age_m is None:
+        return (
+            "info_feeding_newborn",
+            "info_feeding_0_3m",
+            "info_feeding_4_5m",
+            "info_feeding_solids_6m",
+            "info_feeding_7_9m",
+            "info_feeding_10_12m",
+            "info_feeding_12_24m",
+            "info_iron_breastfed",
+        )
+    if age_m < 4:
+        return ("info_feeding_newborn", "info_feeding_0_3m", "info_iron_breastfed")
+    if age_m < 6:
+        return ("info_feeding_4_5m", "info_feeding_0_3m", "info_iron_breastfed")
+    if age_m < 7:
+        return ("info_feeding_solids_6m", "info_feeding_4_5m", "info_iron_breastfed")
+    if age_m < 10:
+        return ("info_feeding_7_9m", "info_feeding_solids_6m")
+    if age_m < 12:
+        return ("info_feeding_10_12m", "info_feeding_7_9m")
+    return ("info_feeding_12_24m", "info_feeding_10_12m")
+
+
+def _is_feeding_doc(doc: dict) -> bool:
+    hid = str(doc.get("id") or "").lower()
+    title = (doc.get("title") or "").lower()
+    return "feeding" in hid or "feeding" in title or hid.startswith("info_iron_breastfed")
+
+
+def _is_growth_centile_doc(doc: dict) -> bool:
+    hid = str(doc.get("id") or "")
+    title = doc.get("title") or ""
+    text_head = (doc.get("text") or "")[:240]
+    if "feeding" in hid.lower():
+        return False
+    if "centile" in hid.lower() or "intergrowth" in hid.lower():
+        return True
+    return bool(_GROWTH_CENTILE_DOC_RE.search(f"{hid} {title} {text_head}"))
+
+
+def _select_feeding_hits(
+    docs: list[dict],
+    retrieved: list[dict],
+    *,
+    age_m: float | None,
+    top_k: int = 3,
+) -> list[dict]:
+    """Force feeding guidance chunks; never return growth-centile explainers for feeding asks."""
+    preferred_ids = _feeding_ids_for_age(age_m)
+    by_id = {str(d.get("id")): d for d in docs}
+    picked: list[dict] = []
+    for pid in preferred_ids:
+        d = by_id.get(pid)
+        if d is None:
+            # prefix match (e.g. info_feeding_0_3m_extra)
+            matches = [x for x in docs if str(x.get("id", "")).startswith(pid)]
+            d = matches[0] if matches else None
+        if d is not None:
+            item = dict(d)
+            item.setdefault("score", 100.0)
+            picked.append(item)
+        if len(picked) >= top_k:
+            break
+    # When age is known, stick to the age band — do not pad with solids/toddler docs.
+    if age_m is not None and picked:
+        return picked[:top_k]
+    if len(picked) < top_k:
+        for h in retrieved:
+            if _is_growth_centile_doc(h):
+                continue
+            if not _is_feeding_doc(h) and "nutrition" not in (h.get("title") or "").lower():
+                continue
+            hid = str(h.get("id"))
+            if any(str(p.get("id")) == hid for p in picked):
+                continue
+            picked.append(dict(h))
+            if len(picked) >= top_k:
+                break
+    if not picked:
+        # Last resort: any curated feeding doc in the store
+        for d in docs:
+            if _is_feeding_doc(d):
+                item = dict(d)
+                item.setdefault("score", 1.0)
+                picked.append(item)
+            if len(picked) >= top_k:
+                break
+    return picked[:top_k]
 
 
 class VectorStore:
@@ -67,69 +238,33 @@ class VectorStore:
             return []
         sims = self.bm25.scores(query)
         order = np.argsort(-sims)
-        out = []
+        # Pull a wider BM25 pool so dense fusion (when enabled) can re-rank.
+        pool_n = max(top_k * 5, 25)
+        candidates = []
         for i in order:
             doc = dict(self.docs[int(i)])
             if filters:
                 if any(doc.get(k) != v for k, v in filters.items()):
                     continue
-            score = float(sims[int(i)])
-            if score <= 0 and filters is None:
-                # still allow weak matches ranked last
-                pass
-            doc["score"] = score
-            out.append(doc)
-            if len(out) >= top_k:
+            doc["score"] = float(sims[int(i)])
+            candidates.append(doc)
+            if len(candidates) >= pool_n:
                 break
-        return out
+        try:
+            from assistant.rag.dense import dense_enabled, hybrid_order
 
-
-class PleiasRAGGenerator:
-    """Lazy loader for PleIAs/Pleias-RAG-1B — the only generative RAG model allowed."""
-
-    def __init__(self):
-        self._tok = None
-        self._model = None
-
-    @property
-    def ready(self) -> bool:
-        return self._model is not None
-
-    def load(self):
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        self._tok = AutoTokenizer.from_pretrained(PLEIAS_RAG_MODEL_ID, trust_remote_code=True)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if device == "cuda" else torch.float32
-        kwargs = {"trust_remote_code": True, "torch_dtype": dtype}
-        kwargs["device_map"] = "auto" if device == "cuda" else "cpu"
-        self._model = AutoModelForCausalLM.from_pretrained(PLEIAS_RAG_MODEL_ID, **kwargs)
-
-    def generate(self, query: str, context: str, max_new_tokens: int = 256) -> str:
-        if not self.ready:
-            self.load()
-        prompt = (
-            "You are a careful pediatric education assistant. Use ONLY the provided sources. "
-            "Quote sources. If insufficient, say you do not know. Never invent growth numbers "
-            "or screening scores — those come from tools.\n\n"
-            f"SOURCES:\n{context}\n\nQUESTION:\n{query}\n\nANSWER:"
-        )
-        enc = self._tok(prompt, return_tensors="pt")
-        device = next(self._model.parameters()).device
-        # Avoid BatchEncoding.device (raises empty AttributeError on transformers 5.x)
-        input_ids = enc["input_ids"].to(device)
-        attention_mask = enc["attention_mask"].to(device)
-        out = self._model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-        )
-        return self._tok.decode(out[0][input_ids.shape[1] :], skip_special_tokens=True).strip()
-
-
-_PLEIAS = PleiasRAGGenerator()
+            if dense_enabled() and candidates:
+                id_to_text = {
+                    str(d.get("id")): f"{d.get('title') or ''}\n{d.get('text') or ''}"
+                    for d in candidates
+                }
+                bm25_ids = [str(d.get("id")) for d in candidates]
+                fused_ids = hybrid_order(bm25_ids, query, id_to_text, top_k=top_k)
+                by_id = {str(d.get("id")): d for d in candidates}
+                return [by_id[i] for i in fused_ids if i in by_id]
+        except Exception:
+            pass
+        return candidates[:top_k]
 
 
 class MedicalRAG:
@@ -150,26 +285,51 @@ class MedicalRAG:
     def retrieve(self, query: str, top_k: int = 5) -> list[dict]:
         return self.store.search(query, top_k=top_k)
 
-    def answer(self, query: str, top_k: int = 5, use_pleias: bool = True) -> dict:
-        qlow = (query or "").lower()
-        screening_q = any(k in qlow for k in ("asq", "m-chat", "mchat", "autism", "screening item"))
-        speech_q = any(
+    def answer(self, query: str, top_k: int = 5, use_llm: bool = True, *, use_pleias: bool | None = None) -> dict:
+        if use_pleias is not None:
+            use_llm = use_pleias
+        # Topic detection must ignore injected chat memory — only the current user turn.
+        topic_src = query or ""
+        if "[CURRENT_USER]" in topic_src:
+            topic_src = topic_src.split("[CURRENT_USER]", 1)[-1]
+        topic_src = re.split(
+            r"\[SESSION_SUMMARY\]|\[RECENT_CHAT\]|\[SESSION_SLOTS\]",
+            topic_src,
+            maxsplit=1,
+        )[0]
+        detect_src = _topic_text_for_detection(topic_src)
+        qlow = detect_src.lower()
+        iron_q = "iron" in qlow or "آهن" in qlow
+        # Iron wins over generic feeding/breast keywords ("iron for breastfed…")
+        feeding_q = _is_feeding_query(detect_src) and not iron_q
+        growth_explain_q = (not feeding_q) and any(
             k in qlow
             for k in (
-                "talk",
-                "speech",
-                "language",
-                "words",
-                "babbl",
-                "milestone",
-                "development",
-                "حرف",
-                "گفتار",
-                "صحبت",
-                "تاخیر",
+                "centile",
+                "percentile",
+                "z-score",
+                "z score",
+                "growth chart",
+                "intergrowth",
+                "who chart",
+                "نمودار",
+                "چارت",
+                "صدک",
             )
         )
-        iron_q = "iron" in qlow or "آهن" in qlow
+        age_m = None
+        # Age may live on metadata lines stripped from detect_src — read full topic_src.
+        m_age = re.search(
+            r"known (?:chronological )?child age:\s*([0-9]+(?:\.[0-9]+)?)\s*months|"
+            r"known chronological age:\s*([0-9]+(?:\.[0-9]+)?)\s*months",
+            (topic_src or "").lower(),
+        )
+        if m_age:
+            try:
+                age_m = float(m_age.group(1) or m_age.group(2))
+            except Exception:
+                age_m = None
+        screening_q = any(k in qlow for k in ("asq", "m-chat", "mchat", "autism", "screening item"))
         sleep_q = "sleep" in qlow or "خواب" in qlow
         rash_q = any(
             k in qlow
@@ -181,33 +341,89 @@ class MedicalRAG:
                 "sole",
                 "wound",
                 "scar",
+                "cut",
+                "scrape",
+                "injury",
+                "bruise",
+                "burn",
+                "lesion",
                 "redness",
                 "hfmd",
                 "hand foot",
                 "hand-foot",
                 "eczema",
                 "spot",
+                "bandage",
                 "جوش",
                 "راش",
                 "زخم",
+                "جراحت",
+                "خراش",
+                "کبودی",
+                "سوختگی",
+            )
+        )
+        motor_q = (not feeding_q and not iron_q and not sleep_q and not rash_q) and _is_motor_query(
+            detect_src
+        )
+        # Speech only when not a more specific care topic (feeding/iron/sleep/rash/motor win).
+        speech_q = (
+            not feeding_q
+            and not iron_q
+            and not sleep_q
+            and not rash_q
+            and not motor_q
+        ) and any(
+            k in qlow
+            for k in (
+                "talk",
+                "speech",
+                "language",
+                "words",
+                "babbl",
+                "dada",
+                "mama",
+                "baba",
+                "papa",
+                "says",
+                "حرف",
+                "گفتار",
+                "صحبت",
+                "تاخیر",
+                "ماما",
+                "بابا",
+                "دادا",
             )
         )
         # Expand short parent concerns so lexical search finds the right guidance chunk
-        search_q = query
-        if speech_q:
-            search_q = f"{query} speech language development milestones infant cooing babbling"
+        # Retrieval query = current turn only (memory context pollutes BM25).
+        search_q = detect_src.strip() or topic_src.strip() or query
+        if feeding_q:
+            search_q = (
+                f"{search_q} infant feeding breastmilk formula complementary foods "
+                "nutrition what should baby eat age-appropriate"
+            )
         elif iron_q:
-            search_q = f"{query} iron supplementation breastfed infant"
+            search_q = f"{search_q} iron supplementation breastfed infant"
         elif sleep_q:
-            search_q = f"{query} infant sleep safe sleep hours"
+            search_q = f"{search_q} infant sleep safe sleep hours"
         elif rash_q:
             search_q = (
-                f"{query} pediatric rash palm blister vesicle hand foot mouth "
-                "wound redness fever urgent care"
+                f"{search_q} pediatric skin wound scar cut scrape bruise burn "
+                "rash palm blister vesicle hand foot mouth redness first aid urgent care"
             )
+        elif motor_q:
+            search_q = (
+                f"{search_q} gross motor walking crawling cruising standing milestones "
+                "toddler development pull to stand delayed walk"
+            )
+        elif speech_q:
+            search_q = f"{search_q} speech language development milestones infant cooing babbling"
 
         hits = self.retrieve(search_q, top_k=max(top_k * 3, 15))
-        if not screening_q:
+        if feeding_q:
+            hits = _select_feeding_hits(self.store.docs, hits, age_m=age_m, top_k=max(top_k, 3))
+        elif not screening_q:
             # Prefer topic-matched care/guidance; drop raw questionnaire dumps.
             def _topic_rank(h: dict) -> tuple:
                 title = (h.get("title") or "").lower()
@@ -215,20 +431,47 @@ class MedicalRAG:
                 hid = str(h.get("id", ""))
                 score = float(h.get("score") or 0)
                 boost = 0.0
-                if speech_q and any(
-                    t in title or t in text
-                    for t in ("speech", "language", "communication", "milestone", "development")
-                ):
-                    boost += 50
-                if iron_q and "iron" in title:
+                if iron_q and ("iron" in title or "iron" in text or "آهن" in text):
                     boost += 50
                 if sleep_q and "sleep" in title:
                     boost += 50
+                if motor_q and any(
+                    t in title or t in text or t in hid
+                    for t in (
+                        "motor",
+                        "walk",
+                        "crawl",
+                        "cruise",
+                        "milestone",
+                        "development",
+                        "gross",
+                    )
+                ):
+                    boost += 55
+                if motor_q and (
+                    "development" in hid
+                    or "motor" in hid
+                    or "milestone" in hid
+                    or hid.startswith("guidance_curated_development")
+                ):
+                    boost += 80
+                if speech_q and any(
+                    t in title or t in text
+                    for t in ("speech", "language", "communication", "milestone", "talk", "babbl")
+                ):
+                    boost += 50
+                if speech_q and "speech" in hid:
+                    boost += 80
                 if rash_q and any(
                     t in title or t in text
                     for t in (
                         "rash",
                         "wound",
+                        "scar",
+                        "cut",
+                        "scrape",
+                        "bruise",
+                        "burn",
                         "hand",
                         "foot",
                         "mouth",
@@ -236,19 +479,36 @@ class MedicalRAG:
                         "skin",
                         "fever",
                         "vision",
+                        "hfmd",
+                        "first aid",
                     )
                 ):
                     boost += 55
+                if rash_q and any(
+                    k in hid
+                    for k in ("rash", "wound", "hfmd", "fever_rash", "photo", "scar", "skin")
+                ):
+                    boost += 80
+                if growth_explain_q and (
+                    "centile" in hid
+                    or "percentile" in title
+                    or "growth chart" in title
+                    or hid.startswith("intergrowth")
+                ):
+                    boost += 60
                 if hid.startswith(("info_", "intergrowth")):
                     boost += 5
                 if hid.startswith(("mchat_", "asq_")) and not screening_q:
                     boost -= 20
+                # Keep feeding docs out of non-feeding medical answers.
+                if "feeding" in hid or "feeding" in title:
+                    boost -= 100
                 return (boost + score, score)
 
             care = [
                 h
                 for h in hits
-                if str(h.get("id", "")).startswith(("info_", "intergrowth"))
+                if str(h.get("id", "")).startswith(("info_", "intergrowth", "guidance_"))
                 or "guidance" in (h.get("title") or "").lower()
                 or any(
                     k in (h.get("title") or "").lower()
@@ -264,17 +524,118 @@ class MedicalRAG:
                         "hand",
                         "skin",
                         "fever",
+                        "motor",
+                        "milestone",
+                        "development",
                     )
                 )
                 or "intergrowth" in (h.get("text") or "").lower()
             ]
+            # Drop feeding chunks entirely unless this is a feeding/iron ask.
+            if not feeding_q and not iron_q:
+                care = [
+                    h
+                    for h in care
+                    if "feeding" not in str(h.get("id", "")).lower()
+                    and "feeding" not in (h.get("title") or "").lower()
+                ]
+                hits = [
+                    h
+                    for h in hits
+                    if "feeding" not in str(h.get("id", "")).lower()
+                    and "feeding" not in (h.get("title") or "").lower()
+                ]
             pool = care or [
                 h
                 for h in hits
                 if not str(h.get("id", "")).startswith(("mchat_", "asq_"))
             ] or hits
             ranked = sorted(pool, key=_topic_rank, reverse=True)
-            if speech_q:
+            if iron_q:
+                iron_hits = [
+                    h
+                    for h in ranked
+                    if "iron" in (h.get("title") or "").lower()
+                    or "iron" in (h.get("text") or "").lower()[:400]
+                    or "آهن" in (h.get("text") or "")
+                ]
+                hits = (iron_hits or ranked)[:3]
+            elif sleep_q:
+                sleep_hits = [
+                    h
+                    for h in ranked
+                    if "sleep" in (h.get("title") or "").lower()
+                    or "sleep" in (h.get("text") or "").lower()[:200]
+                ]
+                hits = (sleep_hits or ranked)[:3]
+            elif rash_q:
+                rash_hits = [
+                    h
+                    for h in ranked
+                    if any(
+                        k in (h.get("title") or "").lower()
+                        or k in (h.get("text") or "").lower()[:500]
+                        or k in str(h.get("id") or "").lower()
+                        for k in (
+                            "rash",
+                            "wound",
+                            "scar",
+                            "cut",
+                            "scrape",
+                            "bruise",
+                            "burn",
+                            "hand-foot",
+                            "hand foot",
+                            "blister",
+                            "skin",
+                            "fever and rash",
+                            "photo",
+                            "hfmd",
+                            "first aid",
+                        )
+                    )
+                ]
+                if not rash_hits:
+                    rash_hits = [
+                        d
+                        for d in self.store.docs
+                        if any(
+                            k in str(d.get("id") or "").lower()
+                            or k in (d.get("title") or "").lower()
+                            for k in ("rash", "wound", "hfmd", "fever_rash", "photo_skin", "scar")
+                        )
+                    ]
+                hits = (rash_hits or ranked)[:3]
+            elif motor_q:
+                motor_hits = [
+                    h
+                    for h in ranked
+                    if any(
+                        k in (h.get("title") or "").lower()
+                        or k in (h.get("text") or "").lower()[:500]
+                        or k in str(h.get("id") or "").lower()
+                        for k in (
+                            "motor",
+                            "walk",
+                            "crawl",
+                            "cruise",
+                            "milestone",
+                            "development",
+                            "gross",
+                            "toddler",
+                        )
+                    )
+                ]
+                if not motor_hits:
+                    motor_hits = [
+                        d
+                        for d in self.store.docs
+                        if "development" in str(d.get("id") or "").lower()
+                        or "motor" in str(d.get("id") or "").lower()
+                        or "milestone" in (d.get("title") or "").lower()
+                    ]
+                hits = (motor_hits or ranked)[:3]
+            elif speech_q:
                 speech_hits = [
                     h
                     for h in ranked
@@ -282,31 +643,17 @@ class MedicalRAG:
                     or "language" in (h.get("title") or "").lower()
                     or "speech" in str(h.get("id") or "").lower()
                     or "communication" in (h.get("title") or "").lower()
+                    or "talk" in (h.get("text") or "").lower()[:300]
                 ]
+                if not speech_hits:
+                    speech_hits = [
+                        d
+                        for d in self.store.docs
+                        if "speech" in str(d.get("id") or "").lower()
+                        or "speech" in (d.get("title") or "").lower()
+                        or "language" in (d.get("title") or "").lower()
+                    ]
                 hits = (speech_hits or ranked)[:2]
-            elif iron_q:
-                iron_hits = [h for h in ranked if "iron" in (h.get("title") or "").lower() or "iron" in (h.get("text") or "").lower()[:200]]
-                hits = (iron_hits or ranked)[:3]
-            elif rash_q:
-                rash_hits = [
-                    h
-                    for h in ranked
-                    if any(
-                        k in (h.get("title") or "").lower()
-                        or k in (h.get("text") or "").lower()[:400]
-                        for k in (
-                            "rash",
-                            "wound",
-                            "hand-foot",
-                            "hand foot",
-                            "blister",
-                            "skin",
-                            "fever and rash",
-                            "photo",
-                        )
-                    )
-                ]
-                hits = (rash_hits or ranked)[:3]
             else:
                 hits = ranked[:top_k]
         else:
@@ -315,38 +662,33 @@ class MedicalRAG:
         text = ""
         mode = "extractive"
         model_id = None
-        # Prefer Bonsai-27B (llama-server) when configured
-        try:
-            from assistant.llm.bonsai_client import bonsai_enabled, get_bonsai
-
-            if bonsai_enabled():
-                client = get_bonsai()
-                if client.ready:
-                    text = client.answer_with_context(query, context)
-                    mode = "bonsai-27b-q1"
-                    model_id = "prism-ml/Bonsai-27B-gguf"
-        except Exception as exc:
-            text = ""
-            bonsai_err = str(exc)
-        else:
-            bonsai_err = ""
-
-        if not text and use_pleias:
+        llm_err = ""
+        model_id = None
+        if use_llm:
             try:
-                text = _PLEIAS.generate(query, context)
-                mode = "pleias-rag-1b"
-                model_id = PLEIAS_RAG_MODEL_ID
+                from assistant.llm.qwen_client import get_qwen, llm_enabled
+
+                if llm_enabled():
+                    client = get_qwen()
+                    if client.ready:
+                        # Generation sees the full current-user block (incl. Follow-up);
+                        # topic detection already used detect_src / prior domain.
+                        gen_raw = _TOPIC_META_LINE_RE.sub(" ", topic_src).strip()
+                        gen_q = gen_raw or detect_src.strip() or query
+                        text = client.answer_with_context(gen_q, context)
+                        mode = "openai-compatible-llm"
+                        model_id = client.model
             except Exception as exc:
-                text = _extractive(hits)
-                if bonsai_err:
-                    text += f"\n[Bonsai unavailable: {bonsai_err}]"
-                text += f"\n[Pleias-RAG-1B unavailable: {exc}]"
+                text = ""
+                llm_err = str(exc)
+
+        if not text:
+            text = _extractive(hits, conversational=True)
+            if llm_err:
+                text += f"\n[LLM unavailable: {llm_err}]"
                 mode = "extractive_fallback"
-        elif not text:
-            text = _extractive(hits)
-            if bonsai_err:
-                text += f"\n[Bonsai unavailable: {bonsai_err}]"
-            mode = "extractive"
+            else:
+                mode = "extractive"
         return {
             "collection": "medical",
             "query": query,
@@ -377,7 +719,17 @@ class ChildRAG:
     def retrieve(self, query: str, child_id: str, top_k: int = 5) -> list[dict]:
         return self.store.search(query, top_k=top_k, filters={"child_id": child_id})
 
-    def answer(self, query: str, child_id: str, top_k: int = 5, use_pleias: bool = True) -> dict:
+    def answer(
+        self,
+        query: str,
+        child_id: str,
+        top_k: int = 5,
+        use_llm: bool = True,
+        *,
+        use_pleias: bool | None = None,
+    ) -> dict:
+        if use_pleias is not None:
+            use_llm = use_pleias
         hits = self.retrieve(query, child_id, top_k=top_k)
         if not hits:
             return {
@@ -388,21 +740,32 @@ class ChildRAG:
                 "model": None,
             }
         context = "\n\n".join(f"[{h['id']}] {h['text']}" for h in hits)
-        if use_pleias:
+        text = ""
+        mode = "extractive"
+        llm_err = ""
+        model_id = None
+        if use_llm:
             try:
-                text = _PLEIAS.generate(query, context)
-                mode = "pleias-rag-1b"
+                from assistant.llm.qwen_client import get_qwen, llm_enabled
+
+                if llm_enabled():
+                    client = get_qwen()
+                    if client.ready:
+                        text = client.answer_with_context(query, context)
+                        mode = "openai-compatible-llm"
+                        model_id = client.model
             except Exception as exc:
-                text = _extractive(hits) + f"\n[Pleias-RAG-1B unavailable: {exc}]"
-                mode = "extractive_fallback"
-        else:
+                llm_err = str(exc)
+        if not text:
             text = _extractive(hits)
-            mode = "extractive"
+            if llm_err:
+                text += f"\n[LLM unavailable: {llm_err}]"
+                mode = "extractive_fallback"
         return {
             "collection": "child",
             "child_id": child_id,
             "mode": mode,
-            "model": PLEIAS_RAG_MODEL_ID if mode.startswith("pleias") else None,
+            "model": model_id if mode == "openai-compatible-llm" else None,
             "answer": text,
             "citations": [{"id": h["id"], "title": h["title"], "score": h["score"]} for h in hits],
         }
@@ -418,15 +781,19 @@ def _extractive(hits: list[dict], *, conversational: bool = True) -> str:
     if text.startswith("## "):
         _, _, rest = text.partition("\n")
         text = rest.strip() or text
-    # Soft trim long dumps
+    # Soft trim long dumps — last-resort fallback only (prefer LLM when ready)
     text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > 700:
-        cut = text[:700]
-        # end on a sentence if possible
+    text = re.sub(r"\*\*", "", text)
+    if len(text) > 420:
+        cut = text[:420]
         sp = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
-        text = cut[: sp + 1] if sp > 200 else cut + "…"
+        text = cut[: sp + 1] if sp > 160 else cut.rstrip(",;:") + "…"
     if conversational:
-        return text
+        topic = title or "this"
+        return (
+            f"Here’s the short version from our notes on {topic}: {text} "
+            "If something looks worse (spreading redness, fever, or you’re unsure), call your clinician."
+        )
     parts = ["Based on retrieved sources:", f"- {title or h.get('id')}: {text}"]
     parts.append("For diagnosis or treatment decisions, consult a pediatric clinician.")
     return "\n".join(parts)

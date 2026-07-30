@@ -59,8 +59,7 @@ def _init_backend():
     """
     FA→EN translation uses deep-translator (Google MT API), NOT a third HF model.
     Agent HF models remain only:
-      - Salesforce/xLAM-1b-fc-r
-      - PleIAs/Pleias-RAG-1B
+      - Salesforce/xLAM-1b-fc-r (optional tool calling)
     """
     global _BACKEND
     if _BACKEND is not None:

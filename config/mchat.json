@@ -1,0 +1,9 @@
+{
+  "reverse_items": [2, 5, 12],
+  "risk_tiers": {
+    "low_max": 2,
+    "medium_max": 7,
+    "high_min": 8
+  },
+  "note": "Medium risk typically requires M-CHAT-R/F follow-up interview; high risk → refer."
+}

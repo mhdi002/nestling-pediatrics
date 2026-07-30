@@ -1,0 +1,92 @@
+# Declarative intent / slot rules — consumed by assistant.agent.rules (Phase 3).
+# Patterns moved out of orchestrator.py over time; this file is the source of truth.
+
+version: 1
+
+intents:
+  help:
+    priority: 100
+    patterns_en:
+      - "^(hi|hello|hey)\\b"
+      - "how can you help"
+      - "what can you do"
+      - "^help\\b"
+    patterns_fa:
+      - "^سلام"
+      - "^درود"
+      - "کمک"
+
+  growth_analysis:
+    priority: 90
+    patterns_en:
+      - "analy[sz]e"
+      - "on track"
+      - "what does .* mean"
+      - "is (he|she|my (baby|child)) (ok|okay|fine|normal)"
+    patterns_fa:
+      - "تحلیل"
+      - "تفسیر"
+      - "مسیر خوب"
+      - "رشدش خوبه"
+
+  growth:
+    priority: 80
+    patterns_en:
+      - "percentile|z-?score|growth chart|overlay|plot"
+      - "\\b(weight|length|height|head circumference)\\b"
+      - "\\d+(?:\\.\\d+)?\\s*(kg|cm|w|weeks?)"
+    patterns_fa:
+      - "نمودار|چارت|وزن|قد|دور\\s*سر|هفته"
+
+  medical:
+    priority: 70
+    patterns_en:
+      - "iron|sleep|vitamin|fever|rash|speech|talk|language|feed"
+      - "scar|wound|cut|scrape|injury|bruise|burn|blister|lesion|redness|eczema"
+      - "walk|walking|crawl|cruising|gross motor|motor skill|milestone"
+      - "food|foods|eaten|nutrition|weaning|complementary"
+      - "what should be eaten|what should (my )?(baby|child) eat|tell me about .*food"
+      - "what should i do"
+      - "worried|delay|problem"
+      - "dada|mama|baba|papa"
+      - "(she|he) says"
+      - "yes (she|he).{0,40}(says|dada|mama)"
+      - "what about that"
+    patterns_fa:
+      - "آهن|خواب|شیر|تب|حرف|گفتار|نگران|تاخیر"
+      - "زخم|جراحت|خراش|کبودی|سوختگی|راش|جوش"
+      - "راه\\s*رفتن|خزیدن|حرکات"
+      - "تغذیه|غذا|خوراک|چی\\s*بدم\\s*بخوره|چی\\s*بخوره"
+      - "چی\\s*به(?:ش|ش)?\\s*بدم\\s*بخوره|به(?:ش|ش)?\\s*چی\\s*بدم|چه\\s*غذایی\\s*بدم"
+      - "غذا\\s*باید\\s*چی|بچم\\s*غذا|چه\\s*چیزی\\s*بخوره|چی\\s*به(?:ش|ش)?\\s*بدم"
+      - "ماما|بابا|دادا|می\\s*گه|خوبه\\s*\\?"
+
+  screening:
+    priority: 60
+    patterns_en:
+      - "asq|m-?chat|autism screen"
+    patterns_fa:
+      - "غربال|سنین و مراحل"
+
+  history:
+    priority: 50
+    patterns_en:
+      - "history|remember|summary|child profile|what do you know"
+    patterns_fa:
+      - "تاریخچه|پرونده|اطلاعات (فرزند|کودک)|یادت"
+
+slots:
+  sex:
+    male: ["male", "boy", "پسر"]
+    female: ["female", "girl", "دختر"]
+  measure:
+    weight: ["weight", "وزن", "کیلو"]
+    length: ["length", "height", "قد"]
+    head_circumference: ["head circumference", "hc", "دور سر"]
+  chart_standard:
+    intergrowth_preterm: ["preterm", "نارس"]
+    who_term: ["term", "طبیعی", "full term"]
+
+thresholds:
+  history_window: 12
+  summary_trigger_turns: 16

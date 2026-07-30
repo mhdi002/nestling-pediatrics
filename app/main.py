@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
 from app.services import create_services, peek_services, set_services
+from assistant.settings import get_settings
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -35,13 +36,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Nestling",
     description="Pediatric parent assistant API",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
+_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

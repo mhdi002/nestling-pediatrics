@@ -12,8 +12,8 @@ Tools (deterministic — no LLM math):
   - chart overlay plotting
 
 Models (optional, loaded on demand):
-  - Salesforce/xLAM-1b-fc-r  → tool/function calling
-  - PleIAs/Pleias-RAG-1B     → RAG answer generation
+  - Qwen/Qwen3.5-4B via local vLLM OpenAI-compatible sidecar → RAG + chat + vision
+  - Salesforce/xLAM-1b-fc-r → tool/function calling (optional)
 """
 
 __version__ = "0.1.0"

@@ -1,0 +1,23 @@
+{
+  "weeks_per_month": 4.348214285714286,
+  "weeks_per_month_legacy": 4.345,
+  "use_legacy_weeks_per_month": true,
+  "comment": "Legacy 4.345 kept by default so golden snapshots stay bit-identical. Set use_legacy_weeks_per_month=false to use 365.25/12/7.",
+  "intergrowth_weeks_min": 27,
+  "intergrowth_weeks_max": 64,
+  "who_age_months_min": 0,
+  "who_age_months_max": 24,
+  "preterm_ga_threshold_weeks": 37,
+  "term_pma_band": [37, 45],
+  "value_ranges": {
+    "weight": [0.2, 20.0],
+    "length": [20.0, 90.0],
+    "head_circumference": [15.0, 55.0]
+  },
+  "track_status": {
+    "investigate_below": 3,
+    "investigate_above": 97,
+    "monitor_below": 10,
+    "monitor_above": 90
+  }
+}

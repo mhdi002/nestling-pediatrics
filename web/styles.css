@@ -789,11 +789,87 @@ textarea:focus {
   bottom: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 0.55rem;
   align-items: end;
   padding: 0.75rem 0 max(0.5rem, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, transparent, rgba(232, 246, 250, 0.98) 22%);
+}
+
+.chat-composer:has(#chat-cancel:not([hidden])) {
+  grid-template-columns: 1fr auto auto auto;
+}
+
+.composer-field {
+  min-width: 0;
+}
+
+.composer-field textarea {
+  width: 100%;
+}
+
+.btn-icon {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.btn-attach-plus {
+  width: var(--touch);
+  height: var(--touch);
+  border-radius: 50%;
+  border-style: solid;
+  border-color: rgba(91, 168, 196, 0.38);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--sky-deep);
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(74, 120, 130, 0.1);
+}
+
+.btn-attach-plus:hover:not(:disabled) {
+  border-color: var(--sky-deep);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(74, 120, 130, 0.14);
+}
+
+.btn-attach-plus:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.attach-plus-glyph {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.attach-plus-glyph::before,
+.attach-plus-glyph::after {
+  content: "";
+  position: absolute;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.attach-plus-glyph::before {
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.attach-plus-glyph::after {
+  top: 50%;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  transform: translateY(-50%);
 }
 
 .toast {
@@ -916,17 +992,6 @@ textarea:focus {
   border: 1px solid var(--border);
 }
 
-.chat-composer {
-  position: sticky;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.55rem;
-  align-items: end;
-  padding: 0.75rem 0 max(0.5rem, env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, transparent, rgba(232, 246, 250, 0.95) 28%);
-}
-
 .chat-composer textarea {
   resize: none;
   min-height: var(--touch);
@@ -945,6 +1010,26 @@ textarea:focus {
   min-width: var(--touch);
   padding-inline: 1.1rem;
 }
+
+.growth-svg-wrap {
+  margin-top: 0.85rem;
+}
+
+.growth-svg-wrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.growth-svg-wrap .curve-p3,
+.growth-svg-wrap .curve-p97 { stroke: #c0392b; stroke-width: 1.5; fill: none; }
+.growth-svg-wrap .curve-p10,
+.growth-svg-wrap .curve-p90 { stroke: #2c3e50; stroke-width: 1.25; stroke-dasharray: 4 3; fill: none; }
+.growth-svg-wrap .curve-p50 { stroke: #27ae60; stroke-width: 1.75; fill: none; }
+.growth-svg-wrap .child-point { fill: #2980b9; stroke: #fff; stroke-width: 1.5; }
 
 /* —— Results —— */
 .result-block {

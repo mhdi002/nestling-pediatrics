@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.api.auth import require_api_key
 from app.services import get_services
 from assistant.config import OVERLAY_DIR, UPLOAD_DIR
+from assistant.settings import get_settings
 from assistant.tools.clinical import (
     dispatch_tool,
+    growth_percentile_curves,
     list_asq_questions,
     list_mchat_questions,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 def _err(status: int, error: str, detail: str | None = None) -> HTTPException:
@@ -71,21 +75,43 @@ class MchatScoreBody(BaseModel):
 
 @router.get("/health")
 def health():
-    bonsai = {"configured": False, "ready": False, "url": None}
+    """Liveness + short LLM readiness probe (1.5s, never blocks Docker health long)."""
+    llm = {"configured": False, "ready": False, "url": None}
+    vision = {"configured": False, "ready": False, "url": None}
     try:
-        from assistant.llm.bonsai_client import bonsai_base_url, bonsai_enabled, get_bonsai
+        from assistant.llm.qwen_client import (
+            get_qwen,
+            llm_base_url,
+            llm_enabled,
+            llm_model_path,
+            vision_base_url,
+        )
 
-        if bonsai_enabled():
-            client = get_bonsai()
-            bonsai = {
+        if llm_enabled():
+            client = get_qwen()
+            ready = bool(client.ready)
+            vision_ready = bool(client.vision_ready) if vision_base_url() else False
+            llm = {
                 "configured": True,
-                "ready": client.ready,
-                "url": bonsai_base_url(),
+                "ready": ready,
+                "probed": True,
+                "url": llm_base_url(),
                 "model": client.model,
+                "model_path": llm_model_path() or None,
+            }
+            vision_url = vision_base_url()
+            vision = {
+                "configured": bool(vision_url),
+                "ready": vision_ready,
+                "probed": True,
+                "url": vision_url,
+                "model": client.vision_model,
+                "shared_endpoint": bool(vision_url) and vision_url == llm_base_url(),
             }
     except Exception as exc:
-        bonsai["error"] = str(exc)
-    return {"status": "ok", "service": "nestling", "bonsai": bonsai}
+        llm["error"] = str(exc)
+        vision["error"] = str(exc)
+    return {"status": "ok", "service": "nestling", "llm": llm, "vision": vision}
 
 
 @router.post("/children")
@@ -174,6 +200,25 @@ def get_session(session_id: str):
     }
 
 
+def _validate_image_bytes(raw: bytes) -> tuple[bytes, str]:
+    """Decode with Pillow, strip EXIF, re-encode as PNG. Reject non-images."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        img = Image.open(BytesIO(raw))
+        img.load()
+        img = img.convert("RGBA") if img.mode in {"P", "RGBA"} else img.convert("RGB")
+        # Drop EXIF by reconstructing
+        out = BytesIO()
+        fmt = "PNG"
+        img.save(out, format=fmt, optimize=True)
+        return out.getvalue(), "image/png"
+    except Exception as exc:
+        raise _err(400, "invalid_image", f"Could not decode image: {exc}") from exc
+
+
 @router.post("/chat/vision")
 async def chat_vision(
     message: str = Form(""),
@@ -182,28 +227,30 @@ async def chat_vision(
     ui_lang: str | None = Form(None),
     image: UploadFile = File(...),
 ):
-    """Parent photo + optional caption → vision (Bonsai mmproj) + medical RAG."""
+    """Parent photo + optional caption -> vision model + medically grounded RAG response."""
     svc = get_services()
     raw = await image.read()
     if not raw:
         raise _err(400, "empty_image", "No image bytes received.")
-    if len(raw) > 8_000_000:
-        raise _err(400, "image_too_large", "Max image size is 8 MB.")
-    mime = image.content_type or "image/jpeg"
+    max_bytes = get_settings().nestling_max_upload_bytes
+    if len(raw) > max_bytes:
+        raise _err(400, "image_too_large", f"Max image size is {max_bytes} bytes.")
+    clean, mime = _validate_image_bytes(raw)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     from uuid import uuid4
 
-    fname = f"{uuid4().hex}_{Path(image.filename or 'photo.jpg').name}"
+    fname = f"{uuid4().hex}.png"
     path = UPLOAD_DIR / fname
-    path.write_bytes(raw)
+    path.write_bytes(clean)
 
     sid = session_id
     if not sid or not svc.chat.get_session(sid):
         sid = svc.chat.create_session(child_id=child_id)
-    caption = (message or "").strip() or "Please look at this photo of my child."
-    svc.chat.add_message(sid, "user", f"[photo:{fname}] {caption}")
+    caption = (message or "").strip()
+    user_msg = f"[photo:{fname}] {caption}" if caption else f"[photo:{fname}]"
+    svc.chat.add_message(sid, "user", user_msg)
     out = svc.assistant.analyze_parent_photo(
-        raw, mime=mime, prompt=caption, ui_lang=ui_lang
+        clean, mime=mime, prompt=caption, ui_lang=ui_lang
     )
     svc.chat.add_message(sid, "assistant", out.get("reply") or "")
     return {
@@ -241,6 +288,64 @@ def chat(body: ChatBody):
         return out
     except Exception as exc:
         raise _err(500, "chat_failed", str(exc)) from exc
+
+
+@router.post("/chat/stream")
+def chat_stream(body: ChatBody):
+    """
+    SSE stream: runs the full chat turn, then streams the reply text in chunks,
+    then emits a final `result` event with the full JSON payload.
+    """
+    svc = get_services()
+    sid = body.session_id
+    if not sid or not svc.chat.get_session(sid):
+        sid = svc.chat.create_session(child_id=body.child_id)
+
+    def gen() -> Iterator[str]:
+        try:
+            out = svc.assistant.chat(
+                sid, body.message, child_id=body.child_id, ui_lang=body.ui_lang
+            )
+            s = svc.chat.get_session(sid) or {}
+            if not (s.get("title") or "").strip():
+                svc.chat.set_title(sid, (body.message or "").strip()[:60])
+            reply = out.get("reply") or ""
+            # Stream reply in word-ish chunks for UX (tools already finished)
+            buf = ""
+            for ch in reply:
+                buf += ch
+                if ch in " \n.,!?;:" or len(buf) >= 24:
+                    yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
+                    buf = ""
+            if buf:
+                yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
+            yield f"event: result\ndata: {json.dumps(out, ensure_ascii=False, default=str)}\n\n"
+            yield "event: done\ndata: {}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@router.get("/growth/curves")
+def growth_curves(
+    sex: str = "male",
+    measure: str = "weight",
+    chart_standard: str | None = None,
+    gestational_age_weeks: float | None = None,
+    age_max: float | None = None,
+):
+    """JSON percentile curves (P3/10/50/90/97) for client SVG charts."""
+    out = growth_percentile_curves(
+        sex,
+        measure,
+        chart_standard=chart_standard,
+        gestational_age_weeks=gestational_age_weeks,
+        age_max=age_max,
+    )
+    if out.get("ok") is False:
+        raise _err(400, "growth_curves_failed", out.get("error") or out.get("detail"))
+    return out
 
 
 @router.post("/growth")

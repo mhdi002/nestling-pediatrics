@@ -38,6 +38,7 @@ class ChatMemory:
               child_id TEXT,
               slots_json TEXT,
               title TEXT,
+              summary TEXT,
               created_at TEXT,
               updated_at TEXT
             );
@@ -51,19 +52,37 @@ class ChatMemory:
               created_at TEXT,
               FOREIGN KEY(session_id) REFERENCES sessions(session_id)
             );
+            CREATE TABLE IF NOT EXISTS session_facts (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              key TEXT NOT NULL,
+              value_json TEXT NOT NULL,
+              provenance TEXT,
+              source_message_id TEXT,
+              confidence REAL,
+              created_at TEXT,
+              updated_at TEXT,
+              FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_messages_session
               ON messages(session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_facts_session
+              ON session_facts(session_id, key);
             """
         )
+        # Migrate older DBs missing summary column
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "summary" not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
         self.conn.commit()
 
     def create_session(self, child_id: str | None = None, title: str | None = None) -> str:
         sid = str(uuid.uuid4())
         now = _utc()
         self.conn.execute(
-            "INSERT INTO sessions(session_id, child_id, slots_json, title, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (sid, child_id, "{}", title or "", now, now),
+            "INSERT INTO sessions(session_id, child_id, slots_json, title, summary, created_at, updated_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (sid, child_id, "{}", title or "", "", now, now),
         )
         self.conn.commit()
         return sid
@@ -164,6 +183,111 @@ class ChatMemory:
             lines.append(f"{m['role'].upper()}: {m['content']}")
         return "\n".join(lines)
 
+    def get_summary(self, session_id: str) -> str:
+        s = self.get_session(session_id)
+        return (s.get("summary") or "") if s else ""
+
+    def set_summary(self, session_id: str, summary: str) -> None:
+        self.conn.execute(
+            "UPDATE sessions SET summary=?, updated_at=? WHERE session_id=?",
+            ((summary or "")[:4000], _utc(), session_id),
+        )
+        self.conn.commit()
+
+    def build_context(
+        self,
+        session_id: str,
+        *,
+        window: int = 12,
+        summary_trigger: int = 16,
+    ) -> dict[str, Any]:
+        """
+        Conversation context for the agent: rolling summary + recent turns + slots.
+        When history exceeds summary_trigger, older turns are folded into summary.
+        """
+        session = self.get_session(session_id) or {}
+        all_msgs = self.get_history(session_id)
+        summary = (session.get("summary") or "").strip()
+        if len(all_msgs) > summary_trigger:
+            older = all_msgs[:-window] if window else all_msgs
+            # Exclude the latest user turn (added before context is built)
+            fold = older[:-1] if older and older[-1].get("role") == "user" else older
+            if fold:
+                bits = []
+                for m in fold[-24:]:
+                    role = (m.get("role") or "?").upper()
+                    content = (m.get("content") or "").strip().replace("\n", " ")
+                    if content:
+                        bits.append(f"{role}: {content[:180]}")
+                folded = " | ".join(bits)
+                if folded:
+                    summary = (summary + " | " + folded).strip(" |") if summary else folded
+                    summary = summary[-3500:]
+                    self.set_summary(session_id, summary)
+        recent = self.get_history(session_id, limit=window)
+        # Drop the trailing user message from "recent" display — it's the current turn
+        if recent and recent[-1].get("role") == "user":
+            recent = recent[:-1]
+        lines = [f"{m['role'].upper()}: {(m.get('content') or '').strip()}" for m in recent if (m.get("content") or "").strip()]
+        facts = self.list_facts(session_id)
+        return {
+            "summary": summary,
+            "recent_text": "\n".join(lines),
+            "slots": dict(session.get("slots") or {}),
+            "facts": facts,
+            "message_count": len(all_msgs),
+        }
+
+    def upsert_fact(
+        self,
+        session_id: str,
+        key: str,
+        value: Any,
+        *,
+        provenance: str = "slot",
+        source_message_id: str | None = None,
+        confidence: float = 1.0,
+    ) -> str:
+        now = _utc()
+        row = self.conn.execute(
+            "SELECT id FROM session_facts WHERE session_id=? AND key=?",
+            (session_id, key),
+        ).fetchone()
+        payload = json.dumps(value, ensure_ascii=False, default=str)
+        if row:
+            self.conn.execute(
+                "UPDATE session_facts SET value_json=?, provenance=?, source_message_id=?, "
+                "confidence=?, updated_at=? WHERE id=?",
+                (payload, provenance, source_message_id, confidence, now, row["id"]),
+            )
+            self.conn.commit()
+            return row["id"]
+        fid = str(uuid.uuid4())
+        self.conn.execute(
+            "INSERT INTO session_facts(id, session_id, key, value_json, provenance, "
+            "source_message_id, confidence, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (fid, session_id, key, payload, provenance, source_message_id, confidence, now, now),
+        )
+        self.conn.commit()
+        return fid
+
+    def list_facts(self, session_id: str) -> dict[str, Any]:
+        rows = self.conn.execute(
+            "SELECT key, value_json, provenance, confidence FROM session_facts WHERE session_id=?",
+            (session_id,),
+        ).fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[r["key"]] = {
+                    "value": json.loads(r["value_json"]),
+                    "provenance": r["provenance"],
+                    "confidence": r["confidence"],
+                }
+            except Exception:
+                out[r["key"]] = {"value": r["value_json"], "provenance": r["provenance"]}
+        return out
+
     def search_session(self, session_id: str, query: str, top_k: int = 5) -> list[dict]:
         q = (query or "").lower()
         hits = []
@@ -194,20 +318,37 @@ class ChatMemory:
                 "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
+        sids = [r["session_id"] for r in rows]
+        counts: dict[str, int] = {sid: 0 for sid in sids}
+        if sids:
+            placeholders = ",".join("?" * len(sids))
+            for cr in self.conn.execute(
+                f"SELECT session_id, COUNT(*) AS n FROM messages "
+                f"WHERE session_id IN ({placeholders}) GROUP BY session_id",
+                sids,
+            ):
+                counts[cr["session_id"]] = int(cr["n"])
         out = []
         for r in rows:
             d = dict(r)
             d["slots"] = json.loads(d.pop("slots_json") or "{}")
-            msgs = self.get_history(d["session_id"], limit=2)
+            sid = d["session_id"]
+            # Last 2 messages only (DESC + reverse) — avoid loading full history
+            preview_rows = self.conn.execute(
+                "SELECT role, content FROM messages WHERE session_id=? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 2",
+                (sid,),
+            ).fetchall()
+            msgs = list(reversed(preview_rows))
             preview = ""
             for m in msgs:
-                if m.get("role") == "user" and (m.get("content") or "").strip():
+                if m["role"] == "user" and (m["content"] or "").strip():
                     preview = (m["content"] or "").strip()
                     break
             if not preview and msgs:
-                preview = (msgs[0].get("content") or "").strip()
+                preview = (msgs[0]["content"] or "").strip()
             d["preview"] = preview[:120]
-            d["message_count"] = len(self.get_history(d["session_id"]))
+            d["message_count"] = counts.get(sid, 0)
             out.append(d)
         return out
 

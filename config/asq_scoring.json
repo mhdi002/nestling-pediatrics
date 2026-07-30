@@ -1,0 +1,9 @@
+{
+  "score_yes": 10,
+  "score_sometimes": 5,
+  "score_not_yet": 0,
+  "cutoff_source": "unverified_default",
+  "cutoff_note": "Official ASQ-3 cutoffs are age- and domain-specific (Brookes Publishing). Until operator-supplied cutoffs are loaded, a flat default of 30 is used and must be disclosed to parents.",
+  "default_cutoff": 30,
+  "domain_cutoffs": {}
+}

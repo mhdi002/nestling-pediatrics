@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from assistant.agent.orchestrator import ParentAssistant, extract_growth_slots
 from assistant.memory.chat_memory import ChatMemory
 from assistant.memory.child_db import ChildMemoryDB
+from assistant.settings import get_settings
 
 
 def test_chat_memory_persists_turns():
@@ -57,8 +58,9 @@ def test_only_allowed_models_advertised():
     asst = ParentAssistant(use_xlam=False, use_pleias=False)
     sid = asst.start_session()
     out = asst.chat(sid, "hello")
-    assert out["models"]["tool_calling"] == "Salesforce/xLAM-1b-fc-r"
-    assert out["models"]["rag"] == "PleIAs/Pleias-RAG-1B"
+    settings = get_settings()
+    assert out["models"]["tool_calling"] == settings.nestling_tool_model
+    assert out["models"]["rag"] == settings.nestling_llm_model
     asst.chat_memory.close()
     asst.db.close()
 

@@ -23,7 +23,9 @@ def test_published_examples():
 
 
 def test_tool_matches_module():
-    out = growth_percentile("male", "weight", 40, value=3.5)
+    out = growth_percentile(
+        "male", "weight", 40, value=3.5, chart_standard="intergrowth_preterm"
+    )
     assert out["tool"] == "growth_percentile"
     assert out["ok"] is True
     assert abs(out["centile"] - ig.centile_from_measurement("male", "weight", 40, 3.5)) < 1e-9

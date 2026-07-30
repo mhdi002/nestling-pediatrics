@@ -119,11 +119,15 @@
         </div>
         <div id="chat-thread" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions"></div>
         <form id="chat-form" class="chat-composer">
-          <label class="sr-only" for="chat-input">Message</label>
+          <div class="composer-field">
+            <label class="sr-only" for="chat-input" data-i18n="messageLabel">Message</label>
             <textarea id="chat-input" rows="1" data-i18n-placeholder="chatPh" placeholder="Type a message…" required maxlength="2000"></textarea>
-          <input type="file" id="chat-image" accept="image/*" hidden />
-          <button type="button" class="btn btn-ghost btn-send" id="chat-attach" data-i18n-title="attachPhoto" title="Attach photo" aria-label="Attach photo">📷</button>
-          <button type="submit" class="btn btn-primary btn-send" id="chat-send" aria-label="Send">
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon btn-attach-plus" id="chat-attach" data-i18n-title="attach" aria-label="Attach">
+            <span class="attach-plus-glyph" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="btn btn-ghost btn-send" id="chat-cancel" hidden data-i18n="cancel" data-i18n-title="cancel" title="Cancel" aria-label="Cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-send" id="chat-send" data-i18n-title="send" title="Send" aria-label="Send">
             <span class="btn-label" data-i18n="send">Send</span>
             <span class="spinner" hidden aria-hidden="true"></span>
           </button>

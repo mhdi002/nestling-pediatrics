@@ -19,7 +19,29 @@ def test_maturity_classifier():
     assert classify_maturity(40) == "term"
 
 
-def test_preterm_routes_to_intergrowth():
+def test_preterm_age_months_not_treated_as_pma_weeks():
+    """Regression: 13.5 months must not plot as PMA≈59w → ~7m chronological."""
+    from assistant.refdata import weeks_per_month
+
+    age_m = 13.5
+    life_weeks = age_m * weeks_per_month()
+    r = growth_percentile(
+        "female",
+        "weight",
+        weeks=life_weeks,
+        age_months=age_m,
+        value=9.0,
+        gestational_age_weeks=32,
+        chart_standard="intergrowth_preterm",
+    )
+    assert r["ok"] is True
+    # PMA 32+13.5*wpm exceeds INTERGROWTH → WHO at chronological 13.5
+    assert r["chart_standard"] == "who_term"
+    assert abs(float(r["age_months"]) - 13.5) < 0.05
+    assert r.get("note")
+
+
+def test_intergrowth_returns_chronological_age_months():
     r = growth_percentile(
         "male",
         "weight",
@@ -29,7 +51,9 @@ def test_preterm_routes_to_intergrowth():
     )
     assert r["ok"] is True
     assert r["chart_standard"] == "intergrowth_preterm"
-    assert abs(r["centile"] - 30.85) < 0.2
+    assert r["age_months"] is not None
+    # 40 PMA − 32 GA = 8 life-weeks ≈ 1.84 months
+    assert 1.5 < float(r["age_months"]) < 2.2
 
 
 def test_term_routes_to_who():

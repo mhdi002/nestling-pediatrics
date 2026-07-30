@@ -42,25 +42,37 @@ def test_tool_specs_cover_all_tools():
 
 
 def test_weeks_bounds_rejected():
-    low = growth_percentile("male", "weight", WEEKS_MIN - 1, value=3.0)
+    low = growth_percentile(
+        "male", "weight", WEEKS_MIN - 1, value=3.0, chart_standard="intergrowth_preterm"
+    )
     assert low["ok"] is False
     assert "27" in low["error"] or "weeks" in low["error"].lower()
 
-    high = growth_percentile("female", "weight", WEEKS_MAX + 0.1, value=5.0)
+    high = growth_percentile(
+        "female", "weight", WEEKS_MAX + 0.1, value=5.0, chart_standard="intergrowth_preterm"
+    )
     assert high["ok"] is False
 
-    ok = growth_percentile("male", "weight", 40, value=3.2)
+    ok = growth_percentile(
+        "male", "weight", 40, value=3.2, chart_standard="intergrowth_preterm"
+    )
     assert ok["ok"] is True
     assert ok["centile"] is not None
 
 
 def test_invalid_sex_and_measure():
-    assert growth_percentile("unknown", "weight", 40)["ok"] is False
-    assert growth_percentile("male", "bmi", 40)["ok"] is False
+    assert growth_percentile(
+        "unknown", "weight", 40, chart_standard="intergrowth_preterm"
+    )["ok"] is False
+    assert growth_percentile(
+        "male", "bmi", 40, chart_standard="intergrowth_preterm"
+    )["ok"] is False
 
 
 def test_value_range_rejected():
-    huge = growth_percentile("male", "weight", 40, value=999)
+    huge = growth_percentile(
+        "male", "weight", 40, value=999, chart_standard="intergrowth_preterm"
+    )
     assert huge["ok"] is False
     assert "value" in huge["error"].lower() or "between" in huge["error"].lower()
 
@@ -82,7 +94,9 @@ def test_overlay_missing_matplotlib_graceful():
             return real_import(name, *args, **kwargs)
 
         with mock.patch("builtins.__import__", side_effect=_blocked):
-            out = overlay_growth_on_chart("male", "weight", 40, 3.2)
+            out = overlay_growth_on_chart(
+                "male", "weight", 40, 3.2, chart_standard="intergrowth_preterm"
+            )
     assert out.get("ok") is True  # numeric assessment still present
     assert out.get("overlay_path") is None
     assert out.get("centile") is not None
@@ -122,8 +136,12 @@ def test_get_child_summary_tool():
 
 
 def test_boundary_weeks_27_and_64():
-    a = growth_percentile("male", "weight", 27, value=0.9)
-    b = growth_percentile("female", "length", 64, value=65.0)
+    a = growth_percentile(
+        "male", "weight", 27, value=0.9, chart_standard="intergrowth_preterm"
+    )
+    b = growth_percentile(
+        "female", "length", 64, value=65.0, chart_standard="intergrowth_preterm"
+    )
     assert a["ok"] is True
     assert b["ok"] is True
 
@@ -131,3 +149,9 @@ def test_boundary_weeks_27_and_64():
 def test_score_mchat_invalid_returns_error_dict():
     out = dispatch_tool("score_mchat", {"answers": {"1": "maybe"}})
     assert out["ok"] is False
+
+
+def test_missing_ga_requires_clarification():
+    out = growth_percentile("male", "weight", 40, value=3.2)
+    assert out["ok"] is False
+    assert out.get("needs_gestational_age") is True

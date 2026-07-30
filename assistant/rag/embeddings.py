@@ -2,8 +2,9 @@
 """
 Lexical retrieval only (BM25-style). No third-party embedding models.
 
-Neural generation is handled exclusively by PleIAs/Pleias-RAG-1B in stores.py.
-Tool calling is handled exclusively by Salesforce/xLAM-1b-fc-r.
+Neural generation is handled by the local Qwen OpenAI-compatible sidecar in stores.py
+(or extractive fallback when the LLM is down).
+Tool calling is handled by Salesforce/xLAM-1b-fc-r (optional) or deterministic router.
 """
 
 from __future__ import annotations
@@ -87,12 +88,11 @@ class HashingEmbedder:
 
 def get_embedder(backend: str = "bm25", model_id: str | None = None):
     """
-    Only BM25 is supported. model_id is ignored — neural embedders are forbidden
-    so the project uses solely xLAM-1b-fc-r and Pleias-RAG-1B.
+    Only BM25 is supported. model_id is ignored — neural embedders are disabled.
     """
     if backend in {"sentence-transformers", "hf", "pleias-embed"}:
         raise RuntimeError(
             "Neural embedding backends are disabled. "
-            "Allowed HF models: Salesforce/xLAM-1b-fc-r, PleIAs/Pleias-RAG-1B only."
+            "RAG retrieval uses BM25; generation uses the local Qwen LLM sidecar."
         )
     return HashingEmbedder()

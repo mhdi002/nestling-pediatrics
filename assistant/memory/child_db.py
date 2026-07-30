@@ -51,6 +51,7 @@ class ChildMemoryDB:
               centile REAL,
               track_status TEXT,
               recorded_at TEXT,
+              age_months REAL,
               FOREIGN KEY(child_id) REFERENCES children(child_id)
             );
             CREATE TABLE IF NOT EXISTS screening_sessions (
@@ -75,6 +76,16 @@ class ChildMemoryDB:
             """
         )
         self.conn.commit()
+        # Migrate older DBs that lack chronological age_months on growth rows.
+        cols = {
+            r[1]
+            for r in self.conn.execute("PRAGMA table_info(growth_measurements)").fetchall()
+        }
+        if "age_months" not in cols:
+            self.conn.execute(
+                "ALTER TABLE growth_measurements ADD COLUMN age_months REAL"
+            )
+            self.conn.commit()
 
     def create_child(
         self,
@@ -112,20 +123,28 @@ class ChildMemoryDB:
         z_score: float | None = None,
         centile: float | None = None,
         track_status: str | None = None,
+        age_months: float | None = None,
     ) -> str:
         gid = str(uuid.uuid4())
         now = _utc()
         self.conn.execute(
-            "INSERT INTO growth_measurements(id,child_id,weeks,measure,value,z_score,centile,track_status,recorded_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
-            (gid, child_id, weeks, measure, value, z_score, centile, track_status, now),
+            "INSERT INTO growth_measurements(id,child_id,weeks,measure,value,z_score,centile,track_status,recorded_at,age_months) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (gid, child_id, weeks, measure, value, z_score, centile, track_status, now, age_months),
         )
         self.conn.commit()
         self.add_event(
             child_id,
             "growth",
             f"{measure}={value} at {weeks}w (centile={centile})",
-            {"measure": measure, "weeks": weeks, "value": value, "centile": centile, "z_score": z_score},
+            {
+                "measure": measure,
+                "weeks": weeks,
+                "value": value,
+                "centile": centile,
+                "z_score": z_score,
+                "age_months": age_months,
+            },
         )
         return gid
 

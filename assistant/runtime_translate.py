@@ -143,6 +143,11 @@ def translate_for_models(user_message: str, ui_lang: str | None = None) -> tuple
     ui_lang forces reply language when set to 'fa' or 'en'.
     """
     detected = detect_lang(user_message)
-    reply_lang = ui_lang if ui_lang in {"fa", "en"} else detected
+    # If parent writes in Persian, keep replies Persian consistently even when UI lang
+    # is still set to English.
+    if detected == "fa":
+        reply_lang = "fa"
+    else:
+        reply_lang = ui_lang if ui_lang in {"fa", "en"} else detected
     en = translate_fa_to_en(user_message) if detected == "fa" else user_message
     return reply_lang, en
