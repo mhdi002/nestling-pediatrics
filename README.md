@@ -2,6 +2,12 @@
 
 Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term + INTERGROWTH preterm), age-aware feeding/sleep/iron/speech/skin/milestone guidance, and optional ASQ / M-CHAT screening helpers. The UI and API speak **English and Persian (FA)**. Growth numbers always come from deterministic clinical tools—not from the LLM.
 
+## Demo
+
+<video src="docs/assets/demo.mp4" controls width="100%"></video>
+
+[Download demo](docs/assets/demo.mp4)
+
 ## Features
 
 - **Growth tools** — percentiles / overlays for weight, length/height, and head circumference; WHO (term) and INTERGROWTH (preterm PMA) routing
