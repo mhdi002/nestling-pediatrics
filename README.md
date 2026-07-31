@@ -4,9 +4,9 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
 
 ## Demo
 
-<video src="docs/assets/demo.mp4" controls width="100%"></video>
+![Nestling demo](docs/assets/demo-preview.gif)
 
-[Download demo](docs/assets/demo.mp4)
+[Download full demo (MP4)](docs/assets/demo.mp4)
 
 ## Features
 
