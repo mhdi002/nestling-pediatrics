@@ -59,48 +59,63 @@
         <p class="home-foot" id="health-status" data-i18n="checking">Checking connection…</p>
       </section>
 
-      <section id="view-child" class="view" data-route="/child" hidden>
-        <header class="view-head">
+      <section id="view-child" class="view view-child" data-route="/child" hidden>
+        <header class="view-head compact">
           <a class="back-link" href="#/" data-i18n="home">← Home</a>
           <h2 data-i18n="childTitle">My child</h2>
           <p class="view-sub" data-i18n="childSub">Create a profile or pick who you’re caring for today.</p>
         </header>
 
-        <div class="panel">
-          <h3 class="panel-title" data-i18n="savedChildren">Saved children</h3>
-          <div id="children-list" class="child-list" role="list">
-            <p class="muted" data-i18n="loading">Loading…</p>
-          </div>
-        </div>
-
-        <div id="child-dossier" class="panel dossier-panel" hidden>
-          <h3 class="panel-title" data-i18n="childDossier">Selected child</h3>
-          <div id="child-dossier-body"></div>
-        </div>
-
-        <form id="child-form" class="panel form-stack" autocomplete="on">
-          <h3 class="panel-title" data-i18n="addChild">Add a child</h3>
-          <label class="field">
-            <span data-i18n="name">Name</span>
-            <input type="text" name="name" required maxlength="80" data-i18n-placeholder="namePh" placeholder="e.g. Maya" />
-          </label>
-          <fieldset class="field-group">
-            <legend data-i18n="sex">Sex</legend>
-            <div class="seg">
-              <label class="seg-opt"><input type="radio" name="sex" value="female" required /><span data-i18n="girl">Girl</span></label>
-              <label class="seg-opt"><input type="radio" name="sex" value="male" /><span data-i18n="boy">Boy</span></label>
+        <div class="child-workspace">
+          <div class="child-picker-bar panel">
+            <div class="child-picker-head">
+              <h3 class="panel-title tight" data-i18n="savedChildren">Saved children</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="toggle-add-child" data-i18n="addChild">Add a child</button>
             </div>
-          </fieldset>
-          <label class="field">
-            <span data-i18n="ga">Gestational age at birth (weeks)</span>
-            <input type="number" name="gestational_age_weeks" required min="22" max="45" step="0.5" data-i18n-placeholder="gaPh" placeholder="e.g. 32" inputmode="decimal" />
-            <small class="field-hint" data-i18n="gaHint">Under 37 weeks = preterm. 37 weeks or more = term. The correct chart is chosen automatically.</small>
-          </label>
-          <button type="submit" class="btn btn-primary btn-block" id="child-submit">
-            <span class="btn-label" data-i18n="saveChild">Save child</span>
-            <span class="spinner" hidden aria-hidden="true"></span>
-          </button>
-        </form>
+            <div id="children-list" class="child-chips" role="list">
+              <p class="muted" data-i18n="loading">Loading…</p>
+            </div>
+          </div>
+
+          <div id="child-dossier" class="panel dossier-panel child-summary-panel" hidden>
+            <div id="child-dossier-body"></div>
+          </div>
+
+          <p id="child-empty-hint" class="muted child-empty-hint" hidden data-i18n="noChildrenYet">No children yet — add one below.</p>
+
+          <form id="child-form" class="panel form-stack add-child-panel" autocomplete="on" hidden>
+            <h3 class="panel-title" data-i18n="addChild">Add a child</h3>
+            <div class="form-grid-2">
+              <label class="field">
+                <span data-i18n="name">Name</span>
+                <input type="text" name="name" required maxlength="80" data-i18n-placeholder="namePh" placeholder="e.g. Maya" />
+              </label>
+              <label class="field">
+                <span data-i18n="dob">Date of birth</span>
+                <input type="date" name="date_of_birth" />
+              </label>
+            </div>
+            <fieldset class="field-group">
+              <legend data-i18n="sex">Sex</legend>
+              <div class="seg">
+                <label class="seg-opt"><input type="radio" name="sex" value="female" required /><span data-i18n="girl">Girl</span></label>
+                <label class="seg-opt"><input type="radio" name="sex" value="male" /><span data-i18n="boy">Boy</span></label>
+              </div>
+            </fieldset>
+            <label class="field">
+              <span data-i18n="ga">Gestational age at birth (weeks)</span>
+              <input type="number" name="gestational_age_weeks" required min="22" max="45" step="0.5" data-i18n-placeholder="gaPh" placeholder="e.g. 32" inputmode="decimal" />
+              <small class="field-hint" data-i18n="gaHint">Under 37 weeks = preterm. 37 weeks or more = term. The correct chart is chosen automatically.</small>
+            </label>
+            <div class="form-actions-row">
+              <button type="button" class="btn btn-ghost" id="cancel-add-child" data-i18n="cancel">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="child-submit">
+                <span class="btn-label" data-i18n="saveChild">Save child</span>
+                <span class="spinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <section id="view-chat" class="view view-chat" data-route="/chat" hidden>
@@ -184,23 +199,38 @@
       </section>
 
       <section id="view-screening" class="view" data-route="/screening" hidden>
-        <header class="view-head">
+        <header class="view-head compact">
           <a class="back-link" href="#/" id="screening-back" data-i18n="home">← Home</a>
           <h2 id="screening-title" data-i18n="screeningTitle">Screening</h2>
           <p class="view-sub" id="screening-sub" data-i18n="screeningSub">Pick a questionnaire for your child’s age.</p>
         </header>
 
-        <div id="screening-picker" class="panel">
-          <label class="field">
-            <span data-i18n="childOptional">Child (optional)</span>
-            <select id="screening-child">
-              <option value="" data-i18n="none">— None —</option>
-            </select>
-          </label>
-          <h3 class="panel-title" data-i18n="asqTitle">ASQ — Ages &amp; Stages</h3>
-          <div id="asq-ages" class="chip-grid"></div>
-          <h3 class="panel-title spaced" data-i18n="mchatTitle">M-CHAT-R</h3>
-          <button type="button" class="btn btn-secondary btn-block" id="start-mchat" data-i18n="startMchat">Start M-CHAT-R</button>
+        <div id="screening-picker" class="panel screening-picker">
+          <div class="screening-controls">
+            <label class="field">
+              <span data-i18n="childOptional">Child (optional)</span>
+              <select id="screening-child">
+                <option value="" data-i18n="none">— None —</option>
+              </select>
+            </label>
+            <label class="field" id="screening-age-field">
+              <span data-i18n="ageMonthsShort">Age (months)</span>
+              <input type="number" id="screening-age-months" min="0" max="72" step="0.5" placeholder="e.g. 12" inputmode="decimal" />
+            </label>
+          </div>
+          <p id="screening-age-badge" class="age-badge" hidden></p>
+
+          <div id="screening-upcoming" class="upcoming-block">
+            <h3 class="panel-title tight" data-i18n="upcomingTests">Upcoming / current tests</h3>
+            <div id="asq-ages" class="test-card-list"></div>
+            <div id="mchat-slot" class="test-card-list mchat-slot"></div>
+          </div>
+
+          <button type="button" class="btn btn-ghost btn-block" id="btn-prev-results" data-i18n="previousResults">View previous test results</button>
+          <div id="screening-history" class="screening-history" hidden>
+            <h3 class="panel-title tight" data-i18n="previousResultsTitle">Previous results</h3>
+            <div id="screening-history-body"></div>
+          </div>
         </div>
 
         <div id="screening-quiz" hidden>
