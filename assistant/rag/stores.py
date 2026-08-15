@@ -10,6 +10,8 @@ Tool calling elsewhere: Salesforce/xLAM-1b-fc-r (optional) or deterministic rout
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -22,61 +24,81 @@ from assistant.config import (
     MEDICAL_INDEX_DIR,
 )
 from assistant.rag.embeddings import BM25Index
+from assistant.refdata import care_topics
+from assistant.settings import get_settings
 
-# EN + FA feeding / nutrition cues for topic isolation (never confuse with growth charts).
-_FEEDING_KEYWORDS = (
-    "feed",
-    "feeding",
-    "food",
-    "foods",
-    "eat",
-    "eaten",
-    "eating",
-    "milk",
-    "breast",
-    "breastfeed",
-    "breastfeeding",
-    "formula",
-    "solid",
-    "solids",
-    "weaning",
-    "complementary",
-    "nutrition",
-    "تغذیه",
-    "غذا",
-    "خوراک",
-    "شیر",
-    "بخوره",
-    "بدم",
-)
-_FEEDING_RE = re.compile(
-    r"چی\s*(?:به(?:ش|ش)?\s*)?بدم|چه\s*غذایی|غذا\s*باید|بچم\s*غذا|به(?:ش|ش)?\s*چی\s*بدم",
-    re.I,
-)
-_GROWTH_CENTILE_DOC_RE = re.compile(
-    r"(centile|percentile|growth.?chart|intergrowth|صدک|نمودار\s*رشد)",
-    re.I,
-)
+log = logging.getLogger(__name__)
+
+# All care-topic keywords, patterns, age bands and ranking weights live in
+# config/care_topics.yaml so clinical routing data is editable without code changes.
+_CFG = care_topics()
+_TOPICS: dict[str, dict] = _CFG.get("topics") or {}
+_RANKING: dict = _CFG.get("ranking") or {}
+_BOOSTS: dict = _RANKING.get("boosts") or {}
+_PENALTIES: dict = _RANKING.get("penalties") or {}
+_MATCH_TERMS: dict = _RANKING.get("match_terms") or {}
+_SELECTION: dict = _CFG.get("selection") or {}
+_SCAN_CHARS: dict = _SELECTION.get("scan_chars") or {}
+_MESSAGES: dict = _CFG.get("messages") or {}
+
+# Parent-facing boilerplate for the non-LLM extractive path. Topic-neutral: the
+# previous wording was skin-specific and bled into speech/feeding answers.
+SAFETY_TAIL = _MESSAGES["safety_tail"]
+CITATION_TAIL = _MESSAGES["citation_tail"]
+NO_MATCH_REPLY = _MESSAGES["no_match"]
+
+
+def _kw(topic: str) -> tuple[str, ...]:
+    return tuple((_TOPICS.get(topic) or {}).get("keywords") or ())
+
+
+def _expansion(topic: str) -> str:
+    return " ".join(((_TOPICS.get(topic) or {}).get("query_expansion") or "").split())
+
+
+def _terms(name: str) -> tuple[str, ...]:
+    return tuple(_MATCH_TERMS.get(name) or ())
+
+
+def _selected(name: str) -> tuple[str, ...]:
+    return tuple(_SELECTION.get(name) or ())
+
+
+_FEEDING_KEYWORDS = _kw("feeding")
+_IRON_KEYWORDS = _kw("iron")
+_SLEEP_KEYWORDS = _kw("sleep")
+_RASH_KEYWORDS = _kw("rash")
+_MOTOR_KEYWORDS = _kw("motor")
+_SPEECH_KEYWORDS = _kw("speech")
+_GROWTH_EXPLAIN_KEYWORDS = _kw("growth_explain")
+_SCREENING_KEYWORDS = _kw("screening")
+
+_FEEDING_RE = re.compile((_TOPICS.get("feeding") or {})["pattern"], re.I)
+_GROWTH_CENTILE_DOC_RE = re.compile(_CFG["growth_centile_doc_pattern"], re.I)
 # Metadata the orchestrator appends — must not drive topic classification.
-_TOPIC_META_LINE_RE = re.compile(
-    r"(?im)^(?:known chronological age:|known child (?:sex|age):|born preterm at).*$"
-)
-_MOTOR_KEYWORDS = (
-    "walk",
-    "walking",
-    "crawl",
-    "crawling",
-    "cruise",
-    "cruising",
-    "standing",
-    "gross motor",
-    "fine motor",
-    "motor skill",
-    "pull to stand",
-    "pulling to stand",
-    "راه رفتن",
-    "خزیدن",
-)
+_TOPIC_META_LINE_RE = re.compile(_CFG["meta_line_pattern"])
+
+# How much of a chunk body each filter reads. Full bodies are long enough that
+# scanning everything pulls in incidental mentions of other topics.
+_DOC_HEAD_CHARS = 240
+
+
+def _scan(topic: str) -> int:
+    return int(_SCAN_CHARS.get(topic, _DOC_HEAD_CHARS))
+
+
+_CARE_ID_PREFIXES = tuple(_RANKING.get("care_id_prefixes") or ())
+_CURATED_ID_PREFIXES = tuple(_RANKING.get("curated_id_prefixes") or ())
+_QUESTIONNAIRE_ID_PREFIXES = tuple(_RANKING.get("questionnaire_id_prefixes") or ())
+_CARE_TITLES = tuple(_RANKING.get("care_titles") or ())
+
+
+def _hit_matches(hit: dict, terms: tuple[str, ...], scan_chars: int) -> bool:
+    """True when any term appears in the chunk's title, id, or leading body text."""
+    title = (hit.get("title") or "").lower()
+    text = (hit.get("text") or "").lower()[:scan_chars]
+    hid = str(hit.get("id") or "").lower()
+    return any(t in title or t in text or t in hid for t in terms)
 
 
 def _topic_text_for_detection(text: str) -> str:
@@ -104,29 +126,14 @@ def _is_motor_query(text: str) -> bool:
 
 
 def _feeding_ids_for_age(age_m: float | None) -> tuple[str, ...]:
-    """Prefer age-banded curated feeding chunk ids."""
+    """Prefer age-banded curated feeding chunk ids (bands from config/care_topics.yaml)."""
     if age_m is None:
-        return (
-            "info_feeding_newborn",
-            "info_feeding_0_3m",
-            "info_feeding_4_5m",
-            "info_feeding_solids_6m",
-            "info_feeding_7_9m",
-            "info_feeding_10_12m",
-            "info_feeding_12_24m",
-            "info_iron_breastfed",
-        )
-    if age_m < 4:
-        return ("info_feeding_newborn", "info_feeding_0_3m", "info_iron_breastfed")
-    if age_m < 6:
-        return ("info_feeding_4_5m", "info_feeding_0_3m", "info_iron_breastfed")
-    if age_m < 7:
-        return ("info_feeding_solids_6m", "info_feeding_4_5m", "info_iron_breastfed")
-    if age_m < 10:
-        return ("info_feeding_7_9m", "info_feeding_solids_6m")
-    if age_m < 12:
-        return ("info_feeding_10_12m", "info_feeding_7_9m")
-    return ("info_feeding_12_24m", "info_feeding_10_12m")
+        return tuple(_CFG.get("feeding_ids_unknown_age") or ())
+    for band in _CFG.get("feeding_age_bands") or []:
+        upper = band.get("max_age_months")
+        if upper is None or age_m < float(upper):
+            return tuple(band.get("ids") or ())
+    return ()
 
 
 def _is_feeding_doc(doc: dict) -> bool:
@@ -138,10 +145,10 @@ def _is_feeding_doc(doc: dict) -> bool:
 def _is_growth_centile_doc(doc: dict) -> bool:
     hid = str(doc.get("id") or "")
     title = doc.get("title") or ""
-    text_head = (doc.get("text") or "")[:240]
+    text_head = (doc.get("text") or "")[:_DOC_HEAD_CHARS]
     if "feeding" in hid.lower():
         return False
-    if "centile" in hid.lower() or "intergrowth" in hid.lower():
+    if any(t in hid.lower() for t in _terms("growth_explain_id")):
         return True
     return bool(_GROWTH_CENTILE_DOC_RE.search(f"{hid} {title} {text_head}"))
 
@@ -151,9 +158,11 @@ def _select_feeding_hits(
     retrieved: list[dict],
     *,
     age_m: float | None,
-    top_k: int = 3,
+    top_k: int | None = None,
 ) -> list[dict]:
     """Force feeding guidance chunks; never return growth-centile explainers for feeding asks."""
+    if top_k is None:
+        top_k = get_settings().nestling_rag_topic_hits
     preferred_ids = _feeding_ids_for_age(age_m)
     by_id = {str(d.get("id")): d for d in docs}
     picked: list[dict] = []
@@ -220,26 +229,42 @@ class VectorStore:
         self.bm25.fit(texts)
 
     def save(self):
+        """Write the index atomically so a reader never sees a half-written file."""
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        (self.index_dir / "docs.json").write_text(
+        docs_path = self.index_dir / "docs.json"
+        tmp_path = docs_path.with_suffix(f".{os.getpid()}.tmp")
+        tmp_path.write_text(
             json.dumps(self.docs, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        os.replace(tmp_path, docs_path)
 
     def load(self) -> bool:
+        """Load a persisted index. A missing or corrupt file means 'rebuild me'."""
         docs_path = self.index_dir / "docs.json"
         if not docs_path.exists():
             return False
-        self.docs = json.loads(docs_path.read_text(encoding="utf-8"))
+        try:
+            docs = json.loads(docs_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            log.warning("Ignoring unreadable RAG index %s: %s", docs_path, exc)
+            return False
+        if not isinstance(docs, list):
+            log.warning("Ignoring malformed RAG index %s: expected a list of docs", docs_path)
+            return False
+        self.docs = docs
         self._rebuild()
         return True
 
-    def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[dict]:
+    def search(self, query: str, top_k: int | None = None, filters: dict | None = None) -> list[dict]:
+        settings = get_settings()
+        if top_k is None:
+            top_k = settings.nestling_rag_top_k
         if not self.docs:
             return []
         sims = self.bm25.scores(query)
         order = np.argsort(-sims)
         # Pull a wider BM25 pool so dense fusion (when enabled) can re-rank.
-        pool_n = max(top_k * 5, 25)
+        pool_n = max(top_k * settings.nestling_rag_pool_multiplier, settings.nestling_rag_pool_min)
         candidates = []
         for i in order:
             doc = dict(self.docs[int(i)])
@@ -262,8 +287,8 @@ class VectorStore:
                 fused_ids = hybrid_order(bm25_ids, query, id_to_text, top_k=top_k)
                 by_id = {str(d.get("id")): d for d in candidates}
                 return [by_id[i] for i in fused_ids if i in by_id]
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Dense re-ranking failed, falling back to BM25: %s", exc)
         return candidates[:top_k]
 
 
@@ -282,12 +307,22 @@ class MedicalRAG:
     def load(self) -> bool:
         return self.store.load()
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[dict]:
+    def retrieve(self, query: str, top_k: int | None = None) -> list[dict]:
         return self.store.search(query, top_k=top_k)
 
-    def answer(self, query: str, top_k: int = 5, use_llm: bool = True, *, use_pleias: bool | None = None) -> dict:
+    def answer(
+        self,
+        query: str,
+        top_k: int | None = None,
+        use_llm: bool = True,
+        *,
+        use_pleias: bool | None = None,
+    ) -> dict:
         if use_pleias is not None:
             use_llm = use_pleias
+        settings = get_settings()
+        if top_k is None:
+            top_k = settings.nestling_rag_top_k
         # Topic detection must ignore injected chat memory — only the current user turn.
         topic_src = query or ""
         if "[CURRENT_USER]" in topic_src:
@@ -299,23 +334,11 @@ class MedicalRAG:
         )[0]
         detect_src = _topic_text_for_detection(topic_src)
         qlow = detect_src.lower()
-        iron_q = "iron" in qlow or "آهن" in qlow
+        iron_q = any(k in qlow for k in _IRON_KEYWORDS)
         # Iron wins over generic feeding/breast keywords ("iron for breastfed…")
         feeding_q = _is_feeding_query(detect_src) and not iron_q
         growth_explain_q = (not feeding_q) and any(
-            k in qlow
-            for k in (
-                "centile",
-                "percentile",
-                "z-score",
-                "z score",
-                "growth chart",
-                "intergrowth",
-                "who chart",
-                "نمودار",
-                "چارت",
-                "صدک",
-            )
+            k in qlow for k in _GROWTH_EXPLAIN_KEYWORDS
         )
         age_m = None
         # Age may live on metadata lines stripped from detect_src — read full topic_src.
@@ -327,42 +350,11 @@ class MedicalRAG:
         if m_age:
             try:
                 age_m = float(m_age.group(1) or m_age.group(2))
-            except Exception:
+            except (TypeError, ValueError):
                 age_m = None
-        screening_q = any(k in qlow for k in ("asq", "m-chat", "mchat", "autism", "screening item"))
-        sleep_q = "sleep" in qlow or "خواب" in qlow
-        rash_q = any(
-            k in qlow
-            for k in (
-                "rash",
-                "blister",
-                "vesicle",
-                "palm",
-                "sole",
-                "wound",
-                "scar",
-                "cut",
-                "scrape",
-                "injury",
-                "bruise",
-                "burn",
-                "lesion",
-                "redness",
-                "hfmd",
-                "hand foot",
-                "hand-foot",
-                "eczema",
-                "spot",
-                "bandage",
-                "جوش",
-                "راش",
-                "زخم",
-                "جراحت",
-                "خراش",
-                "کبودی",
-                "سوختگی",
-            )
-        )
+        screening_q = any(k in qlow for k in _SCREENING_KEYWORDS)
+        sleep_q = any(k in qlow for k in _SLEEP_KEYWORDS)
+        rash_q = any(k in qlow for k in _RASH_KEYWORDS)
         motor_q = (not feeding_q and not iron_q and not sleep_q and not rash_q) and _is_motor_query(
             detect_src
         )
@@ -373,56 +365,31 @@ class MedicalRAG:
             and not sleep_q
             and not rash_q
             and not motor_q
-        ) and any(
-            k in qlow
-            for k in (
-                "talk",
-                "speech",
-                "language",
-                "words",
-                "babbl",
-                "dada",
-                "mama",
-                "baba",
-                "papa",
-                "says",
-                "حرف",
-                "گفتار",
-                "صحبت",
-                "تاخیر",
-                "ماما",
-                "بابا",
-                "دادا",
-            )
-        )
+        ) and any(k in qlow for k in _SPEECH_KEYWORDS)
         # Expand short parent concerns so lexical search finds the right guidance chunk
         # Retrieval query = current turn only (memory context pollutes BM25).
         search_q = detect_src.strip() or topic_src.strip() or query
-        if feeding_q:
-            search_q = (
-                f"{search_q} infant feeding breastmilk formula complementary foods "
-                "nutrition what should baby eat age-appropriate"
-            )
-        elif iron_q:
-            search_q = f"{search_q} iron supplementation breastfed infant"
-        elif sleep_q:
-            search_q = f"{search_q} infant sleep safe sleep hours"
-        elif rash_q:
-            search_q = (
-                f"{search_q} pediatric skin wound scar cut scrape bruise burn "
-                "rash palm blister vesicle hand foot mouth redness first aid urgent care"
-            )
-        elif motor_q:
-            search_q = (
-                f"{search_q} gross motor walking crawling cruising standing milestones "
-                "toddler development pull to stand delayed walk"
-            )
-        elif speech_q:
-            search_q = f"{search_q} speech language development milestones infant cooing babbling"
+        for flag, topic in (
+            (feeding_q, "feeding"),
+            (iron_q, "iron"),
+            (sleep_q, "sleep"),
+            (rash_q, "rash"),
+            (motor_q, "motor"),
+            (speech_q, "speech"),
+        ):
+            if flag:
+                search_q = f"{search_q} {_expansion(topic)}".strip()
+                break
 
-        hits = self.retrieve(search_q, top_k=max(top_k * 3, 15))
+        hits = self.retrieve(
+            search_q,
+            top_k=max(top_k * settings.nestling_rag_query_multiplier, settings.nestling_rag_query_min),
+        )
+        topic_hits = settings.nestling_rag_topic_hits
         if feeding_q:
-            hits = _select_feeding_hits(self.store.docs, hits, age_m=age_m, top_k=max(top_k, 3))
+            hits = _select_feeding_hits(
+                self.store.docs, hits, age_m=age_m, top_k=max(top_k, topic_hits)
+            )
         elif not screening_q:
             # Prefer topic-matched care/guidance; drop raw questionnaire dumps.
             def _topic_rank(h: dict) -> tuple:
@@ -431,104 +398,44 @@ class MedicalRAG:
                 hid = str(h.get("id", ""))
                 score = float(h.get("score") or 0)
                 boost = 0.0
-                if iron_q and ("iron" in title or "iron" in text or "آهن" in text):
-                    boost += 50
-                if sleep_q and "sleep" in title:
-                    boost += 50
+                if iron_q and any(t in title or t in text for t in _IRON_KEYWORDS):
+                    boost += _BOOSTS["topic_text_match"]
+                if sleep_q and any(t in title for t in _SLEEP_KEYWORDS):
+                    boost += _BOOSTS["topic_text_match"]
                 if motor_q and any(
-                    t in title or t in text or t in hid
-                    for t in (
-                        "motor",
-                        "walk",
-                        "crawl",
-                        "cruise",
-                        "milestone",
-                        "development",
-                        "gross",
-                    )
+                    t in title or t in text or t in hid for t in _terms("motor_text")
                 ):
-                    boost += 55
-                if motor_q and (
-                    "development" in hid
-                    or "motor" in hid
-                    or "milestone" in hid
-                    or hid.startswith("guidance_curated_development")
-                ):
-                    boost += 80
-                if speech_q and any(
-                    t in title or t in text
-                    for t in ("speech", "language", "communication", "milestone", "talk", "babbl")
-                ):
-                    boost += 50
-                if speech_q and "speech" in hid:
-                    boost += 80
-                if rash_q and any(
-                    t in title or t in text
-                    for t in (
-                        "rash",
-                        "wound",
-                        "scar",
-                        "cut",
-                        "scrape",
-                        "bruise",
-                        "burn",
-                        "hand",
-                        "foot",
-                        "mouth",
-                        "blister",
-                        "skin",
-                        "fever",
-                        "vision",
-                        "hfmd",
-                        "first aid",
-                    )
-                ):
-                    boost += 55
-                if rash_q and any(
-                    k in hid
-                    for k in ("rash", "wound", "hfmd", "fever_rash", "photo", "scar", "skin")
-                ):
-                    boost += 80
+                    boost += _BOOSTS["motor_text_match"]
+                if motor_q and any(t in hid for t in _terms("motor_id")):
+                    boost += _BOOSTS["motor_id_match"]
+                if speech_q and any(t in title or t in text for t in _terms("speech_text")):
+                    boost += _BOOSTS["topic_text_match"]
+                if speech_q and any(t in hid for t in _terms("speech_id")):
+                    boost += _BOOSTS["speech_id_match"]
+                if rash_q and any(t in title or t in text for t in _terms("rash_text")):
+                    boost += _BOOSTS["rash_text_match"]
+                if rash_q and any(t in hid for t in _terms("rash_id")):
+                    boost += _BOOSTS["rash_id_match"]
                 if growth_explain_q and (
-                    "centile" in hid
-                    or "percentile" in title
-                    or "growth chart" in title
-                    or hid.startswith("intergrowth")
+                    any(t in hid for t in _terms("growth_explain_id"))
+                    or any(t in title for t in _terms("growth_explain_title"))
                 ):
-                    boost += 60
-                if hid.startswith(("info_", "intergrowth")):
-                    boost += 5
-                if hid.startswith(("mchat_", "asq_")) and not screening_q:
-                    boost -= 20
+                    boost += _BOOSTS["growth_explain_match"]
+                if hid.startswith(_CURATED_ID_PREFIXES):
+                    boost += _BOOSTS["curated_prefix"]
+                if hid.startswith(_QUESTIONNAIRE_ID_PREFIXES) and not screening_q:
+                    boost -= _PENALTIES["questionnaire_dump"]
                 # Keep feeding docs out of non-feeding medical answers.
                 if "feeding" in hid or "feeding" in title:
-                    boost -= 100
+                    boost -= _PENALTIES["off_topic_feeding"]
                 return (boost + score, score)
 
             care = [
                 h
                 for h in hits
-                if str(h.get("id", "")).startswith(("info_", "intergrowth", "guidance_"))
+                if str(h.get("id", "")).startswith(_CARE_ID_PREFIXES)
                 or "guidance" in (h.get("title") or "").lower()
-                or any(
-                    k in (h.get("title") or "").lower()
-                    for k in (
-                        "iron",
-                        "sleep",
-                        "vitamin",
-                        "speech",
-                        "language",
-                        "growth",
-                        "rash",
-                        "wound",
-                        "hand",
-                        "skin",
-                        "fever",
-                        "motor",
-                        "milestone",
-                        "development",
-                    )
-                )
+                or any(k in (h.get("title") or "").lower() for k in _CARE_TITLES)
                 or "intergrowth" in (h.get("text") or "").lower()
             ]
             # Drop feeding chunks entirely unless this is a feeding/iron ask.
@@ -548,52 +455,22 @@ class MedicalRAG:
             pool = care or [
                 h
                 for h in hits
-                if not str(h.get("id", "")).startswith(("mchat_", "asq_"))
+                if not str(h.get("id", "")).startswith(_QUESTIONNAIRE_ID_PREFIXES)
             ] or hits
             ranked = sorted(pool, key=_topic_rank, reverse=True)
             if iron_q:
                 iron_hits = [
-                    h
-                    for h in ranked
-                    if "iron" in (h.get("title") or "").lower()
-                    or "iron" in (h.get("text") or "").lower()[:400]
-                    or "آهن" in (h.get("text") or "")
+                    h for h in ranked if _hit_matches(h, _selected("iron"), _scan("iron"))
                 ]
-                hits = (iron_hits or ranked)[:3]
+                hits = (iron_hits or ranked)[:topic_hits]
             elif sleep_q:
                 sleep_hits = [
-                    h
-                    for h in ranked
-                    if "sleep" in (h.get("title") or "").lower()
-                    or "sleep" in (h.get("text") or "").lower()[:200]
+                    h for h in ranked if _hit_matches(h, _selected("sleep"), _scan("sleep"))
                 ]
-                hits = (sleep_hits or ranked)[:3]
+                hits = (sleep_hits or ranked)[:topic_hits]
             elif rash_q:
                 rash_hits = [
-                    h
-                    for h in ranked
-                    if any(
-                        k in (h.get("title") or "").lower()
-                        or k in (h.get("text") or "").lower()[:500]
-                        or k in str(h.get("id") or "").lower()
-                        for k in (
-                            "rash",
-                            "wound",
-                            "scar",
-                            "cut",
-                            "scrape",
-                            "bruise",
-                            "burn",
-                            "hand-foot",
-                            "hand foot",
-                            "blister",
-                            "skin",
-                            "fever and rash",
-                            "photo",
-                            "hfmd",
-                            "first aid",
-                        )
-                    )
+                    h for h in ranked if _hit_matches(h, _selected("rash"), _scan("rash"))
                 ]
                 if not rash_hits:
                     rash_hits = [
@@ -602,58 +479,46 @@ class MedicalRAG:
                         if any(
                             k in str(d.get("id") or "").lower()
                             or k in (d.get("title") or "").lower()
-                            for k in ("rash", "wound", "hfmd", "fever_rash", "photo_skin", "scar")
+                            for k in _selected("rash_fallback_ids")
                         )
                     ]
-                hits = (rash_hits or ranked)[:3]
+                hits = (rash_hits or ranked)[:topic_hits]
             elif motor_q:
                 motor_hits = [
-                    h
-                    for h in ranked
-                    if any(
-                        k in (h.get("title") or "").lower()
-                        or k in (h.get("text") or "").lower()[:500]
-                        or k in str(h.get("id") or "").lower()
-                        for k in (
-                            "motor",
-                            "walk",
-                            "crawl",
-                            "cruise",
-                            "milestone",
-                            "development",
-                            "gross",
-                            "toddler",
-                        )
-                    )
+                    h for h in ranked if _hit_matches(h, _selected("motor"), _scan("motor"))
                 ]
                 if not motor_hits:
                     motor_hits = [
                         d
                         for d in self.store.docs
-                        if "development" in str(d.get("id") or "").lower()
-                        or "motor" in str(d.get("id") or "").lower()
-                        or "milestone" in (d.get("title") or "").lower()
+                        if any(
+                            k in str(d.get("id") or "").lower()
+                            for k in _selected("motor_fallback_ids")
+                        )
+                        or any(
+                            k in (d.get("title") or "").lower()
+                            for k in _selected("motor_fallback_titles")
+                        )
                     ]
-                hits = (motor_hits or ranked)[:3]
+                hits = (motor_hits or ranked)[:topic_hits]
             elif speech_q:
                 speech_hits = [
-                    h
-                    for h in ranked
-                    if "speech" in (h.get("title") or "").lower()
-                    or "language" in (h.get("title") or "").lower()
-                    or "speech" in str(h.get("id") or "").lower()
-                    or "communication" in (h.get("title") or "").lower()
-                    or "talk" in (h.get("text") or "").lower()[:300]
+                    h for h in ranked if _hit_matches(h, _selected("speech"), _scan("speech"))
                 ]
                 if not speech_hits:
                     speech_hits = [
                         d
                         for d in self.store.docs
-                        if "speech" in str(d.get("id") or "").lower()
-                        or "speech" in (d.get("title") or "").lower()
-                        or "language" in (d.get("title") or "").lower()
+                        if any(
+                            k in str(d.get("id") or "").lower()
+                            for k in _selected("speech_fallback_ids")
+                        )
+                        or any(
+                            k in (d.get("title") or "").lower()
+                            for k in _selected("speech_fallback_titles")
+                        )
                     ]
-                hits = (speech_hits or ranked)[:2]
+                hits = (speech_hits or ranked)[:settings.nestling_rag_speech_hits]
             else:
                 hits = ranked[:top_k]
         else:
@@ -716,14 +581,14 @@ class ChildRAG:
     def load(self) -> bool:
         return self.store.load()
 
-    def retrieve(self, query: str, child_id: str, top_k: int = 5) -> list[dict]:
+    def retrieve(self, query: str, child_id: str, top_k: int | None = None) -> list[dict]:
         return self.store.search(query, top_k=top_k, filters={"child_id": child_id})
 
     def answer(
         self,
         query: str,
         child_id: str,
-        top_k: int = 5,
+        top_k: int | None = None,
         use_llm: bool = True,
         *,
         use_pleias: bool | None = None,
@@ -771,9 +636,32 @@ class ChildRAG:
         }
 
 
+def _trim_extract(
+    text: str, *, max_chars: int, min_sentence_chars: int, keep_ratio: float
+) -> str:
+    """
+    Shorten a care note to `max_chars`, preferring a sentence end.
+
+    A sentence end is only used when it keeps at least `keep_ratio` of the budget;
+    otherwise the note is cut on a word boundary. Curated chunks are written as
+    long bulleted age bands, so always snapping to the last full stop could drop
+    the very age band the parent asked about.
+    """
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    sentence_end = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
+    if sentence_end > min_sentence_chars and sentence_end >= max_chars * keep_ratio:
+        return cut[: sentence_end + 1]
+    word_end = cut.rfind(" ")
+    if word_end > min_sentence_chars:
+        cut = cut[:word_end]
+    return cut.rstrip(" ,;:") + "…"
+
+
 def _extractive(hits: list[dict], *, conversational: bool = True) -> str:
     if not hits:
-        return "I couldn't find a matching care note for that — try asking another way, or tell me more detail."
+        return NO_MATCH_REPLY
     # Prefer one best guidance chunk, spoken as chat (not a citation dump)
     h = hits[0]
     title = (h.get("title") or "").strip()
@@ -784,16 +672,16 @@ def _extractive(hits: list[dict], *, conversational: bool = True) -> str:
     # Soft trim long dumps — last-resort fallback only (prefer LLM when ready)
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"\*\*", "", text)
-    if len(text) > 420:
-        cut = text[:420]
-        sp = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
-        text = cut[: sp + 1] if sp > 160 else cut.rstrip(",;:") + "…"
+    settings = get_settings()
+    text = _trim_extract(
+        text,
+        max_chars=settings.nestling_rag_extract_chars,
+        min_sentence_chars=settings.nestling_rag_extract_min_sentence_chars,
+        keep_ratio=settings.nestling_rag_extract_keep_ratio,
+    )
     if conversational:
         topic = title or "this"
-        return (
-            f"Here’s the short version from our notes on {topic}: {text} "
-            "If something looks worse (spreading redness, fever, or you’re unsure), call your clinician."
-        )
+        return f"Here’s the short version from our notes on {topic}: {text} {SAFETY_TAIL}"
     parts = ["Based on retrieved sources:", f"- {title or h.get('id')}: {text}"]
-    parts.append("For diagnosis or treatment decisions, consult a pediatric clinician.")
+    parts.append(CITATION_TAIL)
     return "\n".join(parts)

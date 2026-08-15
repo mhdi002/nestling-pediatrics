@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.auth import require_api_key
 from app.services import get_services
 from assistant.config import OVERLAY_DIR, UPLOAD_DIR
+from assistant.refdata import clinical_bounds
 from assistant.settings import get_settings
 from assistant.tools.clinical import (
     dispatch_tool,
@@ -20,6 +23,8 @@ from assistant.tools.clinical import (
     list_asq_questions,
     list_mchat_questions,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_api_key)])
 
@@ -31,46 +36,73 @@ def _err(status: int, error: str, detail: str | None = None) -> HTTPException:
 # --- request bodies ---
 
 
+_BOUNDS = clinical_bounds()
+GA_MIN_WEEKS = float(_BOUNDS.get("intergrowth_weeks_min", 27))
+GA_MAX_WEEKS = float(_BOUNDS.get("intergrowth_weeks_max", 64))
+PRETERM_GA_WEEKS = float(_BOUNDS.get("preterm_ga_threshold_weeks", 37))
+WHO_AGE_MONTHS_MAX = float(_BOUNDS.get("who_age_months_max", 24))
+ASQ_AGE_MONTHS_MAX = int(_BOUNDS.get("asq_age_months_max", 72))
+# Generous outer bound for a free-text `weeks` field; the clinical tools apply the
+# real per-chart limits and return a parent-readable error.
+MAX_WEEKS_INPUT = 1000.0
+MAX_AGE_MONTHS_INPUT = 1200.0
+MAX_VALUE_INPUT = 1000.0
+NAME_MAX_CHARS = 120
+NOTES_MAX_CHARS = 4000
+MESSAGE_MAX_CHARS = 8000
+UI_LANGS = {"fa", "en"}
+# Characters that flush an SSE token chunk early so the UI streams word-by-word.
+STREAM_BREAK_CHARS = " \n.,!?;:"
+
+
 class ChildCreate(BaseModel):
-    name: str
-    sex: str
+    name: str = Field(..., min_length=1, max_length=NAME_MAX_CHARS)
+    sex: str = Field(..., min_length=1, max_length=NAME_MAX_CHARS)
     date_of_birth: str | None = None
-    gestational_age_weeks: float | None = None
-    notes: str = ""
+    gestational_age_weeks: float | None = Field(
+        None, ge=GA_MIN_WEEKS - 10, le=GA_MAX_WEEKS
+    )
+    notes: str = Field("", max_length=NOTES_MAX_CHARS)
 
 
 class SessionCreate(BaseModel):
     child_id: str | None = None
-    title: str | None = None
+    title: str | None = Field(None, max_length=NAME_MAX_CHARS)
 
 
 class ChatBody(BaseModel):
     # Optional: UI may chat before creating a session — we auto-create.
     session_id: str | None = None
-    message: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1, max_length=MESSAGE_MAX_CHARS)
     child_id: str | None = None
     ui_lang: str | None = None  # 'fa' | 'en'
 
 
 class GrowthBody(BaseModel):
-    sex: str
-    measure: str
-    weeks: float | None = None
-    value: float
+    sex: str = Field(..., min_length=1)
+    measure: str = Field(..., min_length=1)
+    weeks: float | None = Field(None, ge=0, le=MAX_WEEKS_INPUT)
+    value: float = Field(..., gt=0, le=MAX_VALUE_INPUT)
     child_id: str | None = None
-    age_months: float | None = None
-    gestational_age_weeks: float | None = None
+    age_months: float | None = Field(None, ge=0, le=MAX_AGE_MONTHS_INPUT)
+    gestational_age_weeks: float | None = Field(None, ge=GA_MIN_WEEKS - 10, le=GA_MAX_WEEKS)
 
 
 class AsqScoreBody(BaseModel):
     domain_answers: dict[str, list[str]]
-    age_months: int
+    age_months: int = Field(..., ge=0, le=ASQ_AGE_MONTHS_MAX)
     child_id: str | None = None
 
 
 class MchatScoreBody(BaseModel):
     answers: dict[str, str]
     child_id: str | None = None
+
+
+@router.get("/ready")
+def ready():
+    """Fast readiness for load balancers — no LLM probe, no external I/O."""
+    return {"status": "ready", "service": "nestling"}
 
 
 @router.get("/health")
@@ -153,13 +185,23 @@ def child_dossier(child_id: str):
     growth = svc.db.growth_history(child_id)
     screens = svc.db.screenings(child_id)
     ga = child.get("gestational_age_weeks")
-    maturity = "preterm" if ga is not None and float(ga) < 37 else ("term" if ga is not None else "unknown")
+    maturity = (
+        "preterm"
+        if ga is not None and float(ga) < PRETERM_GA_WEEKS
+        else ("term" if ga is not None else "unknown")
+    )
+    overlay_limit = get_settings().nestling_dossier_overlay_limit
     overlays = []
     try:
-        for p in sorted(OVERLAY_DIR.glob(f"overlay_{child_id}_*.png"), key=lambda x: x.stat().st_mtime, reverse=True):
+        newest_first = sorted(
+            OVERLAY_DIR.glob(f"overlay_{child_id}_*.png"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        for p in newest_first[:overlay_limit]:
             overlays.append({"filename": p.name, "url": f"/api/overlays/{p.name}"})
-    except Exception:
-        pass
+    except OSError as exc:
+        log.warning("Could not list overlays for child %s: %s", child_id, exc)
     return {
         "ok": True,
         "child_id": child_id,
@@ -167,7 +209,7 @@ def child_dossier(child_id: str):
         "maturity": maturity,
         "growth": growth,
         "screenings": screens,
-        "overlays": overlays[:12],
+        "overlays": overlays,
         "summary": (
             f"{child.get('name')} ({child.get('sex')}, GA {ga}w, {maturity}): "
             f"{len(growth)} growth, {len(screens)} screening(s)."
@@ -183,20 +225,23 @@ def create_session(body: SessionCreate):
 
 
 @router.get("/sessions")
-def list_sessions(child_id: str | None = None, limit: int = 40):
+def list_sessions(child_id: str | None = None, limit: int | None = Query(None, ge=1)):
     svc = get_services()
     return {"sessions": svc.chat.list_sessions(child_id=child_id, limit=limit)}
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str):
+def get_session(session_id: str, limit: int | None = Query(None, ge=1)):
     svc = get_services()
     s = svc.chat.get_session(session_id)
     if not s:
         raise _err(404, "session_not_found", session_id)
+    # Bounded by default: a long-running session must not serialize its whole history.
+    max_history = get_settings().nestling_history_response_limit
+    history_limit = min(limit, max_history) if limit else max_history
     return {
         "session": s,
-        "history": svc.chat.get_history(session_id),
+        "history": svc.chat.get_history(session_id, limit=history_limit),
     }
 
 
@@ -206,8 +251,17 @@ def _validate_image_bytes(raw: bytes) -> tuple[bytes, str]:
 
     from PIL import Image
 
+    settings = get_settings()
     try:
         img = Image.open(BytesIO(raw))
+        # Reject decompression bombs before load() allocates the full bitmap.
+        w, h = img.size
+        if w * h > settings.nestling_max_image_pixels:
+            raise _err(
+                400,
+                "image_too_large",
+                f"Image exceeds {settings.nestling_max_image_pixels} pixels ({w}x{h}).",
+            )
         img.load()
         img = img.convert("RGBA") if img.mode in {"P", "RGBA"} else img.convert("RGB")
         # Drop EXIF by reconstructing
@@ -215,8 +269,32 @@ def _validate_image_bytes(raw: bytes) -> tuple[bytes, str]:
         fmt = "PNG"
         img.save(out, format=fmt, optimize=True)
         return out.getvalue(), "image/png"
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _err(400, "invalid_image", f"Could not decode image: {exc}") from exc
+
+
+def _run_vision_turn(
+    *,
+    clean: bytes,
+    mime: str,
+    fname: str,
+    caption: str,
+    session_id: str | None,
+    child_id: str | None,
+    ui_lang: str | None,
+) -> tuple[str, dict[str, Any]]:
+    """Blocking half of the vision turn (SQLite + model call), run off the event loop."""
+    svc = get_services()
+    sid = session_id
+    if not sid or not svc.chat.get_session(sid):
+        sid = svc.chat.create_session(child_id=child_id)
+    user_msg = f"[photo:{fname}] {caption}" if caption else f"[photo:{fname}]"
+    svc.chat.add_message(sid, "user", user_msg)
+    out = svc.assistant.analyze_parent_photo(clean, mime=mime, prompt=caption, ui_lang=ui_lang)
+    svc.chat.add_message(sid, "assistant", out.get("reply") or "")
+    return sid, out
 
 
 @router.post("/chat/vision")
@@ -228,31 +306,43 @@ async def chat_vision(
     image: UploadFile = File(...),
 ):
     """Parent photo + optional caption -> vision model + medically grounded RAG response."""
-    svc = get_services()
-    raw = await image.read()
+    settings = get_settings()
+    allowed = settings.allowed_upload_types
+    content_type = (image.content_type or "").split(";")[0].strip().lower()
+    if allowed and content_type not in allowed:
+        # 400 (not 415) to keep the existing error contract the SPA handles.
+        raise _err(
+            400,
+            "unsupported_media_type",
+            f"Allowed image types: {', '.join(sorted(allowed))}. Got {content_type or 'none'}.",
+        )
+    max_bytes = settings.nestling_max_upload_bytes
+    # Read one byte past the cap so an oversized upload is rejected without
+    # buffering the whole body in memory.
+    raw = await image.read(max_bytes + 1)
     if not raw:
         raise _err(400, "empty_image", "No image bytes received.")
-    max_bytes = get_settings().nestling_max_upload_bytes
     if len(raw) > max_bytes:
         raise _err(400, "image_too_large", f"Max image size is {max_bytes} bytes.")
-    clean, mime = _validate_image_bytes(raw)
+
+    clean, mime = await run_in_threadpool(_validate_image_bytes, raw)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     from uuid import uuid4
 
     fname = f"{uuid4().hex}.png"
-    path = UPLOAD_DIR / fname
-    path.write_bytes(clean)
+    await run_in_threadpool((UPLOAD_DIR / fname).write_bytes, clean)
 
-    sid = session_id
-    if not sid or not svc.chat.get_session(sid):
-        sid = svc.chat.create_session(child_id=child_id)
     caption = (message or "").strip()
-    user_msg = f"[photo:{fname}] {caption}" if caption else f"[photo:{fname}]"
-    svc.chat.add_message(sid, "user", user_msg)
-    out = svc.assistant.analyze_parent_photo(
-        clean, mime=mime, prompt=caption, ui_lang=ui_lang
+    sid, out = await run_in_threadpool(
+        _run_vision_turn,
+        clean=clean,
+        mime=mime,
+        fname=fname,
+        caption=caption,
+        session_id=session_id,
+        child_id=child_id,
+        ui_lang=ui_lang,
     )
-    svc.chat.add_message(sid, "assistant", out.get("reply") or "")
     return {
         "session_id": sid,
         "child_id": child_id,
@@ -270,23 +360,36 @@ async def chat_vision(
     }
 
 
-@router.post("/chat")
-def chat(body: ChatBody):
+def _normalized_ui_lang(ui_lang: str | None) -> str | None:
+    lang = (ui_lang or "").strip().lower()
+    return lang if lang in UI_LANGS else None
+
+
+def _run_chat_turn(body: ChatBody) -> dict[str, Any]:
+    """Full chat turn. Sync on purpose — FastAPI runs `def` routes in a worker thread."""
     svc = get_services()
     sid = body.session_id
     if not sid or not svc.chat.get_session(sid):
         # Auto-create when UI has no session yet, or stale localStorage id after DB reset.
         sid = svc.chat.create_session(child_id=body.child_id)
-    try:
-        out = svc.assistant.chat(
-            sid, body.message, child_id=body.child_id, ui_lang=body.ui_lang
+    out = svc.assistant.chat(
+        sid, body.message, child_id=body.child_id, ui_lang=_normalized_ui_lang(body.ui_lang)
+    )
+    # Auto-title from first user message
+    s = svc.chat.get_session(sid) or {}
+    if not (s.get("title") or "").strip():
+        svc.chat.set_title(
+            sid, (body.message or "").strip()[: get_settings().nestling_session_title_chars]
         )
-        # Auto-title from first user message
-        s = svc.chat.get_session(sid) or {}
-        if not (s.get("title") or "").strip():
-            svc.chat.set_title(sid, (body.message or "").strip()[:60])
-        return out
+    return out
+
+
+@router.post("/chat")
+def chat(body: ChatBody):
+    try:
+        return _run_chat_turn(body)
     except Exception as exc:
+        log.exception("Chat turn failed")
         raise _err(500, "chat_failed", str(exc)) from exc
 
 
@@ -296,25 +399,17 @@ def chat_stream(body: ChatBody):
     SSE stream: runs the full chat turn, then streams the reply text in chunks,
     then emits a final `result` event with the full JSON payload.
     """
-    svc = get_services()
-    sid = body.session_id
-    if not sid or not svc.chat.get_session(sid):
-        sid = svc.chat.create_session(child_id=body.child_id)
+    chunk_chars = get_settings().nestling_stream_chunk_chars
 
     def gen() -> Iterator[str]:
         try:
-            out = svc.assistant.chat(
-                sid, body.message, child_id=body.child_id, ui_lang=body.ui_lang
-            )
-            s = svc.chat.get_session(sid) or {}
-            if not (s.get("title") or "").strip():
-                svc.chat.set_title(sid, (body.message or "").strip()[:60])
+            out = _run_chat_turn(body)
             reply = out.get("reply") or ""
             # Stream reply in word-ish chunks for UX (tools already finished)
             buf = ""
             for ch in reply:
                 buf += ch
-                if ch in " \n.,!?;:" or len(buf) >= 24:
+                if ch in STREAM_BREAK_CHARS or len(buf) >= chunk_chars:
                     yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
                     buf = ""
             if buf:
@@ -322,6 +417,7 @@ def chat_stream(body: ChatBody):
             yield f"event: result\ndata: {json.dumps(out, ensure_ascii=False, default=str)}\n\n"
             yield "event: done\ndata: {}\n\n"
         except Exception as exc:
+            log.exception("Streaming chat turn failed")
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
@@ -423,7 +519,12 @@ def mchat_questions():
 @router.post("/mchat/score")
 def mchat_score(body: MchatScoreBody):
     svc = get_services()
-    answers = {int(k): v for k, v in body.answers.items()}
+    try:
+        answers = {int(k): v for k, v in body.answers.items()}
+    except (TypeError, ValueError) as exc:
+        raise _err(
+            400, "invalid_answers", "M-CHAT answer keys must be question numbers."
+        ) from exc
     if body.child_id:
         return svc.assistant.run_mchat_session(body.child_id, answers)
     result = dispatch_tool("score_mchat", {"answers": body.answers}, db=svc.db)
@@ -436,7 +537,12 @@ def mchat_score(body: MchatScoreBody):
 def get_overlay(filename: str):
     if "/" in filename or "\\" in filename or ".." in filename:
         raise _err(400, "invalid_filename", "Path separators not allowed")
-    path = Path(OVERLAY_DIR) / filename
+    root = Path(OVERLAY_DIR).resolve()
+    path = (root / filename).resolve()
+    # Defence in depth: a drive-relative or absolute name would otherwise escape
+    # the overlay directory even without a path separator (e.g. "C:secret.png").
+    if path.parent != root:
+        raise _err(400, "invalid_filename", "Filename must resolve inside the overlay directory")
     if not path.is_file():
         raise _err(404, "not_found", f"Overlay not found: {filename}")
     return FileResponse(path, media_type="image/png")

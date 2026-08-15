@@ -8,7 +8,10 @@
   "who_age_months_min": 0,
   "who_age_months_max": 24,
   "preterm_ga_threshold_weeks": 37,
+  "full_term_weeks": 40,
   "term_pma_band": [37, 45],
+  "asq_age_months_max": 72,
+  "asq_default_cutoff": 30,
   "value_ranges": {
     "weight": [0.2, 20.0],
     "length": [20.0, 90.0],

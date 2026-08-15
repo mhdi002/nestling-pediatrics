@@ -1,14 +1,78 @@
-# Nestling — fully dockerized (app + optional local Qwen vLLM)
+# Nestling — dockerized app tier behind an nginx load balancer,
+# plus an optional local Qwen vLLM sidecar (profile: llm).
+#
+#   docker compose up -d --build                 app + nginx
+#   docker compose up -d --scale nestling=3      3 app replicas (see caveat below)
+#   docker compose restart nginx                 after scaling, so nginx re-resolves
+#   docker compose --profile llm up -d           add the GPU sidecar
+#
+# Every tunable below is an environment variable with a documented default; put
+# overrides in a `.env` file next to this one. See docs/PERFORMANCE.md for
+# measured numbers and for why NESTLING_WEB_CONCURRENCY / replicas > 1 is NOT
+# safe yet with the current SQLite setup.
 services:
+  nginx:
+    image: ${NESTLING_LB_IMAGE:-nginx:1.27-alpine}
+    depends_on:
+      nestling:
+        condition: service_healthy
+    ports:
+      - "${NESTLING_LB_HOST_PORT:-8080}:${NESTLING_LB_LISTEN_PORT:-8080}"
+    volumes:
+      - ./docker/nginx/nestling.conf.template:/etc/nginx/templates/nestling.conf.template:ro
+    environment:
+      # Only NESTLING_LB_* names are substituted into the template, so nginx's
+      # own $host / $remote_addr variables are left alone.
+      - NGINX_ENVSUBST_FILTER=^NESTLING_LB_
+      - NESTLING_LB_LISTEN_PORT=${NESTLING_LB_LISTEN_PORT:-8080}
+      - NESTLING_LB_UPSTREAM_HOST=${NESTLING_LB_UPSTREAM_HOST:-nestling}
+      - NESTLING_LB_UPSTREAM_PORT=${NESTLING_PORT:-8000}
+      - NESTLING_LB_UPSTREAM_KEEPALIVE=${NESTLING_LB_UPSTREAM_KEEPALIVE:-64}
+      # Chat is the scarce resource; cap per-client rate so one device cannot
+      # starve the pool. Raise a lot (e.g. 1000) to effectively disable.
+      - NESTLING_LB_CHAT_RPS=${NESTLING_LB_CHAT_RPS:-2}
+      - NESTLING_LB_CHAT_BURST=${NESTLING_LB_CHAT_BURST:-5}
+      # SSE must outlive the slowest chat turn; with the LLM in the path a turn
+      # can take tens of seconds, so this is deliberately generous.
+      - NESTLING_LB_SSE_TIMEOUT=${NESTLING_LB_SSE_TIMEOUT:-300s}
+      - NESTLING_LB_CHAT_TIMEOUT=${NESTLING_LB_CHAT_TIMEOUT:-120s}
+      - NESTLING_LB_API_TIMEOUT=${NESTLING_LB_API_TIMEOUT:-30s}
+      - NESTLING_LB_HEALTH_TIMEOUT=${NESTLING_LB_HEALTH_TIMEOUT:-5s}
+      - NESTLING_LB_CONNECT_TIMEOUT=${NESTLING_LB_CONNECT_TIMEOUT:-5s}
+      - NESTLING_LB_CLIENT_BODY_TIMEOUT=${NESTLING_LB_CLIENT_BODY_TIMEOUT:-30s}
+      - NESTLING_LB_KEEPALIVE_TIMEOUT=${NESTLING_LB_KEEPALIVE_TIMEOUT:-65s}
+      # Must be >= NESTLING_MAX_UPLOAD_BYTES (app default 8 MB) for photo chat.
+      - NESTLING_LB_CLIENT_MAX_BODY=${NESTLING_LB_CLIENT_MAX_BODY:-10m}
+      - NESTLING_LB_GZIP_LEVEL=${NESTLING_LB_GZIP_LEVEL:-5}
+      - NESTLING_LB_OVERLAY_CACHE=${NESTLING_LB_OVERLAY_CACHE:-5m}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:${NESTLING_LB_LISTEN_PORT:-8080}/api/health"]
+      interval: ${NESTLING_LB_HC_INTERVAL:-20s}
+      timeout: ${NESTLING_LB_HC_TIMEOUT:-5s}
+      retries: ${NESTLING_LB_HC_RETRIES:-5}
+      start_period: ${NESTLING_LB_HC_START:-30s}
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "${NESTLING_LB_CPU_LIMIT:-1.0}"
+          memory: ${NESTLING_LB_MEM_LIMIT:-256M}
+
   nestling:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        INSTALL_ML: "0"
-    ports:
-      - "8000:8000"
+        INSTALL_ML: "${NESTLING_INSTALL_ML:-0}"
+    # No host port published: traffic comes through nginx. Set
+    # NESTLING_APP_HOST_PORT and re-add a ports entry only for direct debugging.
+    expose:
+      - "${NESTLING_PORT:-8000}"
     volumes:
+      # WARNING: nestling_children holds the SQLite databases. Sharing it across
+      # replicas gives every replica a *different* view under write contention —
+      # see docs/PERFORMANCE.md "The state problem". Replicas > 1 is safe for
+      # read-only traffic only until Postgres lands.
       - nestling_children:/app/data/children
       - nestling_overlays:/app/data/overlays
       - nestling_uploads:/app/data/uploads
@@ -30,21 +94,45 @@ services:
       - HF_HOME=/app/data/hf_cache
       - TRANSFORMERS_CACHE=/app/data/hf_cache
       - SENTENCE_TRANSFORMERS_HOME=/app/data/hf_cache
-      - NESTLING_LOAD_MODELS=0
-      - NESTLING_LLM_URL=http://llm:8000
-      - NESTLING_VISION_LLM_URL=http://llm:8000
-      - NESTLING_USE_LLM=1
-      - NESTLING_LLM_MODEL=Qwen/Qwen3.5-4B
-      - NESTLING_VISION_MODEL=Qwen/Qwen3.5-4B
-      - NESTLING_LLM_MODEL_PATH=
-      - NESTLING_USE_DENSE=1
-      - NESTLING_EMBEDDING_MODEL=BAAI/bge-m3
+      # --- serving concurrency (consumed by the Dockerfile CMD) ---
+      # 1 by default: >1 worker means >1 process writing the same SQLite file.
+      # Size to CPU (e.g. 4) only after the SQLite fixes in docs/PERFORMANCE.md.
+      - NESTLING_PORT=${NESTLING_PORT:-8000}
+      - NESTLING_WEB_CONCURRENCY=${NESTLING_WEB_CONCURRENCY:-1}
+      - NESTLING_KEEPALIVE=${NESTLING_KEEPALIVE:-15}
+      - NESTLING_BACKLOG=${NESTLING_BACKLOG:-2048}
+      # --- models ---
+      - NESTLING_LOAD_MODELS=${NESTLING_LOAD_MODELS:-0}
+      - NESTLING_LLM_URL=${NESTLING_LLM_URL:-http://llm:8000}
+      - NESTLING_VISION_LLM_URL=${NESTLING_VISION_LLM_URL:-http://llm:8000}
+      - NESTLING_USE_LLM=${NESTLING_USE_LLM:-1}
+      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-4B}
+      - NESTLING_VISION_MODEL=${NESTLING_VISION_MODEL:-Qwen/Qwen3.5-4B}
+      - NESTLING_LLM_MODEL_PATH=${NESTLING_LLM_MODEL_PATH:-}
+      - NESTLING_USE_DENSE=${NESTLING_USE_DENSE:-1}
+      - NESTLING_EMBEDDING_MODEL=${NESTLING_EMBEDDING_MODEL:-BAAI/bge-m3}
+      # --- API ---
+      - NESTLING_API_KEY=${NESTLING_API_KEY:-}
+      - NESTLING_CORS_ORIGINS=${NESTLING_CORS_ORIGINS:-*}
+      - NESTLING_MAX_UPLOAD_BYTES=${NESTLING_MAX_UPLOAD_BYTES:-8000000}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
-      interval: 20s
-      timeout: 15s
-      retries: 10
-      start_period: 90s
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://127.0.0.1:${NESTLING_PORT:-8000}/api/health"]
+      interval: ${NESTLING_HC_INTERVAL:-20s}
+      timeout: ${NESTLING_HC_TIMEOUT:-15s}
+      retries: ${NESTLING_HC_RETRIES:-10}
+      start_period: ${NESTLING_HC_START:-90s}
+    restart: unless-stopped
+    deploy:
+      replicas: ${NESTLING_REPLICAS:-1}
+      resources:
+        limits:
+          # Chart rendering is CPU-bound (~38 ms CPU per chart), so give the app
+          # real cores; the limit is what caps chart throughput per replica.
+          cpus: "${NESTLING_CPU_LIMIT:-2.0}"
+          memory: ${NESTLING_MEM_LIMIT:-2G}
+        reservations:
+          cpus: "${NESTLING_CPU_RESERVATION:-0.5}"
+          memory: ${NESTLING_MEM_RESERVATION:-512M}
 
   llm:
     profiles: ["llm"]
@@ -52,11 +140,11 @@ services:
       context: .
       dockerfile: docker/llm/Dockerfile
     ports:
-      - "8001:8000"
+      - "${NESTLING_LLM_HOST_PORT:-8001}:8000"
     volumes:
-      - ${NESTLING_HF_CACHE_HOST:-C:/Users/mhf/.cache/huggingface}:/root/.cache/huggingface:ro
+      - ${NESTLING_HF_CACHE_HOST:-${HOME}/.cache/huggingface}:/root/.cache/huggingface:ro
     environment:
-      - NESTLING_LLM_MODEL=Qwen/Qwen3.5-4B
+      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-4B}
       - NESTLING_LLM_USE_MODEL_ID=0
       - HF_HOME=/root/.cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
@@ -64,17 +152,19 @@ services:
       - HF_HUB_OFFLINE=1
       - TRANSFORMERS_OFFLINE=1
       - VLLM_PORT=8000
-      # Hardcoded for 8GB GPU — do not raise util above free VRAM fraction.
-      - VLLM_MAX_MODEL_LEN=1536
-      - VLLM_GPU_MEMORY_UTILIZATION=0.86
-      - VLLM_TENSOR_PARALLEL_SIZE=1
-      - VLLM_ENFORCE_EAGER=1
-      - VLLM_MAX_NUM_SEQS=1
-      - VLLM_QUANTIZATION=fp8
-      - VLLM_KV_CACHE_DTYPE=fp8
+      # Sized for an 8 GB consumer GPU. VLLM_MAX_NUM_SEQS=1 means the sidecar
+      # serves ONE request at a time — it is the hard concurrency limit of the
+      # whole product when NESTLING_USE_LLM=1. See docs/PERFORMANCE.md.
+      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-1536}
+      - VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.86}
+      - VLLM_TENSOR_PARALLEL_SIZE=${VLLM_TENSOR_PARALLEL_SIZE:-1}
+      - VLLM_ENFORCE_EAGER=${VLLM_ENFORCE_EAGER:-1}
+      - VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-1}
+      - VLLM_QUANTIZATION=${VLLM_QUANTIZATION:-fp8}
+      - VLLM_KV_CACHE_DTYPE=${VLLM_KV_CACHE_DTYPE:-fp8}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
     gpus: all
     deploy:
       resources:
@@ -88,7 +178,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 60
-      start_period: 900s
+      start_period: ${NESTLING_LLM_HC_START:-900s}
 
 volumes:
   nestling_children:

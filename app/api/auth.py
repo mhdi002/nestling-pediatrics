@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import Header, HTTPException, Request
 
 from assistant.settings import get_settings
@@ -26,7 +28,8 @@ def require_api_key(
     if auth.lower().startswith("bearer "):
         bearer = auth[7:].strip()
     provided = x_api_key or bearer
-    if provided != expected:
+    # Constant-time compare so a wrong key cannot be recovered by timing.
+    if not provided or not hmac.compare_digest(provided, expected):
         raise HTTPException(
             status_code=401,
             detail={"error": "unauthorized", "detail": "Invalid or missing API key"},

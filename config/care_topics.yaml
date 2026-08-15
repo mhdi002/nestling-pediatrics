@@ -1,0 +1,237 @@
+# Care-topic routing data for the medical RAG (assistant/rag/stores.py).
+#
+# These are domain keyword/pattern lists, not code. Editing them changes which
+# curated chunk a parent question retrieves, so keep EN and FA cues in sync.
+version: 1
+
+# Parent-facing boilerplate used by the non-LLM extractive answer path.
+# Keep topic-neutral: the same sentence is appended to feeding, sleep, speech
+# and skin answers alike.
+messages:
+  safety_tail: >-
+    If anything gets worse or you are unsure, contact your clinician.
+  citation_tail: >-
+    For diagnosis or treatment decisions, consult a pediatric clinician.
+  no_match: >-
+    I couldn't find a matching care note for that — try asking another way, or
+    tell me more detail.
+
+# Metadata lines the orchestrator appends to a query. They carry age/sex facts
+# and must never influence topic detection.
+meta_line_pattern: '(?im)^(?:known chronological age:|known child (?:sex|age):|born preterm at).*$'
+
+topics:
+  feeding:
+    keywords:
+      - feed
+      - feeding
+      - food
+      - foods
+      - eat
+      - eaten
+      - eating
+      - milk
+      - breast
+      - breastfeed
+      - breastfeeding
+      - formula
+      - solid
+      - solids
+      - weaning
+      - complementary
+      - nutrition
+      - تغذیه
+      - غذا
+      - خوراک
+      - شیر
+      - بخوره
+      - بدم
+    pattern: 'چی\s*(?:به(?:ش|ش)?\s*)?بدم|چه\s*غذایی|غذا\s*باید|بچم\s*غذا|به(?:ش|ش)?\s*چی\s*بدم'
+    query_expansion: >-
+      infant feeding breastmilk formula complementary foods nutrition
+      what should baby eat age-appropriate
+
+  iron:
+    keywords: [iron, آهن]
+    query_expansion: iron supplementation breastfed infant
+
+  sleep:
+    keywords: [sleep, خواب]
+    query_expansion: infant sleep safe sleep hours
+
+  rash:
+    keywords:
+      - rash
+      - blister
+      - vesicle
+      - palm
+      - sole
+      - wound
+      - scar
+      - cut
+      - scrape
+      - injury
+      - bruise
+      - burn
+      - lesion
+      - redness
+      - hfmd
+      - hand foot
+      - hand-foot
+      - eczema
+      - spot
+      - bandage
+      - جوش
+      - راش
+      - زخم
+      - جراحت
+      - خراش
+      - کبودی
+      - سوختگی
+    query_expansion: >-
+      pediatric skin wound scar cut scrape bruise burn rash palm blister
+      vesicle hand foot mouth redness first aid urgent care
+
+  motor:
+    keywords:
+      - walk
+      - walking
+      - crawl
+      - crawling
+      - cruise
+      - cruising
+      - standing
+      - gross motor
+      - fine motor
+      - motor skill
+      - pull to stand
+      - pulling to stand
+      - راه رفتن
+      - خزیدن
+    query_expansion: >-
+      gross motor walking crawling cruising standing milestones
+      toddler development pull to stand delayed walk
+
+  speech:
+    keywords:
+      - talk
+      - speech
+      - language
+      - words
+      - babbl
+      - dada
+      - mama
+      - baba
+      - papa
+      - says
+      - حرف
+      - گفتار
+      - صحبت
+      - تاخیر
+      - ماما
+      - بابا
+      - دادا
+    query_expansion: speech language development milestones infant cooing babbling
+
+  growth_explain:
+    keywords:
+      - centile
+      - percentile
+      - z-score
+      - z score
+      - growth chart
+      - intergrowth
+      - who chart
+      - نمودار
+      - چارت
+      - صدک
+
+  screening:
+    keywords: [asq, m-chat, mchat, autism, screening item]
+
+# Chunks that explain growth centiles — never returned for a feeding question.
+growth_centile_doc_pattern: '(centile|percentile|growth.?chart|intergrowth|صدک|نمودار\s*رشد)'
+
+# Curated feeding chunk ids per chronological age band (upper bound exclusive).
+# `max_age_months: null` is the final catch-all band.
+feeding_age_bands:
+  - max_age_months: 4
+    ids: [info_feeding_newborn, info_feeding_0_3m, info_iron_breastfed]
+  - max_age_months: 6
+    ids: [info_feeding_4_5m, info_feeding_0_3m, info_iron_breastfed]
+  - max_age_months: 7
+    ids: [info_feeding_solids_6m, info_feeding_4_5m, info_iron_breastfed]
+  - max_age_months: 10
+    ids: [info_feeding_7_9m, info_feeding_solids_6m]
+  - max_age_months: 12
+    ids: [info_feeding_10_12m, info_feeding_7_9m]
+  - max_age_months: null
+    ids: [info_feeding_12_24m, info_feeding_10_12m]
+
+# Fallback ordering when the child's age is unknown.
+feeding_ids_unknown_age:
+  - info_feeding_newborn
+  - info_feeding_0_3m
+  - info_feeding_4_5m
+  - info_feeding_solids_6m
+  - info_feeding_7_9m
+  - info_feeding_10_12m
+  - info_feeding_12_24m
+  - info_iron_breastfed
+
+# Re-ranking boosts applied to BM25 scores once the topic is known.
+ranking:
+  boosts:
+    topic_text_match: 50
+    motor_text_match: 55
+    motor_id_match: 80
+    speech_id_match: 80
+    rash_text_match: 55
+    rash_id_match: 80
+    growth_explain_match: 60
+    curated_prefix: 5
+  penalties:
+    questionnaire_dump: 20
+    off_topic_feeding: 100
+  # Substrings searched in title/text/id for each topic during re-ranking.
+  match_terms:
+    motor_text: [motor, walk, crawl, cruise, milestone, development, gross]
+    motor_id: [development, motor, milestone, guidance_curated_development]
+    speech_text: [speech, language, communication, milestone, talk, babbl]
+    speech_id: [speech]
+    rash_text:
+      [rash, wound, scar, cut, scrape, bruise, burn, hand, foot, mouth,
+       blister, skin, fever, vision, hfmd, first aid]
+    rash_id: [rash, wound, hfmd, fever_rash, photo, scar, skin]
+    growth_explain_id: [centile, intergrowth]
+    growth_explain_title: [percentile, growth chart]
+  # Titles that mark a chunk as parent care guidance (vs a questionnaire dump).
+  care_titles:
+    [iron, sleep, vitamin, speech, language, growth, rash, wound, hand, skin,
+     fever, motor, milestone, development]
+  care_id_prefixes: [info_, intergrowth, guidance_]
+  # Curated chunks get a small tie-breaking nudge over scraped material.
+  curated_id_prefixes: [info_, intergrowth]
+  questionnaire_id_prefixes: [mchat_, asq_]
+
+# Final per-topic hit selection (title/text/id substrings).
+selection:
+  # How far into a chunk body each topic filter scans before giving up.
+  scan_chars:
+    iron: 400
+    sleep: 200
+    rash: 500
+    motor: 500
+    speech: 300
+  iron: [iron, آهن]
+  sleep: [sleep]
+  rash:
+    [rash, wound, scar, cut, scrape, bruise, burn, hand-foot, hand foot,
+     blister, skin, fever and rash, photo, hfmd, first aid]
+  motor: [motor, walk, crawl, cruise, milestone, development, gross, toddler]
+  speech: [speech, language, communication, talk]
+  rash_fallback_ids: [rash, wound, hfmd, fever_rash, photo_skin, scar]
+  motor_fallback_ids: [development, motor]
+  motor_fallback_titles: [milestone]
+  speech_fallback_ids: [speech]
+  speech_fallback_titles: [speech, language]

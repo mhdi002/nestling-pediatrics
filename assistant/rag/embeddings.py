@@ -4,7 +4,7 @@ Lexical retrieval only (BM25-style). No third-party embedding models.
 
 Neural generation is handled by the local Qwen OpenAI-compatible sidecar in stores.py
 (or extractive fallback when the LLM is down).
-Tool calling is handled by Salesforce/xLAM-1b-fc-r (optional) or deterministic router.
+Tool calling uses the deterministic router (optional tool-calling model from settings).
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ class BM25Index:
         self.k1 = k1
         self.b = b
         self.docs_tokens: list[list[str]] = []
+        self.doc_tf: list[Counter] = []
         self.doc_len: list[int] = []
         self.avgdl = 0.0
         self.df: Counter = Counter()
@@ -37,12 +38,15 @@ class BM25Index:
 
     def fit(self, texts: Iterable[str]):
         self.docs_tokens = [tokenize(t) for t in texts]
+        # Precompute per-doc term frequencies once — Counter(toks) inside scores()
+        # was O(corpus) per query and dominated retrieval at scale.
+        self.doc_tf = [Counter(toks) for toks in self.docs_tokens]
         self.doc_len = [len(toks) for toks in self.docs_tokens]
         self.N = len(self.docs_tokens)
         self.avgdl = (sum(self.doc_len) / self.N) if self.N else 0.0
         self.df = Counter()
-        for toks in self.docs_tokens:
-            for term in set(toks):
+        for tf in self.doc_tf:
+            for term in tf:
                 self.df[term] += 1
 
     def scores(self, query: str) -> np.ndarray:
@@ -50,8 +54,7 @@ class BM25Index:
         scores = np.zeros(self.N, dtype=np.float64)
         if not q or self.N == 0:
             return scores
-        for i, toks in enumerate(self.docs_tokens):
-            tf = Counter(toks)
+        for i, tf in enumerate(self.doc_tf):
             dl = self.doc_len[i] or 1
             s = 0.0
             for term in q:

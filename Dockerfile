@@ -39,5 +39,22 @@ RUN mkdir -p /opt/nestling-seed \
 
 EXPOSE 8000
 
+# Serving concurrency is env-driven, never baked in:
+#   NESTLING_PORT              listen port                      (default 8000)
+#   NESTLING_WEB_CONCURRENCY   uvicorn worker processes         (default 1)
+#   NESTLING_KEEPALIVE         keep-alive timeout, seconds      (default 15)
+#   NESTLING_BACKLOG           accept queue depth               (default 2048)
+#
+# WEB_CONCURRENCY defaults to 1 on purpose. Each worker is a separate process
+# with its own SQLite connection, and the chat/child databases still run in
+# `journal_mode=delete`, so concurrent cross-process writes serialise on the
+# file lock and can surface as "database is locked". Raise it only after the
+# SQLite work in docs/PERFORMANCE.md ("Blocking issue for >1 worker") lands, or
+# after moving to Postgres. Read-heavy deployments can raise it sooner.
 ENTRYPOINT ["python", "/app/scripts/entrypoint.py"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uvicorn app.main:app \
+  --host 0.0.0.0 \
+  --port ${NESTLING_PORT:-8000} \
+  --workers ${NESTLING_WEB_CONCURRENCY:-1} \
+  --backlog ${NESTLING_BACKLOG:-2048} \
+  --timeout-keep-alive ${NESTLING_KEEPALIVE:-15}"]

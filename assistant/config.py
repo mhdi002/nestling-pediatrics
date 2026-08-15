@@ -3,33 +3,25 @@ from __future__ import annotations
 from pathlib import Path
 
 from assistant.refdata import asq_scoring
+from assistant.settings import get_settings
 
-ROOT = Path(__file__).resolve().parent.parent
+_settings = get_settings()
+
+# Every path derives from NESTLING_ROOT / NESTLING_DATA_DIR so a container or a
+# test run can relocate state without touching code.
+ROOT = Path(_settings.nestling_root).resolve()
 EXTRACTED = ROOT / "extracted"
-DATA = ROOT / "data"
+DATA = Path(_settings.nestling_data_dir) if _settings.nestling_data_dir else ROOT / "data"
 EN_DIR = DATA / "en"
 KNOWLEDGE_DIR = DATA / "knowledge"
-CHILD_DB_PATH = DATA / "children" / "children.db"
-CHAT_DB_PATH = DATA / "children" / "chat.db"
+CHILD_DB_PATH = Path(_settings.nestling_child_db or DATA / "children" / "children.db")
+CHAT_DB_PATH = Path(_settings.nestling_chat_db or DATA / "children" / "chat.db")
 CHILD_INDEX_DIR = DATA / "children" / "rag_index"
 MEDICAL_INDEX_DIR = DATA / "knowledge" / "rag_index"
 OVERLAY_DIR = DATA / "overlays"
 
-# Local LLM stack (OpenAI-compatible endpoint):
-# - Unified text/vision model service: Qwen/Qwen3.5-4B
-# Tool calling: Salesforce/xLAM-1b-fc-r (optional) or deterministic router.
-XLAM_MODEL_ID = "Salesforce/xLAM-1b-fc-r"
-TEXT_MODEL_ID = "Qwen/Qwen3.5-4B"
-VISION_MODEL_ID = "Qwen/Qwen3.5-4B"
-TEXT_GGUF = ""
-VISION_GGUF = ""
-VISION_MMPROJ = ""
-
-# Backward compatibility for older imports/tests.
-QWEN_MODEL_ID = TEXT_MODEL_ID
-QWEN_GGUF = TEXT_GGUF
-
-ALLOWED_HF_MODELS = (XLAM_MODEL_ID,)
+# Model identifiers are never declared here — they come from assistant.settings
+# (NESTLING_LLM_MODEL / NESTLING_VISION_MODEL / NESTLING_TOOL_MODEL) only.
 
 UPLOAD_DIR = DATA / "uploads"
 MODELS_DIR = DATA / "models" / "llm"

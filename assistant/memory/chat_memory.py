@@ -3,18 +3,38 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from assistant.config import CHAT_DB_PATH
+from assistant.settings import get_settings
+
+
+# Storage-level caps for the session list UI.
+SESSION_TITLE_CHARS = 80
+SESSION_PREVIEW_CHARS = 120
+SESSION_PREVIEW_MESSAGES = 2
 
 
 def _utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _synchronized(fn):
+    """Serialize a method against the shared SQLite connection."""
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 class ChatMemory:
@@ -28,6 +48,14 @@ class ChatMemory:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        # WAL + NORMAL: measured ~3× write throughput vs delete/FULL under load.
+        # One connection is shared by every request thread (check_same_thread=False),
+        # so all statements must be serialized. Reentrant: public methods call each other.
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self._lock = threading.RLock()
         self._init()
 
     def _init(self) -> None:
@@ -76,6 +104,7 @@ class ChatMemory:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
         self.conn.commit()
 
+    @_synchronized
     def create_session(self, child_id: str | None = None, title: str | None = None) -> str:
         sid = str(uuid.uuid4())
         now = _utc()
@@ -87,6 +116,7 @@ class ChatMemory:
         self.conn.commit()
         return sid
 
+    @_synchronized
     def get_session(self, session_id: str) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM sessions WHERE session_id=?", (session_id,)
@@ -97,6 +127,7 @@ class ChatMemory:
         d["slots"] = json.loads(d.pop("slots_json") or "{}")
         return d
 
+    @_synchronized
     def set_child(self, session_id: str, child_id: str) -> None:
         self.conn.execute(
             "UPDATE sessions SET child_id=?, updated_at=? WHERE session_id=?",
@@ -105,10 +136,12 @@ class ChatMemory:
         self.conn.commit()
         self.merge_slots(session_id, {"child_id": child_id})
 
+    @_synchronized
     def get_slots(self, session_id: str) -> dict:
         s = self.get_session(session_id)
         return dict(s["slots"]) if s else {}
 
+    @_synchronized
     def merge_slots(self, session_id: str, updates: dict) -> dict:
         slots = self.get_slots(session_id)
         for k, v in updates.items():
@@ -121,6 +154,7 @@ class ChatMemory:
         self.conn.commit()
         return slots
 
+    @_synchronized
     def add_message(
         self,
         session_id: str,
@@ -154,21 +188,36 @@ class ChatMemory:
         self.conn.commit()
         return mid
 
+    @_synchronized
     def get_history(self, session_id: str, limit: int | None = None) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT * FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC",
-            (session_id,),
-        ).fetchall()
+        """Oldest-first turns. `limit` keeps the newest N and is applied in SQL."""
+        if limit is not None and limit <= 0:
+            return []
+        if limit is None:
+            rows = self.conn.execute(
+                "SELECT * FROM messages WHERE session_id=? ORDER BY created_at ASC, rowid ASC",
+                (session_id,),
+            ).fetchall()
+        else:
+            # Newest N in the DB, then flipped back to chronological order.
+            rows = list(
+                reversed(
+                    self.conn.execute(
+                        "SELECT * FROM messages WHERE session_id=? "
+                        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                        (session_id, int(limit)),
+                    ).fetchall()
+                )
+            )
         out = []
         for r in rows:
             d = dict(r)
             d["tool_calls"] = json.loads(d.pop("tool_calls_json") or "null")
             d["meta"] = json.loads(d.pop("meta_json") or "{}")
             out.append(d)
-        if limit is not None and limit >= 0:
-            return out[-limit:] if limit else []
         return out
 
+    @_synchronized
     def history_text(
         self,
         session_id: str,
@@ -183,28 +232,37 @@ class ChatMemory:
             lines.append(f"{m['role'].upper()}: {m['content']}")
         return "\n".join(lines)
 
+    @_synchronized
     def get_summary(self, session_id: str) -> str:
         s = self.get_session(session_id)
         return (s.get("summary") or "") if s else ""
 
+    @_synchronized
     def set_summary(self, session_id: str, summary: str) -> None:
+        cap = get_settings().nestling_summary_max_chars
         self.conn.execute(
             "UPDATE sessions SET summary=?, updated_at=? WHERE session_id=?",
-            ((summary or "")[:4000], _utc(), session_id),
+            ((summary or "")[:cap], _utc(), session_id),
         )
         self.conn.commit()
 
+    @_synchronized
     def build_context(
         self,
         session_id: str,
         *,
-        window: int = 12,
-        summary_trigger: int = 16,
+        window: int | None = None,
+        summary_trigger: int | None = None,
     ) -> dict[str, Any]:
         """
         Conversation context for the agent: rolling summary + recent turns + slots.
         When history exceeds summary_trigger, older turns are folded into summary.
         """
+        settings = get_settings()
+        if window is None:
+            window = settings.nestling_history_window
+        if summary_trigger is None:
+            summary_trigger = settings.nestling_summary_trigger_turns
         session = self.get_session(session_id) or {}
         all_msgs = self.get_history(session_id)
         summary = (session.get("summary") or "").strip()
@@ -214,15 +272,16 @@ class ChatMemory:
             fold = older[:-1] if older and older[-1].get("role") == "user" else older
             if fold:
                 bits = []
-                for m in fold[-24:]:
+                turn_cap = settings.nestling_summary_turn_chars
+                for m in fold[-settings.nestling_summary_fold_turns :]:
                     role = (m.get("role") or "?").upper()
                     content = (m.get("content") or "").strip().replace("\n", " ")
                     if content:
-                        bits.append(f"{role}: {content[:180]}")
+                        bits.append(f"{role}: {content[:turn_cap]}")
                 folded = " | ".join(bits)
                 if folded:
                     summary = (summary + " | " + folded).strip(" |") if summary else folded
-                    summary = summary[-3500:]
+                    summary = summary[-settings.nestling_summary_fold_max_chars :]
                     self.set_summary(session_id, summary)
         recent = self.get_history(session_id, limit=window)
         # Drop the trailing user message from "recent" display — it's the current turn
@@ -238,6 +297,7 @@ class ChatMemory:
             "message_count": len(all_msgs),
         }
 
+    @_synchronized
     def upsert_fact(
         self,
         session_id: str,
@@ -271,6 +331,7 @@ class ChatMemory:
         self.conn.commit()
         return fid
 
+    @_synchronized
     def list_facts(self, session_id: str) -> dict[str, Any]:
         rows = self.conn.execute(
             "SELECT key, value_json, provenance, confidence FROM session_facts WHERE session_id=?",
@@ -284,10 +345,12 @@ class ChatMemory:
                     "provenance": r["provenance"],
                     "confidence": r["confidence"],
                 }
-            except Exception:
+            except (json.JSONDecodeError, TypeError):
+                # Legacy rows stored raw strings; surface them as-is.
                 out[r["key"]] = {"value": r["value_json"], "provenance": r["provenance"]}
         return out
 
+    @_synchronized
     def search_session(self, session_id: str, query: str, top_k: int = 5) -> list[dict]:
         q = (query or "").lower()
         hits = []
@@ -298,6 +361,7 @@ class ChatMemory:
                 break
         return hits
 
+    @_synchronized
     def clear_session(self, session_id: str) -> int:
         cur = self.conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
         self.conn.execute(
@@ -307,7 +371,12 @@ class ChatMemory:
         self.conn.commit()
         return cur.rowcount
 
-    def list_sessions(self, child_id: str | None = None, limit: int = 40) -> list[dict]:
+    @_synchronized
+    def list_sessions(self, child_id: str | None = None, limit: int | None = None) -> list[dict]:
+        settings = get_settings()
+        if limit is None:
+            limit = settings.nestling_session_list_limit
+        limit = max(0, min(int(limit), settings.nestling_session_list_max_limit))
         if child_id:
             rows = self.conn.execute(
                 "SELECT * FROM sessions WHERE child_id=? ORDER BY updated_at DESC LIMIT ?",
@@ -336,8 +405,8 @@ class ChatMemory:
             # Last 2 messages only (DESC + reverse) — avoid loading full history
             preview_rows = self.conn.execute(
                 "SELECT role, content FROM messages WHERE session_id=? "
-                "ORDER BY created_at DESC, rowid DESC LIMIT 2",
-                (sid,),
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (sid, SESSION_PREVIEW_MESSAGES),
             ).fetchall()
             msgs = list(reversed(preview_rows))
             preview = ""
@@ -347,18 +416,20 @@ class ChatMemory:
                     break
             if not preview and msgs:
                 preview = (msgs[0]["content"] or "").strip()
-            d["preview"] = preview[:120]
+            d["preview"] = preview[:SESSION_PREVIEW_CHARS]
             d["message_count"] = counts.get(sid, 0)
             out.append(d)
         return out
 
+    @_synchronized
     def set_title(self, session_id: str, title: str) -> None:
         self.conn.execute(
             "UPDATE sessions SET title=?, updated_at=? WHERE session_id=?",
-            ((title or "")[:80], _utc(), session_id),
+            ((title or "")[:SESSION_TITLE_CHARS], _utc(), session_id),
         )
         self.conn.commit()
 
+    @_synchronized
     def close(self) -> None:
         conn = getattr(self, "conn", None)
         if conn is not None:

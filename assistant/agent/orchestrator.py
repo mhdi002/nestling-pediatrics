@@ -13,7 +13,7 @@ Full chat session memory persists multi-turn slots + messages.
 from __future__ import annotations
 
 import json
-import os
+import logging
 import re
 from typing import Any
 
@@ -21,7 +21,7 @@ from assistant.config import EN_DIR, KNOWLEDGE_DIR
 from assistant.memory.chat_memory import ChatMemory
 from assistant.memory.child_db import ChildMemoryDB
 from assistant.rag.stores import ChildRAG, MedicalRAG
-from assistant.refdata import weeks_per_month
+from assistant.refdata import clinical_bounds, weeks_per_month
 from assistant.runtime_translate import translate_en_to_fa, translate_for_models
 from assistant.settings import get_settings
 from assistant.tools.clinical import TOOL_SPECS, _term_age_months_from_weeks, dispatch_tool
@@ -44,6 +44,24 @@ from assistant.agent.intents import (  # noqa: F401
     TALK_WORRY_RE,
     classify_intent,
 )
+
+log = logging.getLogger(__name__)
+
+
+def _bounds() -> dict:
+    return clinical_bounds()
+
+
+# Heuristics for reading a stored `weeks` column that has no unit attached.
+# WHO rows store postnatal weeks of life; INTERGROWTH rows store postmenstrual age.
+# Below this age a weeks value is unambiguous: it cannot be a plausible PMA.
+AMBIGUOUS_WEEKS_MIN = float(_bounds().get("intergrowth_weeks_min", 27))
+AMBIGUOUS_WEEKS_MAX = float(_bounds().get("intergrowth_weeks_max", 64))
+# A postnatal reading this old means the row cannot be an INTERGROWTH PMA point.
+LIFE_WEEKS_TODDLER_MONTHS = 10.0
+# If the PMA reading lands this far below the life-weeks reading, the stored value
+# was postnatal weeks (subtracting GA would report a much younger child).
+PMA_IMPLAUSIBLE_RATIO = 0.75
 
 TASK_INSTRUCTION = """
 You are an expert in composing functions for a pediatric parent assistant.
@@ -86,22 +104,29 @@ def _infer_last_topic(intents: set[str], query: str = "") -> str:
     return topic_slug_from_query(q) or next(iter(sorted(intents)), "chat")
 
 
+DAYS_PER_MONTH = 365.25 / 12
+
+
 def _age_months_from_dob(date_of_birth: str | None) -> float | None:
-    """Chronological age in months from ISO date_of_birth (YYYY-MM-DD)."""
+    """
+    Chronological age in months from ISO date_of_birth (YYYY-MM-DD).
+
+    Uses the UTC date so age matches the UTC timestamps written to the DBs.
+    A future date_of_birth yields None rather than a negative age.
+    """
     if not date_of_birth:
         return None
-    try:
-        from datetime import date, datetime
+    from datetime import datetime, timezone
 
-        raw = str(date_of_birth).strip()[:10]
+    raw = str(date_of_birth).strip()[:10]
+    try:
         dob = datetime.strptime(raw, "%Y-%m-%d").date()
-        today = date.today()
-        if dob > today:
-            return None
-        days = (today - dob).days
-        return max(0.0, days / 30.4375)
-    except Exception:
+    except (TypeError, ValueError):
         return None
+    today = datetime.now(timezone.utc).date()
+    if dob > today:
+        return None
+    return max(0.0, (today - dob).days / DAYS_PER_MONTH)
 
 
 def resolve_known_age_months(slots: dict, child_id: str | None, db: ChildMemoryDB) -> float | None:
@@ -150,6 +175,7 @@ def resolve_known_age_months(slots: dict, child_id: str | None, db: ChildMemoryD
         ga = child.get("gestational_age_weeks")
     chart = slots.get("last_chart_standard") or slots.get("chart_standard")
 
+    preterm_threshold = float(_bounds().get("preterm_ga_threshold_weeks", 37))
     if weeks is not None:
         try:
             w = float(weeks)
@@ -163,11 +189,11 @@ def resolve_known_age_months(slots: dict, child_id: str | None, db: ChildMemoryD
                 except (TypeError, ValueError):
                     pass
             # WHO / term / unknown: weeks are postnatal or near-term PMA band
-            if chart == "who_term" or (ga is not None and float(ga) >= 37):
+            if chart == "who_term" or (ga is not None and float(ga) >= preterm_threshold):
                 return float(_term_age_months_from_weeks(w, float(ga) if ga is not None else None))
             # Ambiguous weeks without preterm chart: do NOT subtract GA (avoids
             # turning 59 life-weeks ≈ 13.5m into ~7m when GA≈28–32).
-            if w < 27:
+            if w < AMBIGUOUS_WEEKS_MIN:
                 return w / wpm
             return float(_term_age_months_from_weeks(w, None))
 
@@ -189,10 +215,14 @@ def resolve_known_age_months(slots: dict, child_id: str | None, db: ChildMemoryD
                     pma_chrono = max(0.0, lw - float(cga)) / wpm
                     # If life-weeks reading is ~12m+ and PMA reading is << that, stored
                     # weeks were almost certainly postnatal (WHO save), not PMA.
-                    if life_m >= 10 and pma_chrono < life_m * 0.75:
+                    if (
+                        life_m >= LIFE_WEEKS_TODDLER_MONTHS
+                        and pma_chrono < life_m * PMA_IMPLAUSIBLE_RATIO
+                    ):
                         return life_m
                     if slots.get("last_chart_standard") == "intergrowth_preterm" or (
-                        cga is not None and float(cga) < 37 and 27 <= lw <= 64
+                        float(cga) < preterm_threshold
+                        and AMBIGUOUS_WEEKS_MIN <= lw <= AMBIGUOUS_WEEKS_MAX
                     ):
                         return pma_chrono
                 return float(_term_age_months_from_weeks(lw, float(cga) if cga is not None else None))
@@ -272,7 +302,7 @@ class XLAMToolCaller:
         outputs = self._model.generate(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            max_new_tokens=512,
+            max_new_tokens=get_settings().nestling_tool_max_new_tokens,
             do_sample=False,
             eos_token_id=self._tok.eos_token_id,
         )
@@ -298,20 +328,27 @@ class XLAMToolCaller:
         return calls
 
 
-def parse_tool_calls(text: str) -> list[dict]:
-    text = text.strip()
+def _tool_calls_from_json(raw: str) -> list[dict] | None:
+    """Parsed tool_calls list, or None when `raw` is not a tool-call object."""
     try:
-        data = json.loads(text)
-        return data.get("tool_calls", [])
-    except Exception:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return []
-        try:
-            data = json.loads(m.group(0))
-            return data.get("tool_calls", [])
-        except Exception:
-            return []
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    calls = data.get("tool_calls")
+    return calls if isinstance(calls, list) else []
+
+
+def parse_tool_calls(text: str) -> list[dict]:
+    text = (text or "").strip()
+    calls = _tool_calls_from_json(text)
+    if calls is not None:
+        return calls
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        return []
+    return _tool_calls_from_json(m.group(0)) or []
 
 
 def interpret_track_status(track_status: str | None, centile: float | None, *, fa: bool = False) -> str:
@@ -455,10 +492,18 @@ def hydrate_slots_from_child(db: ChildMemoryDB, child_id: str | None, slots: dic
                 )
             )
             life_m = lw / wpm
-            if cga is not None and float(cga) < 37 and 27 <= lw <= 64:
+            preterm_threshold = float(_bounds().get("preterm_ga_threshold_weeks", 37))
+            if (
+                cga is not None
+                and float(cga) < preterm_threshold
+                and AMBIGUOUS_WEEKS_MIN <= lw <= AMBIGUOUS_WEEKS_MAX
+            ):
                 pma_chrono = max(0.0, lw - float(cga)) / wpm
                 # WHO saves store life-weeks; INTERGROWTH stores PMA.
-                if life_m >= 10 and pma_chrono < life_m * 0.75:
+                if (
+                    life_m >= LIFE_WEEKS_TODDLER_MONTHS
+                    and pma_chrono < life_m * PMA_IMPLAUSIBLE_RATIO
+                ):
                     chrono = life_m
                 else:
                     chrono = pma_chrono
@@ -572,7 +617,7 @@ class ParentAssistant:
         self.child_rag = ChildRAG()
         # xLAM loads only when NESTLING_LOAD_MODELS=1.
         # Generative RAG uses the vLLM/Qwen sidecar when NESTLING_USE_LLM is on.
-        load = os.environ.get("NESTLING_LOAD_MODELS", "0") == "1"
+        load = bool(get_settings().nestling_load_models)
         if use_llm is None:
             if use_pleias is not None:
                 use_llm = bool(use_pleias)
@@ -597,8 +642,8 @@ class ParentAssistant:
                     n = self.refresh_medical_index()
                     if n:
                         self.medical.load()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Could not refresh the medical RAG index at startup: %s", exc)
         self.child_rag.load()
 
     def refresh_medical_index(self):
@@ -658,11 +703,12 @@ class ParentAssistant:
                         image_bytes=image_bytes,
                         prompt=grounded_prompt,
                         mime=mime,
-                        max_tokens=700,
+                        max_tokens=get_settings().llm_max_tokens_vision,
                     )
                     mode = "vision+rag"
                     model = get_settings().nestling_vision_model
             except Exception as exc:
+                log.warning("Vision analysis failed, falling back to RAG: %s", exc)
                 vision_text = ""
                 mode = f"rag_fallback:{exc}"
         if not vision_text:
@@ -922,8 +968,6 @@ class ParentAssistant:
         new_measurement_turn = "value" in turn_growth
 
         # Inject rolling conversation memory into the tool/RAG turn (was unused before).
-        from assistant.settings import get_settings
-
         _s = get_settings()
         mem_ctx = self.chat_memory.build_context(
             session_id,
@@ -1036,8 +1080,9 @@ class ParentAssistant:
                 memory_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
             if mem_ctx.get("recent_text"):
                 recent = mem_ctx["recent_text"]
-                if len(recent) > 1200:
-                    recent = recent[-1200:]
+                recent_cap = _s.nestling_memory_recent_chars
+                if len(recent) > recent_cap:
+                    recent = recent[-recent_cap:]
                 memory_parts.append(f"[RECENT_CHAT]\n{recent}")
 
             followup_hit = bool(_MED_FU.search(en_message) or _MED_FU.search(user_message or ""))
@@ -1121,18 +1166,19 @@ class ParentAssistant:
             analyze=bool(_ANALYZE2.search(en_message)),
             prior_query=prior_med,
         )
+        query_cap = _s.nestling_medical_query_chars
         if "medical" in intents or "screening" in intents:
             if soft_turn and prior_med and prior_care:
                 thread_slots["last_topic"] = prior_care
-                thread_slots["last_medical_query"] = prior_med[:500]
+                thread_slots["last_medical_query"] = prior_med[:query_cap]
             else:
                 thread_slots["last_topic"] = topic_slug_from_query(en_message) or topic
-                thread_slots["last_medical_query"] = en_message.strip()[:500]
+                thread_slots["last_medical_query"] = en_message.strip()[:query_cap]
         elif topic == "chat" and prior_care:
             # Don't wipe an open care thread on a stray chat miss.
             thread_slots["last_topic"] = prior_care
             if prior_med:
-                thread_slots["last_medical_query"] = prior_med[:500]
+                thread_slots["last_medical_query"] = prior_med[:query_cap]
         else:
             thread_slots["last_topic"] = topic
         slots = self.chat_memory.merge_slots(session_id, thread_slots)
@@ -1462,11 +1508,8 @@ class ParentAssistant:
 
     def close(self) -> None:
         """Release SQLite handles (needed on Windows before deleting temp DBs)."""
-        try:
-            self.db.close()
-        except Exception:
-            pass
-        try:
-            self.chat_memory.close()
-        except Exception:
-            pass
+        for name, closer in (("child_db", self.db.close), ("chat_memory", self.chat_memory.close)):
+            try:
+                closer()
+            except Exception as exc:
+                log.warning("Error closing %s: %s", name, exc)

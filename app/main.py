@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import router as api_router
 from app.services import create_services, peek_services, set_services
 from assistant.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
@@ -29,8 +32,8 @@ async def lifespan(app: FastAPI):
     if svc is not None:
         try:
             svc.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Error during service shutdown: %s", exc)
 
 
 app = FastAPI(
@@ -41,10 +44,13 @@ app = FastAPI(
 )
 
 _settings = get_settings()
+_cors_origins = _settings.cors_origin_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_settings.cors_origin_list,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # Credentials cannot be combined with a wildcard origin; browsers reject the
+    # response and Starlette would silently drop the header anyway.
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,9 +68,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(Exception)
 async def unhandled_exception(request: Request, exc: Exception):
+    # Log the traceback server-side; the client gets no internal details.
+    log.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
-        content={"error": "internal_error", "detail": str(exc)},
+        content={"error": "internal_error", "detail": "Internal server error"},
     )
 
 

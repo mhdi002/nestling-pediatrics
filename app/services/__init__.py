@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import os
+import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,9 @@ from typing import Any
 from assistant.agent.orchestrator import ParentAssistant
 from assistant.memory.chat_memory import ChatMemory, ChatMemoryDB
 from assistant.memory.child_db import ChildMemoryDB
+from assistant.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -19,25 +23,25 @@ class Services:
     assistant: ParentAssistant
 
     def close(self) -> None:
-        try:
-            self.assistant.close()
-        except Exception:
+        """Release every handle even when one of them fails to close."""
+        for name, closer in (
+            ("assistant", self.assistant.close),
+            ("child_db", self.db.close),
+            ("chat_memory", self.chat.close),
+        ):
             try:
-                self.db.close()
-            except Exception:
-                pass
-            try:
-                self.chat.close()
-            except Exception:
-                pass
+                closer()
+            except Exception as exc:
+                log.warning("Error closing %s: %s", name, exc)
 
 
 _services: Services | None = None
+_services_lock = threading.Lock()
 
 
 def load_models_enabled() -> bool:
     """True when NESTLING_LOAD_MODELS=1 (loads optional xLAM)."""
-    return os.environ.get("NESTLING_LOAD_MODELS", "0") == "1"
+    return bool(get_settings().nestling_load_models)
 
 
 def get_assistant(
@@ -92,7 +96,11 @@ def create_services(
 def get_services() -> Services:
     global _services
     if _services is None:
-        _services = create_services()
+        # Double-checked: concurrent first requests must not build two service
+        # containers (two SQLite connections, two RAG indexes).
+        with _services_lock:
+            if _services is None:
+                _services = create_services()
     return _services
 
 
@@ -102,7 +110,8 @@ def peek_services() -> Services | None:
 
 def set_services(services: Services | None) -> None:
     global _services
-    _services = services
+    with _services_lock:
+        _services = services
 
 
 __all__ = [

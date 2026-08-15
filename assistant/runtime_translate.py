@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from functools import lru_cache
 from typing import Literal
+
+from assistant.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 _HAS_FA = re.compile(r"[\u0600-\u06FF]")
 
@@ -59,14 +65,44 @@ def detect_lang(text: str) -> Literal["fa", "en"]:
     return "fa" if has_persian(text) else "en"
 
 
-@lru_cache(maxsize=1)
+# One entry per direction — maxsize=1 made fa→en and en→fa evict each other.
+@lru_cache(maxsize=2)
 def _google(source: str, target: str):
     try:
         from deep_translator import GoogleTranslator
 
         return GoogleTranslator(source=source, target=target)
-    except Exception:
+    except Exception as exc:
+        log.info("Online translation unavailable, using the offline glossary: %s", exc)
         return None
+
+
+@lru_cache(maxsize=1)
+def _translate_pool() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(
+        max_workers=max(1, get_settings().nestling_translate_workers),
+        thread_name_prefix="nestling-mt",
+    )
+
+
+def _translate_bounded(translator, text: str) -> str | None:
+    """
+    Machine translation with a hard deadline.
+
+    deep_translator issues an HTTP GET with no timeout, so a stalled upstream
+    would otherwise hang the whole chat turn. On timeout the caller falls back
+    to the offline glossary.
+    """
+    timeout = get_settings().nestling_translate_timeout
+    future = _translate_pool().submit(translator.translate, text)
+    try:
+        return future.result(timeout=timeout)
+    except FutureTimeout:
+        future.cancel()
+        log.warning("Translation timed out after %.1fs; using the offline glossary.", timeout)
+    except Exception as exc:
+        log.warning("Translation failed, using the offline glossary: %s", exc)
+    return None
 
 
 def _glossary_fa_to_en(text: str) -> str:
@@ -84,10 +120,9 @@ def translate_fa_to_en(text: str) -> str:
         return text
     tr = _google("fa", "en")
     if tr is not None:
-        try:
-            return tr.translate(text)
-        except Exception:
-            pass
+        translated = _translate_bounded(tr, text)
+        if translated:
+            return translated
     return _glossary_fa_to_en(text)
 
 
@@ -106,10 +141,9 @@ def translate_en_to_fa(text: str) -> str:
         pass
     tr = _google("en", "fa")
     if tr is not None:
-        try:
-            return tr.translate(text)
-        except Exception:
-            pass
+        translated = _translate_bounded(tr, text)
+        if translated:
+            return translated
     return patched if patched != text else text
 
 

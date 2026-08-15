@@ -1,0 +1,126 @@
+# Nestling reverse proxy / load balancer.
+#
+# Rendered at container start by the official nginx image, which runs envsubst
+# over /etc/nginx/templates/*.template. Only NESTLING_LB_* names are substituted
+# (NGINX_ENVSUBST_FILTER in docker-compose.yml) so nginx's own runtime variables
+# such as $host and $remote_addr survive untouched.
+
+upstream nestling_app {
+    # Docker's embedded DNS returns one address per replica of the app service and
+    # nginx resolves them at startup, so after `--scale nestling=N` you must run
+    # `docker compose restart nginx` for the new replicas to enter rotation.
+    server ${NESTLING_LB_UPSTREAM_HOST}:${NESTLING_LB_UPSTREAM_PORT} max_fails=3 fail_timeout=10s;
+
+    least_conn;
+    keepalive ${NESTLING_LB_UPSTREAM_KEEPALIVE};
+}
+
+# Cheap protection against one client monopolising the shared chat capacity.
+# Set NESTLING_LB_CHAT_RPS very high to effectively disable it.
+limit_req_zone $binary_remote_addr zone=chat_zone:10m rate=${NESTLING_LB_CHAT_RPS}r/s;
+
+server {
+    listen ${NESTLING_LB_LISTEN_PORT};
+    server_name _;
+
+    client_max_body_size ${NESTLING_LB_CLIENT_MAX_BODY};
+    client_body_timeout ${NESTLING_LB_CLIENT_BODY_TIMEOUT};
+    keepalive_timeout ${NESTLING_LB_KEEPALIVE_TIMEOUT};
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level ${NESTLING_LB_GZIP_LEVEL};
+    gzip_proxied any;
+    gzip_types
+        text/plain
+        text/css
+        text/javascript
+        application/javascript
+        application/json
+        image/svg+xml;
+    # text/event-stream is deliberately absent from gzip_types: compressing SSE
+    # buffers output and defeats incremental delivery. The stream location also
+    # sets `gzip off` explicitly.
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection "";
+
+    # --- SSE chat stream -----------------------------------------------------
+    # The app runs the whole turn before emitting the first token, so the read
+    # timeout must exceed the slowest possible turn (LLM in the path), and all
+    # buffering must be off or the browser sees nothing until the stream ends.
+    location = /api/chat/stream {
+        limit_req zone=chat_zone burst=${NESTLING_LB_CHAT_BURST} nodelay;
+
+        proxy_pass http://nestling_app;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        chunked_transfer_encoding on;
+        gzip off;
+        add_header X-Accel-Buffering no;
+
+        proxy_connect_timeout ${NESTLING_LB_CONNECT_TIMEOUT};
+        proxy_send_timeout ${NESTLING_LB_SSE_TIMEOUT};
+        proxy_read_timeout ${NESTLING_LB_SSE_TIMEOUT};
+    }
+
+    # --- non-streaming chat --------------------------------------------------
+    # Slowest JSON endpoint (RAG, and LLM generation when the sidecar is up),
+    # so it gets its own longer timeout instead of inheriting the API default.
+    location = /api/chat {
+        limit_req zone=chat_zone burst=${NESTLING_LB_CHAT_BURST} nodelay;
+
+        proxy_pass http://nestling_app;
+        proxy_connect_timeout ${NESTLING_LB_CONNECT_TIMEOUT};
+        proxy_send_timeout ${NESTLING_LB_CHAT_TIMEOUT};
+        proxy_read_timeout ${NESTLING_LB_CHAT_TIMEOUT};
+    }
+
+    location = /api/chat/vision {
+        proxy_pass http://nestling_app;
+        proxy_request_buffering on;   # buffer the upload, not the response
+        proxy_connect_timeout ${NESTLING_LB_CONNECT_TIMEOUT};
+        proxy_send_timeout ${NESTLING_LB_CHAT_TIMEOUT};
+        proxy_read_timeout ${NESTLING_LB_CHAT_TIMEOUT};
+    }
+
+    # --- health: never rate limited, never logged --------------------------
+    location = /api/health {
+        proxy_pass http://nestling_app;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout ${NESTLING_LB_HEALTH_TIMEOUT};
+        access_log off;
+    }
+
+    # --- generated chart PNGs ---------------------------------------------
+    # Filenames embed child id, measure and value, so a new measurement changes
+    # the URL; caching them is safe and takes image bytes off the app tier.
+    # Browser-side only: no proxy_cache is configured, so these per-child images
+    # are never stored on the shared proxy.
+    location /api/overlays/ {
+        proxy_pass http://nestling_app;
+        proxy_read_timeout ${NESTLING_LB_API_TIMEOUT};
+        expires ${NESTLING_LB_OVERLAY_CACHE};
+    }
+
+    # --- everything else on the API ---------------------------------------
+    location /api/ {
+        proxy_pass http://nestling_app;
+        proxy_connect_timeout ${NESTLING_LB_CONNECT_TIMEOUT};
+        proxy_send_timeout ${NESTLING_LB_API_TIMEOUT};
+        proxy_read_timeout ${NESTLING_LB_API_TIMEOUT};
+    }
+
+    # --- static SPA --------------------------------------------------------
+    location / {
+        proxy_pass http://nestling_app;
+        proxy_connect_timeout ${NESTLING_LB_CONNECT_TIMEOUT};
+        proxy_read_timeout ${NESTLING_LB_API_TIMEOUT};
+    }
+}

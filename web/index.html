@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#7ec8c8" />
   <meta name="description" content="Nestling — gentle growth and development support for parents" />
+  <!-- Optional: point the UI at an API on another origin. Empty/absent = same origin + /api.
+       <meta name="nestling-api-base" content="https://api.example.org/api" /> -->
   <title>Nestling</title>
   <link rel="icon" type="image/png" href="assets/logo-nestling.png" />
   <link rel="apple-touch-icon" href="assets/logo-nestling.png" />
@@ -17,7 +19,7 @@
   <div class="bg-pattern" aria-hidden="true"></div>
   <div class="app-shell">
     <header class="topbar" id="topbar">
-      <a href="#/" class="brand-mini" aria-label="Nestling home">
+      <a href="#/" class="brand-mini" data-i18n-aria-label="homeAria" aria-label="Nestling home">
         <span class="brand-mark" aria-hidden="true">
           <img src="assets/logo-nestling.png" alt="" class="brand-logo-img" width="34" height="34" />
         </span>
@@ -38,7 +40,7 @@
           <h1 class="brand-hero" data-i18n="brand">Nestling</h1>
           <p class="hero-tagline" data-i18n="tagline">Gentle guidance for your little one’s growth and milestones.</p>
         </div>
-        <nav class="cta-stack" aria-label="Main actions">
+        <nav class="cta-stack" data-i18n-aria-label="mainActionsAria" aria-label="Main actions">
           <a class="btn btn-primary btn-xl" href="#/chat">
             <span class="btn-dot chat" aria-hidden="true"></span>
             <span data-i18n="talk">Talk to assistant</span>
@@ -72,7 +74,14 @@
               <h3 class="panel-title tight" data-i18n="savedChildren">Saved children</h3>
               <button type="button" class="btn btn-ghost btn-sm" id="toggle-add-child" data-i18n="addChild">Add a child</button>
             </div>
-            <div id="children-list" class="child-chips" role="list">
+            <div
+              id="children-list"
+              class="child-chips"
+              role="group"
+              data-i18n-aria-label="childListAria"
+              aria-label="Saved children — pick one"
+              aria-busy="true"
+            >
               <p class="muted" data-i18n="loading">Loading…</p>
             </div>
           </div>
@@ -88,7 +97,14 @@
             <div class="form-grid-2">
               <label class="field">
                 <span data-i18n="name">Name</span>
-                <input type="text" name="name" required maxlength="80" data-i18n-placeholder="namePh" placeholder="e.g. Maya" />
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  data-constraint="childName"
+                  data-i18n-placeholder="namePh"
+                  placeholder="e.g. Maya"
+                />
               </label>
               <label class="field">
                 <span data-i18n="dob">Date of birth</span>
@@ -104,7 +120,15 @@
             </fieldset>
             <label class="field">
               <span data-i18n="ga">Gestational age at birth (weeks)</span>
-              <input type="number" name="gestational_age_weeks" required min="22" max="45" step="0.5" data-i18n-placeholder="gaPh" placeholder="e.g. 32" inputmode="decimal" />
+              <input
+                type="number"
+                name="gestational_age_weeks"
+                required
+                data-constraint="gaWeeks"
+                data-i18n-placeholder="gaPh"
+                placeholder="e.g. 32"
+                inputmode="decimal"
+              />
               <small class="field-hint" data-i18n="gaHint">Under 37 weeks = preterm. 37 weeks or more = term. The correct chart is chosen automatically.</small>
             </label>
             <div class="form-actions-row">
@@ -132,15 +156,31 @@
           <h3 class="panel-title" data-i18n="chatHistory">Chat history</h3>
           <div id="chat-history-list" class="chat-history-list"></div>
         </div>
-        <div id="chat-thread" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <div
+          id="chat-thread"
+          class="chat-thread"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          data-i18n-aria-label="chatLogAria"
+          aria-label="Conversation"
+        ></div>
         <form id="chat-form" class="chat-composer">
           <div class="composer-field">
             <label class="sr-only" for="chat-input" data-i18n="messageLabel">Message</label>
-            <textarea id="chat-input" rows="1" data-i18n-placeholder="chatPh" placeholder="Type a message…" required maxlength="2000"></textarea>
+            <textarea
+              id="chat-input"
+              rows="1"
+              data-constraint="chatMessage"
+              data-i18n-placeholder="chatPh"
+              placeholder="Type a message…"
+              required
+            ></textarea>
           </div>
-          <button type="button" class="btn btn-ghost btn-icon btn-attach-plus" id="chat-attach" data-i18n-title="attach" aria-label="Attach">
+          <button type="button" class="btn btn-ghost btn-icon btn-attach-plus" id="chat-attach" data-i18n-title="attachPhoto" aria-label="Attach a photo">
             <span class="attach-plus-glyph" aria-hidden="true"></span>
           </button>
+          <input type="file" id="chat-file" class="sr-only" accept="image/*" tabindex="-1" aria-hidden="true" />
           <button type="button" class="btn btn-ghost btn-send" id="chat-cancel" hidden data-i18n="cancel" data-i18n-title="cancel" title="Cancel" aria-label="Cancel">Cancel</button>
           <button type="submit" class="btn btn-primary btn-send" id="chat-send" data-i18n-title="send" title="Send" aria-label="Send">
             <span class="btn-label" data-i18n="send">Send</span>
@@ -179,23 +219,45 @@
           </label>
           <label class="field">
             <span data-i18n="ageWeeks">Age (weeks)</span>
-            <input type="number" name="weeks" min="0" max="64" step="0.5" placeholder="e.g. 40" inputmode="decimal" />
+            <input
+              type="number"
+              name="weeks"
+              data-constraint="growthWeeks"
+              data-i18n-placeholder="weeksPh"
+              placeholder="e.g. 40"
+              inputmode="decimal"
+            />
             <small class="field-hint" data-i18n="ageWeeksHint">Preterm: postmenstrual weeks. Term: weeks since birth.</small>
           </label>
           <label class="field">
             <span data-i18n="ageMonths">Age (months) — term children</span>
-            <input type="number" name="age_months" min="0" max="24" step="0.5" placeholder="e.g. 2" inputmode="decimal" />
+            <input
+              type="number"
+              name="age_months"
+              data-constraint="growthMonths"
+              data-i18n-placeholder="monthsPh"
+              placeholder="e.g. 2"
+              inputmode="decimal"
+            />
           </label>
           <label class="field">
             <span data-i18n="value">Value</span>
-            <input type="number" name="value" required min="0.1" step="0.01" placeholder="e.g. 3.2" inputmode="decimal" />
+            <input
+              type="number"
+              name="value"
+              required
+              data-constraint="growthValue"
+              data-i18n-placeholder="valuePh"
+              placeholder="e.g. 3.2"
+              inputmode="decimal"
+            />
           </label>
           <button type="submit" class="btn btn-primary btn-block" id="growth-submit">
             <span class="btn-label" data-i18n="calculate">Calculate</span>
             <span class="spinner" hidden aria-hidden="true"></span>
           </button>
         </form>
-        <div id="growth-result" class="result-block" hidden></div>
+        <div id="growth-result" class="result-block" role="region" aria-live="polite" hidden></div>
       </section>
 
       <section id="view-screening" class="view" data-route="/screening" hidden>
@@ -215,7 +277,14 @@
             </label>
             <label class="field" id="screening-age-field">
               <span data-i18n="ageMonthsShort">Age (months)</span>
-              <input type="number" id="screening-age-months" min="0" max="72" step="0.5" placeholder="e.g. 12" inputmode="decimal" />
+              <input
+                type="number"
+                id="screening-age-months"
+                data-constraint="screeningAge"
+                data-i18n-placeholder="agePh"
+                placeholder="e.g. 12"
+                inputmode="decimal"
+              />
             </label>
           </div>
           <p id="screening-age-badge" class="age-badge" hidden></p>
@@ -234,8 +303,19 @@
         </div>
 
         <div id="screening-quiz" hidden>
-          <div class="progress-bar" aria-hidden="true"><div id="quiz-progress" class="progress-fill"></div></div>
-          <p class="quiz-meta" id="quiz-meta"></p>
+          <div
+            class="progress-bar"
+            id="quiz-progress-bar"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            data-i18n-aria-label="progressAria"
+            aria-label="Questionnaire progress"
+          >
+            <div id="quiz-progress" class="progress-fill"></div>
+          </div>
+          <p class="quiz-meta" id="quiz-meta" aria-live="polite"></p>
           <div class="quiz-card">
             <p class="quiz-domain" id="quiz-domain"></p>
             <p class="quiz-q" id="quiz-question"></p>
@@ -247,12 +327,13 @@
           </div>
         </div>
 
-        <div id="screening-report" class="result-block" hidden></div>
+        <div id="screening-report" class="result-block" role="region" aria-live="polite" hidden></div>
       </section>
     </main>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="config.js"></script>
   <script src="i18n.js"></script>
   <script src="app.js" defer></script>
 </body>

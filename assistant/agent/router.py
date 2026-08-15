@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from assistant.agent.rules import extract_slots_from_rules, match_intents_from_rules
+from assistant.settings import get_settings
+
+log = logging.getLogger(__name__)
+
+# Confidence tiers for the hybrid router, highest-trust source first.
+REGEX_CONFIDENCE = 0.85
+RULES_CONFIDENCE = 0.6
+FALLBACK_CONFIDENCE = 0.4
+DEFAULT_LLM_CONFIDENCE = 0.5
+# How many prior slots are shown to the routing LLM as context.
+PRIOR_SLOTS_IN_PROMPT = 12
 
 
 class IntentDecision(BaseModel):
@@ -57,17 +71,19 @@ def route_message(
     # Optional LLM boost when text LLM is up
     source: Literal["rules", "regex", "hybrid", "llm"] = "hybrid"
     rationale = f"regex={sorted(regex_intents)} rules={sorted(rule_intents)}"
+    min_llm_confidence = get_settings().nestling_router_llm_min_confidence
     try:
         llm_decision = _try_llm_route(en, prior_slots=prior_slots)
-        if llm_decision and llm_decision.confidence >= 0.7:
+        if llm_decision and llm_decision.confidence >= min_llm_confidence:
             intents |= set(llm_decision.intents)
             for k, v in (llm_decision.slots or {}).items():
                 if v is not None and v != "":
                     slots.setdefault(k, v)
             source = "llm"
             rationale = llm_decision.rationale or rationale
-    except Exception:
-        pass
+    except Exception as exc:
+        # The deterministic rules already produced a decision; the LLM is a bonus.
+        log.warning("LLM intent routing failed, keeping the rule-based decision: %s", exc)
 
     # Care / feeding questions must never pick up growth from LLM or rules alone.
     show_chart = bool(SHOW_CHART_RE.search(msg) or SHOW_CHART_RE.search(en))
@@ -81,9 +97,13 @@ def route_message(
         intents.discard("growth")
         intents.discard("growth_analysis")
 
-    conf = 0.85 if regex_intents else (0.6 if rule_intents else 0.4)
+    conf = (
+        REGEX_CONFIDENCE
+        if regex_intents
+        else (RULES_CONFIDENCE if rule_intents else FALLBACK_CONFIDENCE)
+    )
     if source == "llm":
-        conf = max(conf, 0.7)
+        conf = max(conf, min_llm_confidence)
     return IntentDecision(
         intents=sorted(intents),
         slots=slots,
@@ -109,7 +129,8 @@ def _try_llm_route(message: str, *, prior_slots: dict | None = None) -> IntentDe
     )
     prior = ""
     if prior_slots:
-        prior = f" Prior slots: { {k: prior_slots[k] for k in list(prior_slots)[:12]} }"
+        shown = {k: prior_slots[k] for k in list(prior_slots)[:PRIOR_SLOTS_IN_PROMPT]}
+        prior = f" Prior slots: {shown}"
     text = client.answer_with_context(
         query=f"{message}{prior}\n{schema_hint}",
         context="Classify the parent message for a pediatric assistant. Never invent numbers.",
@@ -124,21 +145,30 @@ def _try_llm_route(message: str, *, prior_slots: dict | None = None) -> IntentDe
             "Never classify scar/wound or walking questions as chat or growth_analysis."
         ),
     )
-    import json
-    import re
-
     raw = (text or "").strip()
-    try:
-        data = json.loads(raw)
-    except Exception:
+    data = _loads_object(raw)
+    if data is None:
         m = re.search(r"\{.*\}", raw, re.S)
-        if not m:
-            return None
-        data = json.loads(m.group(0))
+        data = _loads_object(m.group(0)) if m else None
+    if data is None:
+        return None
+    try:
+        confidence = float(data.get("confidence") or DEFAULT_LLM_CONFIDENCE)
+    except (TypeError, ValueError):
+        confidence = DEFAULT_LLM_CONFIDENCE
     return IntentDecision(
-        intents=list(data.get("intents") or []),
+        intents=[str(i) for i in (data.get("intents") or []) if i],
         slots=dict(data.get("slots") or {}),
-        confidence=float(data.get("confidence") or 0.5),
+        confidence=confidence,
         source="llm",
         rationale=str(data.get("rationale") or "llm"),
     )
+
+
+def _loads_object(raw: str) -> dict | None:
+    """Parse `raw` as a JSON object, or None when it is not one."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None

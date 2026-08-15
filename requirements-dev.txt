@@ -1,0 +1,15 @@
+# Development / performance tooling ONLY.
+# Deliberately NOT installed into the runtime Docker image (see Dockerfile:
+# the image installs requirements-core.txt) so the served container stays lean.
+#
+#   python -m pip install -r requirements-dev.txt
+
+# Load testing (perf/locustfile.py, perf/run_ramp.py)
+locust>=2.31
+
+# Process CPU/RSS sampling during load tests (perf/monitor.py)
+psutil>=5.9
+
+# Sampling profiler for the running server — attach without restarting it:
+#   py-spy record -o perf/results/flame.svg --pid <uvicorn pid> --duration 30
+py-spy>=0.3.14

@@ -18,28 +18,17 @@ env
 .DS_Store
 Thumbs.db
 
-# Local agent / temp dumps
+# Local agent / temp dumps (mirrors the `_*` rules in .gitignore)
 preview_*.png
-_tmp_*
-_debug_*
-_run_log*
-_parser_*
-_probe_*
-_domain_*
-_slice_*
-_test_write*
-_file_list*
-_append_notes*
-_analyze_*
-_pdf_*
-_asq_*
-_mchat_*
-_extract_*
-_dump_*
-_compare_*
-_finalize_*
+_*
+!__init__.py
+!__main__.py
 agent-transcripts
 .cursor
+
+# Performance/load-test harness: dev-only, never needed in the runtime image
+perf
+requirements-dev.txt
 
 # Tests not needed in runtime image
 tests

@@ -1,40 +1,101 @@
 /**
  * Nestling — parental SPA
- * API_BASE is relative so Docker / reverse-proxy can serve /api alongside /web
+ * Runtime values (API base, endpoint paths, timings, domain limits) come from
+ * config.js; every user-facing string comes from i18n.js. Keep literals out of
+ * this module so the app runs unchanged on any host, port or proxy prefix.
  */
 (function () {
   "use strict";
 
-  const API_BASE = "/api";
-  const STORAGE_CHILD = "nestling_active_child";
-  const STORAGE_SESSION = "nestling_chat_session";
-  const STORAGE_LANG = "nestling_lang";
+  const CFG = window.NESTLING_CONFIG;
+  if (!CFG) {
+    document.addEventListener("DOMContentLoaded", () => {
+      const main = document.getElementById("main");
+      if (main) main.textContent = "Nestling could not load its configuration (config.js).";
+    });
+    return;
+  }
 
-  const ASQ_AGES = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 27, 30, 33, 36, 42, 48, 54, 60];
-  const MCHAT_AGE_MIN = 16;
-  const MCHAT_AGE_MAX = 30;
+  const API_BASE = CFG.api.base;
+  const EP = CFG.api.paths;
+  const TIME = CFG.timing;
+  const LIMITS = CFG.limits;
+  const REVEAL = CFG.reveal;
+  const CHART = CFG.chart;
+  const STORAGE = CFG.storageKeys;
+  const ASQ_AGES = LIMITS.asqAges;
+
+  const API_ORIGIN = (() => {
+    try {
+      return new URL(API_BASE, window.location.href).origin;
+    } catch (_) {
+      return window.location.origin;
+    }
+  })();
+
+  /** localStorage throws in private mode / blocked-cookie contexts. */
+  const store = {
+    get(key) {
+      try {
+        return localStorage.getItem(key);
+      } catch (_) {
+        return null;
+      }
+    },
+    set(key, value) {
+      try {
+        localStorage.setItem(key, value);
+      } catch (_) {
+        /* storage unavailable — session stays in memory */
+      }
+    },
+    remove(key) {
+      try {
+        localStorage.removeItem(key);
+      } catch (_) {
+        /* ignore */
+      }
+    },
+  };
 
   const state = {
     children: [],
     activeChild: null,
-    chatSessionId: localStorage.getItem(STORAGE_SESSION) || null,
+    chatSessionId: store.get(STORAGE.chatSession) || null,
     quiz: null,
-    lang: localStorage.getItem(STORAGE_LANG) || "en",
+    lang: normalizeLang(store.get(STORAGE.lang)),
     screeningAgeMonths: null,
     screeningHistoryOpen: false,
+    chatHistoryOpen: false,
     lastDossier: null,
+    lastGrowth: null,
+    lastReport: null,
+    chatAbort: null,
+    childrenToken: 0,
+    dossierToken: 0,
+    quizAdvanceTimer: null,
+    ageInputTimer: null,
   };
-  // normalize after helpers exist — set below after function defs via boot
+
+  /** Active text-reveal animations, so clearing the thread can stop them. */
+  const reveals = new Set();
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
+  function normalizeLang(lang) {
+    return lang === "fa" ? "fa" : "en";
+  }
+
+  function i18nPack() {
+    const packs = window.NESTLING_I18N || {};
+    return packs[state.lang] || packs.en || {};
+  }
+
   function t(key, vars) {
-    const pack = (window.NESTLING_I18N && window.NESTLING_I18N[state.lang]) || {};
-    let s =
-      pack[key] != null
-        ? pack[key]
-        : (window.NESTLING_I18N && window.NESTLING_I18N.en[key]) || key;
+    const packs = window.NESTLING_I18N || {};
+    const pack = packs[state.lang] || {};
+    let s = pack[key] != null ? pack[key] : (packs.en && packs.en[key]) || key;
     if (vars && typeof s === "string") {
       Object.keys(vars).forEach((k) => {
         s = s.replace(new RegExp(`\\{${k}\\}`, "g"), String(vars[k]));
@@ -43,14 +104,55 @@
     return s;
   }
 
+  /** Locale-aware digits (Persian numerals in fa) for display only. */
+  function fmtNum(value, digits) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "—";
+    const max = digits != null ? digits : Number.isInteger(n) ? 0 : 1;
+    try {
+      return new Intl.NumberFormat(i18nPack().numberLocale || undefined, {
+        minimumFractionDigits: digits != null ? digits : 0,
+        maximumFractionDigits: max,
+      }).format(n);
+    } catch (_) {
+      return String(n);
+    }
+  }
+
+  /**
+   * Set translated text and remember the key (plus interpolation vars) so a
+   * later language switch re-renders content that JS wrote.
+   */
+  function setI18nText(el, key, vars) {
+    if (!el) return;
+    el.setAttribute("data-i18n", key);
+    if (vars) el.dataset.i18nVars = JSON.stringify(vars);
+    else delete el.dataset.i18nVars;
+    el.textContent = t(key, vars);
+  }
+
   function applyI18n() {
-    const pack = (window.NESTLING_I18N && window.NESTLING_I18N[state.lang]) || window.NESTLING_I18N.en;
+    const pack = i18nPack();
     document.documentElement.lang = pack.lang || state.lang;
     document.documentElement.dir = pack.dir || "ltr";
-    document.title = pack.brand || "Nestling";
+    document.title = pack.brand || t("brand");
     $$("[data-i18n]").forEach((el) => {
       const key = el.getAttribute("data-i18n");
-      if (key && pack[key] != null) el.textContent = pack[key];
+      if (!key) return;
+      let vars = null;
+      if (el.dataset.i18nVars) {
+        try {
+          vars = JSON.parse(el.dataset.i18nVars);
+        } catch (_) {
+          vars = null;
+        }
+      }
+      if (vars) el.textContent = t(key, vars);
+      else if (pack[key] != null) el.textContent = pack[key];
+    });
+    $$("[data-i18n-aria-label]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-aria-label");
+      if (key && pack[key] != null) el.setAttribute("aria-label", pack[key]);
     });
     $$("[data-i18n-placeholder]").forEach((el) => {
       const key = el.getAttribute("data-i18n-placeholder");
@@ -64,14 +166,17 @@
       }
     });
     const toggle = $("#lang-toggle");
-    if (toggle) toggle.textContent = pack.langToggle || "فارسی";
+    if (toggle && pack.langToggle) toggle.textContent = pack.langToggle;
   }
 
+  /** Re-render everything JS produced, so switching language never leaves mixed text. */
   function setLang(lang) {
-    state.lang = lang === "fa" ? "fa" : "en";
-    localStorage.setItem(STORAGE_LANG, state.lang);
+    state.lang = normalizeLang(lang);
+    store.set(STORAGE.lang, state.lang);
     applyI18n();
-    // Refresh chat welcome in the new language
+    applyFieldConstraints();
+    renderChildChip();
+
     const thread = $("#chat-thread");
     if (thread && thread.dataset.ready) {
       const first = thread.querySelector(".bubble.assistant");
@@ -79,16 +184,21 @@
         first.textContent = t("chatWelcome");
       }
     }
-    loadChildren().catch(() => {});
-    if (currentPath() === "/screening" && !state.quiz) refreshScreeningPicker();
+    if (state.chatHistoryOpen) loadChatHistoryList();
+    if (currentPath() === "/child") loadChildren();
+    else if (state.activeChild) loadChildDossier(activeChildId());
+    if (state.lastGrowth) renderGrowthResult(state.lastGrowth);
+    if (state.lastReport) renderScreeningReport(state.lastReport);
+    if (state.quiz) relabelQuizForLang();
+    else if (currentPath() === "/screening") refreshScreeningPicker();
   }
 
   /* —— Utils —— */
   function loadJson(key, fallback) {
     try {
-      const raw = localStorage.getItem(key);
+      const raw = store.get(key);
       return raw ? JSON.parse(raw) : fallback;
-    } catch {
+    } catch (_) {
       return fallback;
     }
   }
@@ -101,7 +211,7 @@
     if (dob > now) return 0;
     let months =
       (now.getFullYear() - dob.getFullYear()) * 12 + (now.getMonth() - dob.getMonth());
-    const dayFrac = (now.getDate() - dob.getDate()) / 30.4375;
+    const dayFrac = (now.getDate() - dob.getDate()) / LIMITS.daysPerMonth;
     months += dayFrac;
     return Math.max(0, Math.round(months * 10) / 10);
   }
@@ -109,19 +219,61 @@
   function correctedAgeMonths(chronoMonths, gaWeeks) {
     if (chronoMonths == null || gaWeeks == null) return chronoMonths;
     const ga = Number(gaWeeks);
-    if (!(ga < 37)) return chronoMonths;
-    const earlyWeeks = Math.max(0, 40 - ga);
-    return Math.max(0, Math.round((Number(chronoMonths) - earlyWeeks / 4.345) * 10) / 10);
+    if (!(ga < LIMITS.pretermWeeks)) return chronoMonths;
+    const earlyWeeks = Math.max(0, LIMITS.fullTermWeeks - ga);
+    return Math.max(
+      0,
+      Math.round((Number(chronoMonths) - earlyWeeks / LIMITS.weeksPerMonth) * 10) / 10
+    );
+  }
+
+  function isPreterm(gaWeeks) {
+    return gaWeeks != null && Number(gaWeeks) < LIMITS.pretermWeeks;
+  }
+
+  function maturityLabel(gaWeeks) {
+    if (gaWeeks == null || Number.isNaN(Number(gaWeeks))) return "";
+    return isPreterm(gaWeeks) ? t("preterm") : t("term");
   }
 
   function formatAgeLabel(months) {
     if (months == null || Number.isNaN(Number(months))) return "—";
-    const m = Number(months);
-    const shown = Number.isInteger(m) ? String(m) : m.toFixed(1);
-    return t("ageMonthsValue", { age: shown });
+    return t("ageMonthsValue", { age: fmtNum(months) });
   }
 
-  function asqWindows() {
+  const MEASURE_KEYS = { weight: "mWeight", length: "mLength", head_circumference: "mHc" };
+
+  function measureLabel(measure) {
+    const key = MEASURE_KEYS[String(measure || "")];
+    return key ? t(key) : String(measure || "");
+  }
+
+  /** "gross_motor" -> domainGrossMotor, falling back to a readable id. */
+  function keyFromId(prefix, id) {
+    const parts = String(id || "")
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1));
+    return prefix + parts.join("");
+  }
+
+  function domainLabel(id) {
+    const key = keyFromId("domain", id);
+    const pack = i18nPack();
+    if (pack[key] != null) return pack[key];
+    return String(id || "").replace(/_/g, " ");
+  }
+
+  function trackLabel(track) {
+    const raw = String(track || "");
+    if (!raw) return "";
+    const key = keyFromId("track", raw);
+    const pack = i18nPack();
+    if (pack[key] != null) return pack[key];
+    return raw.replace(/_/g, " ");
+  }
+
+  function buildAsqWindows() {
     const ages = ASQ_AGES;
     const map = {};
     ages.forEach((age, i) => {
@@ -134,10 +286,12 @@
     return map;
   }
 
+  const ASQ_WINDOWS = buildAsqWindows();
+
   function relevantAsqAges(ageMonths) {
     if (ageMonths == null || Number.isNaN(Number(ageMonths))) return { current: [], upcoming: [] };
     const age = Number(ageMonths);
-    const windows = asqWindows();
+    const windows = ASQ_WINDOWS;
     const current = ASQ_AGES.filter((a) => age >= windows[a].lo && age < windows[a].hi);
     if (current.length) {
       const lastCurrent = current[current.length - 1];
@@ -146,7 +300,9 @@
       return { current, upcoming };
     }
     const upcoming = ASQ_AGES.filter((a) => a > age).slice(0, 1);
-    const recent = [...ASQ_AGES].reverse().find((a) => a <= age && age - a <= 1.25);
+    const recent = [...ASQ_AGES]
+      .reverse()
+      .find((a) => a <= age && age - a <= LIMITS.asqRecencyMonths);
     return { current: recent != null ? [recent] : [], upcoming };
   }
 
@@ -173,9 +329,18 @@
   function saveActiveChild(child) {
     const normalized = normalizeChild(child);
     state.activeChild = normalized;
-    if (normalized) localStorage.setItem(STORAGE_CHILD, JSON.stringify(normalized));
-    else localStorage.removeItem(STORAGE_CHILD);
+    if (normalized) store.set(STORAGE.activeChild, JSON.stringify(normalized));
+    else store.remove(STORAGE.activeChild);
     renderChildChip();
+  }
+
+  function childIdOf(child) {
+    if (!child) return null;
+    return child.child_id || child.id || null;
+  }
+
+  function activeChildId() {
+    return childIdOf(state.activeChild);
   }
 
   function normalizeChild(raw) {
@@ -189,11 +354,10 @@
 
   function renderChildChip() {
     const chip = $("#active-child-chip");
+    if (!chip) return;
     if (state.activeChild && state.activeChild.name) {
       chip.hidden = false;
-      const ga = state.activeChild.gestational_age_weeks;
-      const mat =
-        ga != null ? (Number(ga) < 37 ? t("preterm") : t("term")) : "";
+      const mat = maturityLabel(state.activeChild.gestational_age_weeks);
       const age =
         state.activeChild.date_of_birth != null
           ? ageMonthsFromDob(state.activeChild.date_of_birth)
@@ -215,8 +379,14 @@
       state.lastDossier = null;
       return;
     }
+    const token = ++state.dossierToken;
+    panel.hidden = false;
+    panel.setAttribute("aria-busy", "true");
+    if (!body.childElementCount) renderMessage(body, t("loading"));
     try {
-      const data = await api(`/children/${encodeURIComponent(childId)}/dossier`);
+      const data = await api(EP.childDossier(childId));
+      // A newer selection won already — drop this response.
+      if (token !== state.dossierToken) return;
       state.lastDossier = data;
       const p = data.profile || {};
       const growth = data.growth || [];
@@ -237,34 +407,42 @@
       growth.forEach((g) => {
         latestByMeasure[g.measure] = g;
       });
-      const growthBits = ["weight", "length", "head_circumference"]
+      const growthBits = Object.keys(MEASURE_KEYS)
         .map((m) => latestByMeasure[m])
         .filter(Boolean)
-        .slice(0, 3)
+        .slice(0, LIMITS.dossierGrowthRows)
         .map((g) => {
           const cent =
-            g.centile != null ? ` · P${Number(g.centile).toFixed(0)}` : "";
-          return `<li><strong>${escapeHtml(g.measure)}</strong> ${escapeHtml(String(g.value))}${escapeHtml(cent)}</li>`;
+            g.centile != null ? ` · ${t("centileShort", { n: fmtNum(g.centile, 0) })}` : "";
+          return `<li><strong>${escapeHtml(measureLabel(g.measure))}</strong> ${escapeHtml(
+            fmtNum(g.value)
+          )}${escapeHtml(cent)}</li>`;
         })
         .join("");
 
       const lastScreen = screens.length ? screens[screens.length - 1] : null;
       const screenSummary = lastScreen
-        ? `<strong>${escapeHtml(lastScreen.instrument || "")}</strong> — ${escapeHtml(
+        ? `<strong>${escapeHtml(lastScreen.instrument || t("screeningFallback"))}</strong> — ${escapeHtml(
             (lastScreen.result && lastScreen.result.summary) || t("done")
           )}`
         : escapeHtml(t("noScreensYet"));
 
-      const chartsHtml = overlays.length
-        ? `<div class="dossier-charts compact">${overlays
-            .slice(0, 3)
+      const charts = overlays
+        .slice(0, LIMITS.dossierChartsMax)
+        .map((o) => ({
+          url: safeOverlayUrl(o.url) || (o.filename ? apiUrl(EP.overlay(o.filename)) : null),
+          label: o.measure ? measureLabel(o.measure) : t("chartOverlayAlt"),
+        }))
+        .filter((o) => o.url);
+      const chartsHtml = charts.length
+        ? `<div class="dossier-charts compact">${charts
             .map(
               (o) =>
                 `<a href="${escapeHtml(o.url)}" target="_blank" rel="noopener" title="${escapeHtml(
-                  o.measure || o.filename || "chart"
-                )}"><img class="overlay-img" src="${escapeHtml(
-                  o.url
-                )}" alt="${escapeHtml(o.measure || t("chartOverlayAlt"))}" /></a>`
+                  o.label
+                )}"><img class="overlay-img" src="${escapeHtml(o.url)}" alt="${escapeHtml(
+                  o.label
+                )}" loading="lazy" /></a>`
             )
             .join("")}</div>`
         : "";
@@ -274,7 +452,15 @@
           <div class="summary-hero-text">
             <h3 class="summary-name">${escapeHtml(p.name || "")}</h3>
             <p class="summary-meta">${escapeHtml(
-              [sexLabel, maturity, p.gestational_age_weeks != null ? `${t("gaLabel")} ${p.gestational_age_weeks}w` : ""]
+              [
+                sexLabel,
+                maturity,
+                p.gestational_age_weeks != null
+                  ? `${t("gaLabel")} ${t("weeksSuffix", {
+                      n: fmtNum(p.gestational_age_weeks),
+                    })}`
+                  : "",
+              ]
                 .filter(Boolean)
                 .join(" · ")
             )}</p>
@@ -283,8 +469,12 @@
             <span class="lbl">${escapeHtml(t("ageLabel"))}</span>
             <span class="val">${escapeHtml(chrono != null ? formatAgeLabel(chrono) : "—")}</span>
             ${
-              corr != null && chrono != null && Math.abs(corr - chrono) >= 0.3
-                ? `<span class="corr">${escapeHtml(t("correctedAgeNote", { age: corr }))}</span>`
+              corr != null &&
+              chrono != null &&
+              Math.abs(corr - chrono) >= LIMITS.correctedAgeNoticeMonths
+                ? `<span class="corr">${escapeHtml(
+                    t("correctedAgeNote", { age: fmtNum(corr) })
+                  )}</span>`
                 : ""
             }
           </div>
@@ -300,7 +490,9 @@
           </div>
           <div class="summary-card">
             <h4>${escapeHtml(t("screeningTitle"))}</h4>
-            <p class="muted tight">${escapeHtml(t("screeningCount", { n: screens.length }))}</p>
+            <p class="muted tight">${escapeHtml(
+              t("screeningCount", { n: fmtNum(screens.length, 0) })
+            )}</p>
             <p class="summary-last">${screenSummary}</p>
           </div>
           ${
@@ -318,9 +510,14 @@
       `;
       panel.hidden = false;
     } catch (err) {
+      if (token !== state.dossierToken || isAbortError(err)) return;
       state.lastDossier = null;
-      body.innerHTML = `<p class="muted">${escapeHtml(err.message)}</p>`;
+      renderMessage(body, `${t("dossierLoadFailed")} ${err.message}`, {
+        retry: () => loadChildDossier(childId),
+      });
       panel.hidden = false;
+    } finally {
+      if (token === state.dossierToken) panel.removeAttribute("aria-busy");
     }
   }
 
@@ -329,22 +526,49 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
+
+  /**
+   * Text-only status/error renderer with an optional retry button, so a failed
+   * fetch never leaves a spinner or an empty panel behind.
+   */
+  function renderMessage(container, message, { retry, className = "muted" } = {}) {
+    if (!container) return;
+    container.textContent = "";
+    const p = document.createElement("p");
+    p.className = className;
+    p.textContent = message;
+    container.appendChild(p);
+    if (typeof retry === "function") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-ghost btn-sm retry-btn";
+      btn.textContent = t("retry");
+      btn.addEventListener("click", retry);
+      container.appendChild(btn);
+    }
+  }
+
+  let toastHideTimer = null;
+  let toastFadeTimer = null;
 
   function toast(message, type = "info") {
     const el = $("#toast");
+    if (!el || !message) return;
+    window.clearTimeout(toastHideTimer);
+    window.clearTimeout(toastFadeTimer);
     el.textContent = message;
     el.classList.toggle("error", type === "error");
     el.hidden = false;
     el.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => {
+    toastHideTimer = window.setTimeout(() => {
       el.classList.remove("show");
-      setTimeout(() => {
+      toastFadeTimer = window.setTimeout(() => {
         el.hidden = true;
-      }, 350);
-    }, 3200);
+      }, TIME.toastFadeMs);
+    }, TIME.toastVisibleMs);
   }
 
   function setLoading(btn, loading) {
@@ -355,58 +579,137 @@
     if (spin) spin.hidden = !loading;
   }
 
+  function apiUrl(path) {
+    return `${API_BASE}${path}`;
+  }
+
+  function isAbortError(err) {
+    return !!err && (err.name === "AbortError" || err.name === "TimeoutError");
+  }
+
+  function timeoutError() {
+    const e = new Error(t("requestTimeout"));
+    e.timeout = true;
+    return e;
+  }
+
+  /** Pick the friendliest message out of FastAPI's error shapes. */
+  function errorMessage(data, status) {
+    const d = data && (data.detail != null ? data.detail : data.message || data.error);
+    if (typeof d === "string" && d.trim()) return d;
+    if (Array.isArray(d)) {
+      const first = d.find((x) => x && (x.msg || x.detail));
+      if (first) return String(first.msg || first.detail);
+    }
+    if (d && typeof d === "object" && typeof d.detail === "string") return d.detail;
+    return t("requestFailed", { status });
+  }
+
+  /**
+   * Single fetch wrapper: JSON encoding, caller-provided AbortSignal, hard
+   * timeout so a hung backend can never leave the UI spinning, and typed errors.
+   */
   async function api(path, options = {}) {
+    const { timeoutMs = TIME.requestTimeoutMs, signal: outerSignal, ...rest } = options;
+    const isForm = typeof FormData !== "undefined" && rest.body instanceof FormData;
     const opts = {
-      headers: { Accept: "application/json", ...(options.body ? { "Content-Type": "application/json" } : {}) },
-      ...options,
+      ...rest,
+      headers: {
+        Accept: "application/json",
+        ...(rest.body && !isForm ? { "Content-Type": "application/json" } : {}),
+        ...(rest.headers || {}),
+      },
     };
-    if (opts.body && typeof opts.body === "object") {
+    if (opts.body && typeof opts.body === "object" && !isForm) {
       opts.body = JSON.stringify(opts.body);
     }
-    let res;
+
+    const ctrl = new AbortController();
+    const relayAbort = () => ctrl.abort();
+    if (outerSignal) {
+      if (outerSignal.aborted) ctrl.abort();
+      else outerSignal.addEventListener("abort", relayAbort, { once: true });
+    }
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, timeoutMs);
+    opts.signal = ctrl.signal;
+
     try {
-      res = await fetch(`${API_BASE}${path}`, opts);
-    } catch (err) {
-      const e = new Error(t("serverUnreachable"));
-      e.cause = err;
-      throw e;
-    }
-    let data = null;
-    const text = await res.text();
-    if (text) {
+      let res;
       try {
-        data = JSON.parse(text);
-      } catch {
-        data = { raw: text };
+        res = await fetch(apiUrl(path), opts);
+      } catch (err) {
+        if (timedOut) throw timeoutError();
+        if (isAbortError(err)) throw err;
+        const e = new Error(t("serverUnreachable"));
+        e.cause = err;
+        e.offline = true;
+        throw e;
       }
+      let text;
+      try {
+        text = await res.text();
+      } catch (err) {
+        if (timedOut) throw timeoutError();
+        throw err;
+      }
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          data = { raw: text };
+        }
+      }
+      if (!res.ok) {
+        const e = new Error(errorMessage(data, res.status));
+        e.status = res.status;
+        e.data = data;
+        throw e;
+      }
+      return data;
+    } finally {
+      window.clearTimeout(timer);
+      if (outerSignal) outerSignal.removeEventListener("abort", relayAbort);
     }
-    if (!res.ok) {
-      const msg =
-        (data && (data.detail || data.message || data.error)) ||
-        `Request failed (${res.status})`;
-      const e = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-      e.status = res.status;
-      e.data = data;
-      throw e;
+  }
+
+  /**
+   * Only same-origin (or configured API origin) image URLs are rendered, so a
+   * compromised/odd API payload cannot inject `javascript:` or third-party URLs.
+   */
+  function safeOverlayUrl(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+    if (/^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=\s]+$/i.test(s)) return s;
+    let url;
+    try {
+      url = new URL(s, window.location.href);
+    } catch (_) {
+      return null;
     }
-    return data;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.origin !== window.location.origin && url.origin !== API_ORIGIN) return null;
+    return url.href;
   }
 
   function overlaySrc(data) {
-    if (!data) return null;
-    if (data.overlay_url) return data.overlay_url;
-    if (data.image_url) return data.image_url;
-    if (data.overlay_image) return data.overlay_image;
-    if (data.overlay_filename) {
-      return `/api/overlays/${encodeURIComponent(data.overlay_filename)}`;
-    }
-    // API often returns bare filename in `overlay`
-    if (data.overlay && !/[\\/]/.test(data.overlay)) {
-      return `/api/overlays/${encodeURIComponent(data.overlay)}`;
-    }
+    if (!data || typeof data !== "object") return null;
+    const direct = data.overlay_url || data.image_url || data.overlay_image;
+    if (direct) return safeOverlayUrl(direct);
+    // API often returns a bare filename in `overlay` / `overlay_filename`.
+    const named =
+      data.overlay_filename ||
+      (data.overlay && !/[\\/]/.test(String(data.overlay)) ? data.overlay : null);
+    if (named) return apiUrl(EP.overlay(String(named)));
     const path = data.overlay_path || data.overlay;
     if (path) {
-      return `/api/overlays/${encodeURIComponent(String(path).split(/[/\\]/).pop())}`;
+      const file = String(path).split(/[/\\]/).pop();
+      if (file) return apiUrl(EP.overlay(file));
     }
     return null;
   }
@@ -429,11 +732,17 @@
   function navigate() {
     const path = currentPath();
     const id = routes[path] || routes["/"];
+    const leavingChat = path !== "/chat";
+    const leavingScreening = path !== "/screening";
     $$(".view").forEach((v) => {
       v.hidden = v.id !== id;
     });
     const topbar = $("#topbar");
-    topbar.style.opacity = path === "/" ? "0.92" : "1";
+    if (topbar) topbar.classList.toggle("at-home", path === "/");
+
+    // Never leave work running for a view the parent has left.
+    if (leavingChat) abortChat();
+    if (leavingScreening) clearQuizAdvanceTimer();
 
     if (path === "/child") loadChildren();
     if (path === "/chat") initChat();
@@ -446,112 +755,163 @@
       syncScreeningAgeFromChild();
       if (!state.quiz) showScreeningPicker();
     }
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   }
 
   /* —— Home health —— */
   async function checkHealth() {
     const el = $("#health-status");
+    if (!el) return;
     try {
-      await api("/health");
-      el.textContent = t("ready");
+      await api(EP.health);
+      setI18nText(el, "ready");
       el.className = "home-foot ok";
-    } catch {
-      el.textContent = t("offline");
+    } catch (_) {
+      setI18nText(el, "offline");
       el.className = "home-foot bad";
     }
   }
 
   /* —— Children —— */
+  /** Newest first, active child pinned, capped — the API list is unpaginated. */
+  function childrenForSelect() {
+    const activeId = activeChildId();
+    const sorted = state.children.slice().sort((a, b) => {
+      const at = String(a.created_at || "");
+      const bt = String(b.created_at || "");
+      return bt.localeCompare(at);
+    });
+    const capped = sorted.slice(0, LIMITS.childSelectMax);
+    if (activeId && !capped.some((c) => childIdOf(c) === activeId)) {
+      const active = state.children.find((c) => childIdOf(c) === activeId);
+      if (active) capped.unshift(active);
+    }
+    return capped;
+  }
+
   function fillChildSelects() {
-    const opts = [`<option value="">${escapeHtml(t("none"))}</option>`]
-      .concat(
-        state.children.map((c) => {
-          const id = c.child_id || c.id;
-          const selected =
-            state.activeChild && (state.activeChild.child_id || state.activeChild.id) === id
-              ? " selected"
-              : "";
-          return `<option value="${escapeHtml(id)}"${selected}>${escapeHtml(c.name)}</option>`;
-        })
-      )
-      .join("");
-    const g = $("#growth-child");
-    const s = $("#screening-child");
-    if (g) g.innerHTML = opts;
-    if (s) s.innerHTML = opts;
+    const activeId = activeChildId();
+    const options = childrenForSelect();
+    [$("#growth-child"), $("#screening-child")].forEach((sel) => {
+      if (!sel) return;
+      const previous = sel.value;
+      // Rebuilt wholesale so repeated loads can't stack duplicate options.
+      sel.textContent = "";
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = t("none");
+      sel.appendChild(none);
+      options.forEach((c) => {
+        const id = childIdOf(c);
+        if (!id) return;
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = c.name || id;
+        sel.appendChild(opt);
+      });
+      const wanted =
+        previous && options.some((c) => childIdOf(c) === previous)
+          ? previous
+          : activeId || "";
+      sel.value = wanted || "";
+    });
+  }
+
+  async function selectChild(child) {
+    const id = childIdOf(child);
+    if (!id) return;
+    saveActiveChild(child);
+    // A different child means a different conversation context.
+    abortChat();
+    state.chatSessionId = null;
+    store.remove(STORAGE.chatSession);
+    const thread = $("#chat-thread");
+    if (thread) {
+      thread.dataset.ready = "";
+      thread.textContent = "";
+    }
+    $$(".child-chip", $("#children-list")).forEach((b) => {
+      const isActive = b.dataset.id === id;
+      b.classList.toggle("active", isActive);
+      b.setAttribute("aria-pressed", String(isActive));
+    });
+    fillChildSelects();
+    syncScreeningAgeFromChild();
+    toast(t("childSelected", { name: child.name || "" }));
+    await loadChildDossier(id);
   }
 
   async function loadChildren() {
     const list = $("#children-list");
     const emptyHint = $("#child-empty-hint");
+    if (!list) return;
+    const token = ++state.childrenToken;
+    list.setAttribute("aria-busy", "true");
+    if (!list.querySelector(".child-chip")) renderMessage(list, t("loading"));
     try {
-      const data = await api("/children");
+      const data = await api(EP.children);
+      if (token !== state.childrenToken) return;
       state.children = Array.isArray(data) ? data : data.children || [];
       fillChildSelects();
+      const panel = $("#child-dossier");
       if (!state.children.length) {
-        list.innerHTML = "";
+        list.textContent = "";
         if (emptyHint) emptyHint.hidden = false;
-        const panel = $("#child-dossier");
         if (panel) panel.hidden = true;
         return;
       }
       if (emptyHint) emptyHint.hidden = true;
-      const activeId = state.activeChild && (state.activeChild.child_id || state.activeChild.id);
-      const ordered = state.children.slice();
-      if (activeId) {
-        ordered.sort((a, b) => {
-          const aid = a.child_id || a.id;
-          const bid = b.child_id || b.id;
-          if (aid === activeId) return -1;
-          if (bid === activeId) return 1;
-          return 0;
+      const activeId = activeChildId();
+      // Active child first, then most recently added.
+      const ordered = state.children.slice().sort((a, b) => {
+        if (activeId) {
+          if (childIdOf(a) === activeId) return -1;
+          if (childIdOf(b) === activeId) return 1;
+        }
+        return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      });
+      // Rebuilt from scratch each time: no duplicate rows, no stale listeners.
+      list.textContent = "";
+      ordered.slice(0, LIMITS.childChipsMax).forEach((c) => {
+        const id = childIdOf(c);
+        if (!id) return;
+        const isActive = id === activeId;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `child-chip${isActive ? " active" : ""}`;
+        btn.dataset.id = id;
+        btn.setAttribute("aria-pressed", String(isActive));
+        const name = document.createElement("span");
+        name.className = "child-chip-name";
+        name.textContent = c.name || id;
+        btn.appendChild(name);
+        const age = ageMonthsFromDob(c.date_of_birth);
+        const metaText = [
+          maturityLabel(c.gestational_age_weeks),
+          age != null ? formatAgeLabel(age) : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        if (metaText) {
+          const meta = document.createElement("span");
+          meta.className = "meta";
+          meta.textContent = metaText;
+          btn.appendChild(meta);
+        }
+        btn.addEventListener("click", () => {
+          selectChild(c);
         });
-      }
-      const shown = ordered.slice(0, 12);
-      list.innerHTML = shown
-        .map((c) => {
-          const id = c.child_id || c.id;
-          const gaNum = c.gestational_age_weeks;
-          const maturity =
-            gaNum != null ? (Number(gaNum) < 37 ? t("preterm") : t("term")) : "";
-          const age = ageMonthsFromDob(c.date_of_birth);
-          const meta = [maturity, age != null ? formatAgeLabel(age) : ""]
-            .filter(Boolean)
-            .join(" · ");
-          return `<button type="button" class="child-chip${id === activeId ? " active" : ""}" data-id="${escapeHtml(id)}" role="listitem">
-            <span class="child-chip-name">${escapeHtml(c.name)}</span>
-            ${meta ? `<span class="meta">${escapeHtml(meta)}</span>` : ""}
-          </button>`;
-        })
-        .join("");
-      $$(".child-chip", list).forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const child = state.children.find((c) => (c.child_id || c.id) === btn.dataset.id);
-          saveActiveChild(child);
-          state.chatSessionId = null;
-          localStorage.removeItem(STORAGE_SESSION);
-          const thread = $("#chat-thread");
-          if (thread) {
-            thread.dataset.ready = "";
-            thread.innerHTML = "";
-          }
-          await loadChildDossier(child.child_id || child.id);
-          fillChildSelects();
-          syncScreeningAgeFromChild();
-          $$(".child-chip", list).forEach((b) =>
-            b.classList.toggle("active", b.dataset.id === (child.child_id || child.id))
-          );
-          toast(t("childSelected", { name: child.name }));
-        });
+        list.appendChild(btn);
       });
       if (activeId) await loadChildDossier(activeId);
-      else {
-        const panel = $("#child-dossier");
-        if (panel) panel.hidden = true;
-      }
+      else if (panel) panel.hidden = true;
     } catch (err) {
-      list.innerHTML = `<p class="muted">${escapeHtml(err.message)}</p>`;
+      if (token !== state.childrenToken || isAbortError(err)) return;
+      renderMessage(list, `${t("childrenLoadFailed")} ${err.message}`, {
+        retry: () => loadChildren(),
+      });
+    } finally {
+      if (token === state.childrenToken) list.removeAttribute("aria-busy");
     }
   }
 
@@ -560,7 +920,14 @@
     const toggle = $("#toggle-add-child");
     if (!form) return;
     form.hidden = !open;
-    if (toggle) toggle.textContent = open ? t("hideAddChild") : t("addChild");
+    if (toggle) {
+      setI18nText(toggle, open ? "hideAddChild" : "addChild");
+      toggle.setAttribute("aria-expanded", String(!!open));
+    }
+    if (open) {
+      const first = form.querySelector('input[name="name"]');
+      if (first) first.focus();
+    }
   }
 
   function wireChildForm() {
@@ -575,7 +942,9 @@
     if (cancel) {
       cancel.addEventListener("click", () => setAddChildOpen(false));
     }
-    $("#child-form").addEventListener("submit", async (e) => {
+    const form0 = $("#child-form");
+    if (!form0) return;
+    form0.addEventListener("submit", async (e) => {
       e.preventDefault();
       const form = e.target;
       const btn = $("#child-submit");
@@ -589,7 +958,7 @@
       if (dob) body.date_of_birth = dob;
       setLoading(btn, true);
       try {
-        const created = await api("/children", { method: "POST", body });
+        const created = await api(EP.children, { method: "POST", body });
         saveActiveChild(created);
         form.reset();
         setAddChildOpen(false);
@@ -606,73 +975,120 @@
   }
 
   /* —— Chat —— */
+  /** Cancel any in-flight chat request and stop text reveals. */
+  function abortChat() {
+    if (state.chatAbort) {
+      state.chatAbort.abort();
+      state.chatAbort = null;
+    }
+    cancelReveals();
+    setChatBusy(false);
+  }
+
+  function cancelReveals(finishText = true) {
+    [...reveals].forEach((r) => r.stop(finishText));
+    reveals.clear();
+  }
+
   async function ensureChatSession() {
     if (state.chatSessionId) return state.chatSessionId;
-    const childId =
-      (state.activeChild && (state.activeChild.child_id || state.activeChild.id)) || undefined;
-    const data = await api("/sessions", {
+    const childId = activeChildId() || undefined;
+    const data = await api(EP.sessions, {
       method: "POST",
       body: childId ? { child_id: childId } : {},
     });
     state.chatSessionId = data.session_id;
-    localStorage.setItem(STORAGE_SESSION, data.session_id);
+    store.set(STORAGE.chatSession, data.session_id);
     return state.chatSessionId;
   }
 
   async function startNewChat() {
+    abortChat();
     state.chatSessionId = null;
-    localStorage.removeItem(STORAGE_SESSION);
+    store.remove(STORAGE.chatSession);
     const thread = $("#chat-thread");
     if (thread) {
       thread.dataset.ready = "";
-      thread.innerHTML = "";
+      thread.textContent = "";
     }
-    const panel = $("#chat-history-panel");
-    if (panel) panel.hidden = true;
+    setChatHistoryOpen(false);
     await ensureChatSession();
     initChat();
-    toast(t("newChatStarted"), "ok");
+    toast(t("newChatStarted"));
+  }
+
+  function setChatHistoryOpen(open) {
+    state.chatHistoryOpen = !!open;
+    const panel = $("#chat-history-panel");
+    if (panel) panel.hidden = !open;
+    const btn = $("#btn-chat-history");
+    if (btn) btn.setAttribute("aria-expanded", String(!!open));
   }
 
   async function loadChatHistoryList() {
-    const panel = $("#chat-history-panel");
     const list = $("#chat-history-list");
-    if (!panel || !list) return;
-    panel.hidden = false;
-    list.innerHTML = `<p class="muted">${escapeHtml(t("loading"))}</p>`;
-    const childId =
-      (state.activeChild && (state.activeChild.child_id || state.activeChild.id)) || "";
-    const q = childId ? `?child_id=${encodeURIComponent(childId)}&limit=30` : "?limit=30";
-    const data = await api(`/sessions${q}`);
-    const sessions = data.sessions || [];
-    if (!sessions.length) {
-      list.innerHTML = `<p class="muted">${escapeHtml(t("noChatHistory"))}</p>`;
-      return;
+    if (!list) return;
+    setChatHistoryOpen(true);
+    renderMessage(list, t("loading"));
+    const childId = activeChildId() || "";
+    const q = new URLSearchParams();
+    if (childId) q.set("child_id", childId);
+    q.set("limit", String(LIMITS.chatHistoryLimit));
+    try {
+      const data = await api(`${EP.sessions}?${q.toString()}`);
+      const sessions = data.sessions || [];
+      if (!sessions.length) {
+        renderMessage(list, t("noChatHistory"));
+        return;
+      }
+      list.textContent = "";
+      sessions.forEach((s) => {
+        if (!s || !s.session_id) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "history-item";
+        const title = document.createElement("strong");
+        title.textContent =
+          String(s.title || s.preview || s.session_id).slice(
+            0,
+            LIMITS.chatHistoryTitleMaxChars
+          ) || t("chatFallbackTitle");
+        const meta = document.createElement("span");
+        meta.className = "muted";
+        meta.textContent = `${fmtNum(s.message_count || 0, 0)} · ${formatTimestamp(s.updated_at)}`;
+        btn.appendChild(title);
+        btn.appendChild(meta);
+        btn.addEventListener("click", () => {
+          openChatSession(s.session_id).catch((err) => {
+            toast(`${t("chatOpenFailed")} ${err.message}`, "error");
+          });
+        });
+        list.appendChild(btn);
+      });
+    } catch (err) {
+      if (isAbortError(err)) return;
+      renderMessage(list, `${t("chatHistoryLoadFailed")} ${err.message}`, {
+        retry: () => loadChatHistoryList(),
+      });
     }
-    list.innerHTML = sessions
-      .map((s) => {
-        const title = (s.title || s.preview || s.session_id || "").slice(0, 80);
-        const meta = `${s.message_count || 0} · ${(s.updated_at || "").slice(0, 16)}`;
-        return `<button type="button" class="history-item" data-sid="${escapeHtml(
-          s.session_id
-        )}"><strong>${escapeHtml(title || t("chatFallbackTitle"))}</strong><span class="muted">${escapeHtml(
-          meta
-        )}</span></button>`;
-      })
-      .join("");
-    list.querySelectorAll(".history-item").forEach((btn) => {
-      btn.addEventListener("click", () => openChatSession(btn.getAttribute("data-sid")));
-    });
+  }
+
+  function formatTimestamp(raw) {
+    return String(raw || "")
+      .slice(0, LIMITS.timestampChars)
+      .replace("T", " ");
   }
 
   async function openChatSession(sessionId) {
     if (!sessionId) return;
-    const data = await api(`/sessions/${encodeURIComponent(sessionId)}`);
+    const data = await api(EP.session(sessionId));
+    abortChat();
     state.chatSessionId = sessionId;
-    localStorage.setItem(STORAGE_SESSION, sessionId);
+    store.set(STORAGE.chatSession, sessionId);
     const thread = $("#chat-thread");
+    if (!thread) return;
     thread.dataset.ready = "1";
-    thread.innerHTML = "";
+    thread.textContent = "";
     const hist = data.history || [];
     if (!hist.length) {
       appendBubble("assistant", t("chatWelcome"));
@@ -686,48 +1102,91 @@
         }
       });
     }
-    const panel = $("#chat-history-panel");
-    if (panel) panel.hidden = true;
-    toast(t("chatOpened"), "ok");
+    setChatHistoryOpen(false);
+    toast(t("chatOpened"));
   }
 
   function initChat() {
     const thread = $("#chat-thread");
+    if (!thread) return;
     if (!thread.dataset.ready) {
       thread.dataset.ready = "1";
-      thread.innerHTML = "";
+      thread.textContent = "";
       appendBubble("assistant", t("chatWelcome"));
     }
-    ensureChatSession().catch((err) => toast(err.message, "error"));
+    ensureChatSession().catch((err) => {
+      if (!isAbortError(err)) toast(err.message, "error");
+    });
     const newBtn = $("#btn-new-chat");
     const histBtn = $("#btn-chat-history");
     if (newBtn && !newBtn.dataset.wired) {
       newBtn.dataset.wired = "1";
       newBtn.addEventListener("click", () => {
-        startNewChat().catch((err) => toast(err.message, "error"));
+        startNewChat().catch((err) => {
+          if (!isAbortError(err)) toast(err.message, "error");
+        });
       });
     }
     if (histBtn && !histBtn.dataset.wired) {
       histBtn.dataset.wired = "1";
+      histBtn.setAttribute("aria-expanded", "false");
       histBtn.addEventListener("click", () => {
-        const panel = $("#chat-history-panel");
-        if (panel && !panel.hidden) {
-          panel.hidden = true;
+        if (state.chatHistoryOpen) {
+          setChatHistoryOpen(false);
           return;
         }
-        loadChatHistoryList().catch((err) => toast(err.message, "error"));
+        loadChatHistoryList();
       });
     }
   }
 
   function appendBubble(role, text) {
     const thread = $("#chat-thread");
+    if (!thread) return null;
     const div = document.createElement("div");
     div.className = `bubble ${role}`;
     div.textContent = text;
     thread.appendChild(div);
     thread.scrollTop = thread.scrollHeight;
     return div;
+  }
+
+  /**
+   * Shell for a bubble whose text arrives progressively. Hidden from assistive
+   * tech while streaming so screen readers hear the finished reply once.
+   */
+  function createBubbleShell(thread) {
+    const div = document.createElement("div");
+    div.className = "bubble assistant streaming";
+    div.setAttribute("aria-hidden", "true");
+    const body = document.createElement("span");
+    body.className = "stream-text";
+    const caret = document.createElement("span");
+    caret.className = "stream-caret";
+    caret.setAttribute("aria-hidden", "true");
+    div.appendChild(body);
+    div.appendChild(caret);
+    thread.appendChild(div);
+    thread.scrollTop = thread.scrollHeight;
+    return { div, body, caret };
+  }
+
+  function revealPace(length) {
+    const charsPerTick =
+      length > REVEAL.longTextChars
+        ? REVEAL.charsPerTickMax
+        : length > REVEAL.mediumTextChars
+          ? REVEAL.charsPerTickMedium
+          : length > REVEAL.shortTextChars
+            ? REVEAL.charsPerTickSmall
+            : REVEAL.charsPerTickMin;
+    const delayMs =
+      length > REVEAL.longTextChars
+        ? TIME.revealTickFastMs
+        : length > REVEAL.mediumTextChars
+          ? TIME.revealTickMediumMs
+          : TIME.revealTickSlowMs;
+    return { charsPerTick, delayMs };
   }
 
   function prefersReducedMotion() {
@@ -750,36 +1209,45 @@
       return Promise.resolve(appendBubble("assistant", full));
     }
 
-    const div = document.createElement("div");
-    div.className = "bubble assistant streaming";
-    const body = document.createElement("span");
-    body.className = "stream-text";
-    const caret = document.createElement("span");
-    caret.className = "stream-caret";
-    caret.setAttribute("aria-hidden", "true");
-    div.appendChild(body);
-    div.appendChild(caret);
-    thread.appendChild(div);
-    thread.scrollTop = thread.scrollHeight;
-
+    const { div, body, caret } = createBubbleShell(thread);
     // Adaptive pace: short replies feel natural; long ones finish sooner
     const len = full.length;
-    const charsPerTick = len > 900 ? 5 : len > 400 ? 3 : len > 160 ? 2 : 1;
-    const delayMs = len > 900 ? 8 : len > 400 ? 12 : 16;
+    const { charsPerTick, delayMs } = revealPace(len);
 
     return new Promise((resolve) => {
       let i = 0;
+      let timer = null;
+      let done = false;
+      const settle = (showAll) => {
+        if (done) return;
+        done = true;
+        if (timer) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+        if (showAll) body.textContent = full;
+        div.classList.remove("streaming");
+        div.removeAttribute("aria-hidden");
+        caret.remove();
+        reveals.delete(handle);
+        resolve(div);
+      };
+      const handle = { stop: (finishText) => settle(!!finishText) };
+      reveals.add(handle);
       const step = () => {
+        timer = null;
+        if (!div.isConnected) {
+          settle(false);
+          return;
+        }
         i = Math.min(len, i + charsPerTick);
         body.textContent = full.slice(0, i);
         thread.scrollTop = thread.scrollHeight;
         if (i >= len) {
-          div.classList.remove("streaming");
-          caret.remove();
-          resolve(div);
+          settle(false);
           return;
         }
-        window.setTimeout(step, delayMs);
+        timer = window.setTimeout(step, delayMs);
       };
       step();
     });
@@ -787,6 +1255,7 @@
 
   function appendToolResult(payload) {
     const thread = $("#chat-thread");
+    if (!thread || !payload) return;
     let results = payload.tool_results;
     if (!results && payload.tools) {
       const tools = payload.tools;
@@ -795,22 +1264,28 @@
       else results = [tools];
     }
     const list = Array.isArray(results) ? results : results ? [results] : [];
-    const imgs = [];
+    // A Set keeps one image per URL: repeated plots can't duplicate overlays.
+    const imgs = new Set();
     list.forEach((tr) => {
       if (!tr) return;
       const res = tr.result || tr;
       const img = overlaySrc(res) || overlaySrc(tr) || overlaySrc(payload);
-      if (img) imgs.push(img);
+      if (img) imgs.add(img);
     });
     const topImg = overlaySrc(payload);
-    if (topImg && !imgs.includes(topImg)) imgs.push(topImg);
-    if (!imgs.length) return;
+    if (topImg) imgs.add(topImg);
+    if (!imgs.size) return;
     // Replace prior chart images in this thread so replots don't stack conflicting overlays.
-    thread.querySelectorAll(".tool-block.clean, img.overlay-img").forEach((el) => el.remove());
-    imgs.forEach((img) => {
+    thread.querySelectorAll(".tool-block.clean").forEach((el) => el.remove());
+    imgs.forEach((src) => {
       const block = document.createElement("div");
       block.className = "tool-block clean";
-      block.innerHTML = `<img class="overlay-img" src="${escapeHtml(img)}" alt="${escapeHtml(t("chartOverlayAlt"))}" />`;
+      const img = document.createElement("img");
+      img.className = "overlay-img";
+      img.src = src;
+      img.alt = t("chartOverlayAlt");
+      img.loading = "lazy";
+      block.appendChild(img);
       thread.appendChild(block);
     });
     thread.scrollTop = thread.scrollHeight;
@@ -821,32 +1296,60 @@
    * Throws if the endpoint is unavailable so caller can fall back to /api/chat.
    */
   async function chatViaStream(body, { signal, onToken } = {}) {
+    // Chain an internal controller so an idle stream can be torn down without
+    // being confused with a parent-initiated cancel.
+    const ctrl = new AbortController();
+    const relayAbort = () => ctrl.abort();
+    if (signal) {
+      if (signal.aborted) ctrl.abort();
+      else signal.addEventListener("abort", relayAbort, { once: true });
+    }
+    let stalled = false;
+    let idleTimer = null;
+    const armIdleTimer = () => {
+      if (idleTimer) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(() => {
+        stalled = true;
+        ctrl.abort();
+      }, TIME.streamIdleTimeoutMs);
+    };
+    const disarm = () => {
+      if (idleTimer) window.clearTimeout(idleTimer);
+      idleTimer = null;
+      if (signal) signal.removeEventListener("abort", relayAbort);
+    };
+
     let res;
     try {
-      res = await fetch(`${API_BASE}/chat/stream`, {
+      armIdleTimer();
+      res = await fetch(apiUrl(EP.chatStream), {
         method: "POST",
         headers: {
           Accept: "text/event-stream",
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
-        signal,
+        signal: ctrl.signal,
       });
     } catch (err) {
-      if (err && err.name === "AbortError") throw err;
+      disarm();
+      if (stalled) throw timeoutError();
+      if (isAbortError(err)) throw err;
       const e = new Error(t("serverUnreachable"));
       e.cause = err;
       e.streamUnavailable = true;
       throw e;
     }
     if (!res.ok || !res.body) {
-      const e = new Error(`stream_unavailable (${res.status})`);
+      disarm();
+      const e = new Error(errorMessage(null, res.status));
       e.status = res.status;
       e.streamUnavailable = true;
       throw e;
     }
     const ctype = (res.headers.get("content-type") || "").toLowerCase();
     if (ctype.includes("application/json") && !ctype.includes("text/event-stream")) {
+      disarm();
       const e = new Error("stream_unavailable");
       e.streamUnavailable = true;
       throw e;
@@ -884,19 +1387,37 @@
       }
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let sep;
-      while ((sep = buffer.search(/\r?\n\r?\n/)) !== -1) {
-        const match = buffer.match(/\r?\n\r?\n/);
-        const block = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + (match ? match[0].length : 2));
-        if (block.trim()) dispatchBlock(block);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armIdleTimer();
+        buffer += decoder.decode(value, { stream: true });
+        let sep;
+        while ((sep = buffer.search(/\r?\n\r?\n/)) !== -1) {
+          const match = buffer.match(/\r?\n\r?\n/);
+          const block = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + (match ? match[0].length : 2));
+          if (block.trim()) dispatchBlock(block);
+        }
+      }
+      if (buffer.trim()) dispatchBlock(buffer);
+    } catch (err) {
+      // Aborted mid-stream: a stall is retryable, a parent cancel is not an error.
+      if (stalled) {
+        const e = new Error(t("streamStalled"));
+        e.timeout = true;
+        throw e;
+      }
+      throw err;
+    } finally {
+      disarm();
+      try {
+        reader.cancel();
+      } catch (_) {
+        /* already closed */
       }
     }
-    if (buffer.trim()) dispatchBlock(buffer);
 
     if (!resultPayload) {
       const e = new Error("stream_incomplete");
@@ -910,9 +1431,15 @@
     try {
       return await chatViaStream(body, { signal, onToken });
     } catch (err) {
-      if (err && err.name === "AbortError") throw err;
+      if (isAbortError(err)) throw err;
       if (!err.streamUnavailable) throw err;
-      const data = await api("/chat", { method: "POST", body, signal });
+      // Streaming endpoint missing or wrong content type — fall back to /chat.
+      const data = await api(EP.chat, {
+        method: "POST",
+        body,
+        signal,
+        timeoutMs: TIME.chatRequestTimeoutMs,
+      });
       const reply = data.reply || data.message || data.response || data.answer || "";
       if (reply && onToken) onToken(reply);
       return data;
@@ -921,29 +1448,25 @@
 
   function createStreamingAssistantBubble() {
     const thread = $("#chat-thread");
-    const div = document.createElement("div");
-    div.className = "bubble assistant streaming";
-    const body = document.createElement("span");
-    body.className = "stream-text";
-    const caret = document.createElement("span");
-    caret.className = "stream-caret";
-    caret.setAttribute("aria-hidden", "true");
-    div.appendChild(body);
-    div.appendChild(caret);
-    thread.appendChild(div);
-    thread.scrollTop = thread.scrollHeight;
+    if (!thread) return null;
+    const { div, body, caret } = createBubbleShell(thread);
     const reducedMotion = prefersReducedMotion();
     let queue = "";
     let timer = null;
     let finishing = false;
+    let closed = false;
 
     const cleanup = (finalText) => {
       if (timer) {
-        clearTimeout(timer);
+        window.clearTimeout(timer);
         timer = null;
       }
+      if (closed) return div.isConnected ? div : null;
+      closed = true;
+      reveals.delete(handle);
       if (finalText != null && finalText !== "") body.textContent = finalText;
       div.classList.remove("streaming");
+      div.removeAttribute("aria-hidden");
       caret.remove();
       if (!body.textContent) {
         div.remove();
@@ -952,19 +1475,36 @@
       return div;
     };
 
+    const handle = {
+      stop(finishText) {
+        // Flush whatever is queued so a cancelled reveal never truncates text.
+        cleanup(finishText && queue ? body.textContent + queue : undefined);
+      },
+    };
+    reveals.add(handle);
+
     const schedule = () => {
       if (timer) return;
-      timer = window.setTimeout(drain, 14);
+      timer = window.setTimeout(drain, TIME.streamTickMs);
     };
 
     const drain = () => {
       timer = null;
+      if (!div.isConnected) {
+        cleanup();
+        return;
+      }
       if (!queue.length) {
         if (finishing) cleanup();
         return;
       }
       const qLen = queue.length;
-      const charsPerTick = qLen > 40 ? 3 : qLen > 16 ? 2 : 1;
+      const charsPerTick =
+        qLen > REVEAL.queueLargeChars
+          ? REVEAL.charsPerTickMedium
+          : qLen > REVEAL.queueMediumChars
+            ? REVEAL.charsPerTickSmall
+            : REVEAL.charsPerTickMin;
       body.textContent += queue.slice(0, charsPerTick);
       queue = queue.slice(charsPerTick);
       thread.scrollTop = thread.scrollHeight;
@@ -978,7 +1518,7 @@
     return {
       el: div,
       append(text) {
-        if (!text) return;
+        if (!text || closed) return;
         const chunk = String(text);
         if (reducedMotion) {
           body.textContent += chunk;
@@ -993,12 +1533,34 @@
         if (reducedMotion) return cleanup();
         if (!queue.length) return cleanup();
         finishing = true;
-        if (!timer) {
-          schedule();
-        }
+        if (!timer) schedule();
         return div;
       },
     };
+  }
+
+  /** Composer autosize ceiling — owned by styles.css (--composer-max-h). */
+  function composerMaxHeight() {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue(
+      "--composer-max-h"
+    );
+    const px = parseFloat(raw);
+    return Number.isFinite(px) && px > 0 ? px : LIMITS.composerMaxHeightPx;
+  }
+
+  function setChatBusy(busy) {
+    setLoading($("#chat-send"), busy);
+    const cancelBtn = $("#chat-cancel");
+    const attachBtn = $("#chat-attach");
+    const input = $("#chat-input");
+    const thread = $("#chat-thread");
+    if (cancelBtn) cancelBtn.hidden = !busy;
+    if (attachBtn) attachBtn.disabled = busy;
+    if (input) input.disabled = busy;
+    if (thread) {
+      if (busy) thread.setAttribute("aria-busy", "true");
+      else thread.removeAttribute("aria-busy");
+    }
   }
 
   function wireChat() {
@@ -1006,30 +1568,26 @@
     const input = $("#chat-input");
     const attachBtn = $("#chat-attach");
     const cancelBtn = $("#chat-cancel");
-    let chatAbort = null;
-
-    function setChatBusy(busy) {
-      const btn = $("#chat-send");
-      setLoading(btn, busy);
-      if (cancelBtn) cancelBtn.hidden = !busy;
-      if (attachBtn) attachBtn.disabled = busy;
-      if (input) input.disabled = busy;
-    }
+    const fileInput = $("#chat-file");
+    if (!form || !input) return;
 
     input.addEventListener("input", () => {
       input.style.height = "auto";
-      input.style.height = Math.min(input.scrollHeight, 120) + "px";
+      input.style.height = Math.min(input.scrollHeight, composerMaxHeight()) + "px";
     });
     if (cancelBtn && !cancelBtn.dataset.wired) {
       cancelBtn.dataset.wired = "1";
       cancelBtn.addEventListener("click", () => {
-        if (chatAbort) chatAbort.abort();
+        if (state.chatAbort) state.chatAbort.abort();
       });
     }
-    if (attachBtn && !attachBtn.dataset.wired) {
+    if (attachBtn && fileInput && !attachBtn.dataset.wired) {
       attachBtn.dataset.wired = "1";
-      attachBtn.addEventListener("click", () => {
-        toast(t("attachComingSoon"), "info");
+      attachBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files && fileInput.files[0];
+        fileInput.value = "";
+        if (file) sendPhoto(file);
       });
     }
     form.addEventListener("submit", async (e) => {
@@ -1039,9 +1597,9 @@
       appendBubble("user", message);
       input.value = "";
       input.style.height = "auto";
-      if (chatAbort) chatAbort.abort();
-      chatAbort = new AbortController();
-      const { signal } = chatAbort;
+      abortChat();
+      state.chatAbort = new AbortController();
+      const { signal } = state.chatAbort;
       setChatBusy(true);
       const scene = appendBubble("tool-scene", t("thinking"));
       let streamBubble = null;
@@ -1049,7 +1607,7 @@
         if (scene.isConnected) scene.remove();
         if (data.session_id) {
           state.chatSessionId = data.session_id;
-          localStorage.setItem(STORAGE_SESSION, data.session_id);
+          store.set(STORAGE.chatSession, data.session_id);
         }
         const reply =
           data.reply || data.message || data.response || data.answer || t("done");
@@ -1067,68 +1625,54 @@
           appendToolResult(data);
         }
       };
-      try {
+      const runTurn = async () => {
         await ensureChatSession();
-        const body = {
-          message,
-          session_id: state.chatSessionId || undefined,
-          child_id:
-            (state.activeChild && (state.activeChild.child_id || state.activeChild.id)) || undefined,
-          ui_lang: state.lang,
-        };
         let gotToken = false;
-        const data = await chatRequest(body, {
-          signal,
-          onToken: (text) => {
-            if (!gotToken) {
-              if (scene.isConnected) scene.remove();
-              streamBubble = createStreamingAssistantBubble();
-              gotToken = true;
-            }
-            if (streamBubble) streamBubble.append(text);
+        const data = await chatRequest(
+          {
+            message,
+            session_id: state.chatSessionId || undefined,
+            child_id: activeChildId() || undefined,
+            ui_lang: state.lang,
           },
-        });
+          {
+            signal,
+            onToken: (text) => {
+              if (!gotToken) {
+                if (scene && scene.isConnected) scene.remove();
+                streamBubble = createStreamingAssistantBubble();
+                gotToken = true;
+              }
+              if (streamBubble) streamBubble.append(text);
+            },
+          }
+        );
         await applyChatResult(data, gotToken);
+      };
+
+      try {
+        await runTurn();
       } catch (err) {
-        if (scene.isConnected) scene.remove();
+        if (scene && scene.isConnected) scene.remove();
         if (streamBubble) {
           streamBubble.finish();
           streamBubble = null;
         }
-        if (err && err.name === "AbortError") {
+        if (isAbortError(err)) {
           appendBubble("system", t("chatCancelled"));
           return;
         }
-        if (String(err.message || "").includes("session_not_found") || err.status === 404) {
+        // Stale session id (e.g. DB reset): drop it and retry once.
+        const stale =
+          String(err.message || "").includes("session_not_found") || err.status === 404;
+        if (stale) {
           state.chatSessionId = null;
-          localStorage.removeItem(STORAGE_SESSION);
+          store.remove(STORAGE.chatSession);
           try {
-            await ensureChatSession();
-            let gotToken = false;
-            const data = await chatRequest(
-              {
-                message,
-                session_id: state.chatSessionId,
-                child_id:
-                  (state.activeChild && (state.activeChild.child_id || state.activeChild.id)) ||
-                  undefined,
-                ui_lang: state.lang,
-              },
-              {
-                signal,
-                onToken: (text) => {
-                  if (!gotToken) {
-                    streamBubble = createStreamingAssistantBubble();
-                    gotToken = true;
-                  }
-                  if (streamBubble) streamBubble.append(text);
-                },
-              }
-            );
-            await applyChatResult(data, gotToken);
+            await runTurn();
             return;
           } catch (err2) {
-            if (err2 && err2.name === "AbortError") {
+            if (isAbortError(err2)) {
               appendBubble("system", t("chatCancelled"));
               return;
             }
@@ -1140,10 +1684,93 @@
         appendBubble("system", err.message);
         toast(err.message, "error");
       } finally {
+        if (state.chatAbort && state.chatAbort.signal === signal) state.chatAbort = null;
         setChatBusy(false);
-        input.focus();
+        if (!input.disabled) input.focus();
       }
     });
+  }
+
+  /**
+   * Parent photo -> /chat/vision (multipart). Validates type/size client-side
+   * against the same ceiling the API enforces, and always resolves the UI state.
+   */
+  async function sendPhoto(file) {
+    if (!file) return;
+    if (file.type && !LIMITS.acceptedImageTypes.includes(file.type)) {
+      toast(t("photoUnsupported"), "error");
+      return;
+    }
+    if (file.size > LIMITS.maxUploadBytes) {
+      toast(
+        t("photoTooLarge", {
+          mb: fmtNum(LIMITS.maxUploadBytes / LIMITS.bytesPerMegabyte, 0),
+        }),
+        "error"
+      );
+      return;
+    }
+    const input = $("#chat-input");
+    const caption = input ? input.value.trim() : "";
+    if (input) {
+      input.value = "";
+      input.style.height = "auto";
+    }
+
+    const thread = $("#chat-thread");
+    if (thread && !thread.dataset.ready) thread.dataset.ready = "1";
+    const bubble = appendBubble("user", caption);
+    if (bubble) {
+      const objectUrl = URL.createObjectURL(file);
+      const img = document.createElement("img");
+      img.className = "bubble-photo";
+      img.alt = t("photoAlt");
+      img.src = objectUrl;
+      img.addEventListener("load", () => URL.revokeObjectURL(objectUrl), { once: true });
+      img.addEventListener("error", () => URL.revokeObjectURL(objectUrl), { once: true });
+      bubble.appendChild(img);
+    }
+
+    abortChat();
+    state.chatAbort = new AbortController();
+    const { signal } = state.chatAbort;
+    setChatBusy(true);
+    const scene = appendBubble("tool-scene", t("photoSending"));
+    try {
+      const fd = new FormData();
+      fd.append("image", file, file.name || "photo.png");
+      fd.append("message", caption);
+      if (state.chatSessionId) fd.append("session_id", state.chatSessionId);
+      const childId = activeChildId();
+      if (childId) fd.append("child_id", childId);
+      fd.append("ui_lang", state.lang);
+      const data = await api(EP.chatVision, {
+        method: "POST",
+        body: fd,
+        signal,
+        timeoutMs: TIME.visionTimeoutMs,
+      });
+      if (scene && scene.isConnected) scene.remove();
+      if (data.session_id) {
+        state.chatSessionId = data.session_id;
+        store.set(STORAGE.chatSession, data.session_id);
+      }
+      await streamAssistantBubble(
+        data.reply || data.message || data.response || data.answer || t("done")
+      );
+      appendToolResult(data);
+    } catch (err) {
+      if (scene && scene.isConnected) scene.remove();
+      if (isAbortError(err)) {
+        appendBubble("system", t("chatCancelled"));
+        return;
+      }
+      appendBubble("system", `${t("visionFailed")} — ${err.message}`);
+      toast(err.message, "error");
+    } finally {
+      if (state.chatAbort && state.chatAbort.signal === signal) state.chatAbort = null;
+      setChatBusy(false);
+    }
   }
 
   /* —— Growth —— */
@@ -1151,14 +1778,14 @@
     const sel = $("#growth-child");
     const id = sel && sel.value;
     if (!id) return;
-    const child = state.children.find((c) => (c.child_id || c.id) === id);
-    if (child && child.sex) {
+    const child = state.children.find((c) => childIdOf(c) === id);
+    if (child && (child.sex === "male" || child.sex === "female")) {
       const radio = $(`#growth-form input[name="sex"][value="${child.sex}"]`);
       if (radio) radio.checked = true;
     }
   }
 
-  async function fetchGrowthCurves(params) {
+  async function fetchGrowthCurves(params, signal) {
     const q = new URLSearchParams();
     if (params.sex) q.set("sex", params.sex);
     if (params.measure) q.set("measure", params.measure);
@@ -1168,10 +1795,10 @@
     }
     if (params.age_max != null) q.set("age_max", String(params.age_max));
     try {
-      const data = await api(`/growth/curves?${q.toString()}`);
+      const data = await api(`${EP.growthCurves}?${q.toString()}`, { signal });
       if (data && data.ok !== false && data.ages && data.curves) return data;
     } catch (_) {
-      /* endpoint missing or failed — PNG overlay fallback */
+      /* endpoint missing or failed — PNG overlay fallback keeps the view usable */
     }
     return null;
   }
@@ -1184,9 +1811,9 @@
       .filter((p) => Array.isArray(curves[p]) && curves[p].length);
     if (!ages.length || !pctKeys.length) return "";
 
-    const pad = { top: 28, right: 16, bottom: 36, left: 44 };
-    const W = 640;
-    const H = 360;
+    const pad = CHART.padding;
+    const W = CHART.width;
+    const H = CHART.height;
     const innerW = W - pad.left - pad.right;
     const innerH = H - pad.top - pad.bottom;
 
@@ -1208,7 +1835,7 @@
       yMin = 0;
       yMax = 1;
     }
-    const yPad = (yMax - yMin) * 0.08 || 0.1;
+    const yPad = (yMax - yMin) * CHART.yPadRatio || CHART.yPadFallback;
     yMin -= yPad;
     yMax += yPad;
 
@@ -1227,7 +1854,9 @@
           })
           .filter(Boolean)
           .join(" ");
-        return `<polyline class="curve-p${escapeHtml(p)}" points="${pts}" />`;
+        // Percentile keys land in a class name — keep them numeric only.
+        const safeKey = String(p).replace(/[^0-9]/g, "");
+        return `<polyline class="curve-p${safeKey}" points="${pts}" />`;
       })
       .join("");
 
@@ -1235,40 +1864,127 @@
     if (childPoint && Number.isFinite(childPoint.x) && Number.isFinite(childPoint.y)) {
       childMark = `<circle class="child-point" cx="${sx(childPoint.x).toFixed(1)}" cy="${sy(
         childPoint.y
-      ).toFixed(1)}" r="6" />`;
+      ).toFixed(1)}" r="${CHART.pointRadius}" />`;
     }
 
-    const xLabel = curvesData.age_unit === "weeks" ? t("ageWeeks") : t("ageMonths");
-    const yLabel = curvesData.units || t("value");
+    const xLabel =
+      curvesData.age_unit === "weeks" ? t("ageAxisWeeks") : t("ageAxisMonths");
+    const yLabel =
+      typeof curvesData.units === "string" && curvesData.units
+        ? curvesData.units
+        : t("valueUnit");
     const title = escapeHtml(t("percentileChart"));
+    const axisY = H - pad.bottom;
 
+    // Colors, weights and font sizes come from styles.css (.growth-svg-wrap …).
     return `<div class="growth-svg-wrap" role="img" aria-label="${title}">
       <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <text x="${pad.left}" y="18" fill="#3a5560" font-size="13" font-weight="700">${title}</text>
-        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${H - pad.bottom}" stroke="#c5d5dc" />
-        <line x1="${pad.left}" y1="${H - pad.bottom}" x2="${W - pad.right}" y2="${H - pad.bottom}" stroke="#c5d5dc" />
+        <text class="gsvg-title" x="${pad.left}" y="${CHART.titleY}">${title}</text>
+        <line class="gsvg-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${axisY}" />
+        <line class="gsvg-axis" x1="${pad.left}" y1="${axisY}" x2="${W - pad.right}" y2="${axisY}" />
         ${polylines}
         ${childMark}
-        <text x="${W / 2}" y="${H - 8}" text-anchor="middle" fill="#5a7380" font-size="11">${escapeHtml(
-          xLabel
-        )}</text>
-        <text x="12" y="${H / 2}" text-anchor="middle" fill="#5a7380" font-size="11"
-          transform="rotate(-90 12 ${H / 2})">${escapeHtml(yLabel)}</text>
+        <text class="gsvg-axis-label" x="${W / 2}" y="${
+          H - CHART.axisLabelOffset
+        }" text-anchor="middle">${escapeHtml(xLabel)}</text>
+        <text class="gsvg-axis-label" x="${CHART.yAxisLabelX}" y="${
+          H / 2
+        }" text-anchor="middle" transform="rotate(-90 ${CHART.yAxisLabelX} ${
+          H / 2
+        })">${escapeHtml(yLabel)}</text>
       </svg>
     </div>`;
   }
 
+  function growthBadgeClass(track) {
+    if (/below_3|above_97|investigate|alert|high/i.test(track)) return "alert";
+    if (/outer|monitor|warn/i.test(track)) return "warn";
+    return "";
+  }
+
+  /** Unit label for the measured value, tolerating string or per-measure map. */
+  function measureUnitLabel(data, body) {
+    const measure = (data && data.measure) || (body && body.measure);
+    const units = data && data.units;
+    if (units && typeof units === "object") {
+      const u = units[measure];
+      if (typeof u === "string" && u) return u;
+    } else if (typeof units === "string" && units) {
+      return units;
+    }
+    return measureLabel(measure) || t("value");
+  }
+
+  /**
+   * Renders (or re-renders, e.g. after a language switch) the growth result
+   * from the cached payload — one block, replaced wholesale, so repeated
+   * calculations can never stack duplicate charts.
+   */
+  function renderGrowthResult(cached) {
+    const out = $("#growth-result");
+    if (!out || !cached) return;
+    const { data, body, curves } = cached;
+    const centile = data.centile != null ? fmtNum(data.centile, 1) : "—";
+    const z = data.z_score != null ? fmtNum(data.z_score, 2) : "—";
+    const track = data.track_status || data.status || "";
+    const badgeClass = growthBadgeClass(track);
+    const img = overlaySrc(data);
+    let svgHtml = "";
+    if (curves) {
+      const childX =
+        curves.age_unit === "months"
+          ? Number(data.age_months != null ? data.age_months : body.age_months)
+          : Number(data.weeks != null ? data.weeks : body.weeks);
+      const childY = Number(data.value != null ? data.value : body.value);
+      svgHtml = renderGrowthSvg(curves, { x: childX, y: childY });
+    }
+
+    out.innerHTML = `
+      <h3>${escapeHtml(t("growthResult"))}</h3>
+      ${
+        track
+          ? `<span class="badge ${badgeClass}">${escapeHtml(trackLabel(track))}</span>`
+          : ""
+      }
+      <div class="stat-row">
+        <div class="stat"><span class="val">${escapeHtml(centile)}</span><span class="lbl">${escapeHtml(
+          t("centile")
+        )}</span></div>
+        <div class="stat"><span class="val">${escapeHtml(z)}</span><span class="lbl">${escapeHtml(
+          t("zScore")
+        )}</span></div>
+        <div class="stat"><span class="val">${escapeHtml(
+          fmtNum(data.value != null ? data.value : body.value, 2)
+        )}</span><span class="lbl">${escapeHtml(measureUnitLabel(data, body))}</span></div>
+      </div>
+      ${data.summary ? `<p>${escapeHtml(data.summary)}</p>` : ""}
+      ${
+        svgHtml ||
+        (img
+          ? `<img class="overlay-img" src="${escapeHtml(img)}" alt="${escapeHtml(
+              t("growthChartAlt")
+            )}" loading="lazy" />`
+          : "")
+      }
+      ${!svgHtml && !img ? `<p class="muted">${escapeHtml(t("curveLoadFailed"))}</p>` : ""}
+    `;
+    out.hidden = false;
+  }
+
   function wireGrowth() {
-    $("#growth-child").addEventListener("change", (e) => {
+    const childSel = $("#growth-child");
+    const growthForm = $("#growth-form");
+    if (!childSel || !growthForm) return;
+    childSel.addEventListener("change", (e) => {
       const id = e.target.value;
       if (id) {
-        const child = state.children.find((c) => (c.child_id || c.id) === id);
+        const child = state.children.find((c) => childIdOf(c) === id);
         if (child) saveActiveChild(child);
       }
       syncGrowthSexFromChild();
     });
 
-    $("#growth-form").addEventListener("submit", async (e) => {
+    growthForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const form = e.target;
       const btn = $("#growth-submit");
@@ -1284,33 +2000,27 @@
       if (weeksRaw !== "" && weeksRaw != null) body.weeks = Number(weeksRaw);
       if (monthsRaw !== "" && monthsRaw != null) body.age_months = Number(monthsRaw);
       if (body.child_id) {
-        const child = state.children.find((c) => (c.child_id || c.id) === body.child_id);
+        const child = state.children.find((c) => childIdOf(c) === body.child_id);
         if (child && child.gestational_age_weeks != null) {
           body.gestational_age_weeks = Number(child.gestational_age_weeks);
         }
       }
       if (!body.child_id) delete body.child_id;
       if (body.weeks == null && body.age_months == null) {
-        toast(t("ageWeeksHint"), "error");
+        toast(t("enterAgeError"), "error");
         return;
       }
       setLoading(btn, true);
       const out = $("#growth-result");
-      out.hidden = true;
+      if (out) {
+        out.hidden = false;
+        out.setAttribute("aria-busy", "true");
+        renderMessage(out, t("loading"));
+      }
       try {
-        const data = await api("/growth", { method: "POST", body });
-        const centile = data.centile != null ? Number(data.centile).toFixed(1) : "—";
-        const z = data.z_score != null ? Number(data.z_score).toFixed(2) : "—";
-        const track = data.track_status || data.status || "";
-        const badgeClass =
-          /below_3|above_97|investigate|alert|high/i.test(track)
-            ? "alert"
-            : /outer|monitor|warn/i.test(track)
-              ? "warn"
-              : "";
-        const img = overlaySrc(data);
-
-        let svgHtml = "";
+        const data = await api(EP.growth, { method: "POST", body });
+        const usesMonths =
+          data.chart_standard === "who_term" || data.age_months != null;
         const curves = await fetchGrowthCurves({
           sex: data.sex || body.sex,
           measure: data.measure || body.measure,
@@ -1319,52 +2029,37 @@
             data.gestational_age_weeks != null
               ? data.gestational_age_weeks
               : body.gestational_age_weeks,
-          age_max:
-            data.chart_standard === "who_term" || data.age_months != null
-              ? Math.max(24, Number(data.age_months || body.age_months || 12) + 2)
-              : Math.max(64, Number(data.weeks || body.weeks || 40) + 4),
+          age_max: usesMonths
+            ? Math.max(
+                LIMITS.growthMonthsMax,
+                Number(
+                  data.age_months || body.age_months || LIMITS.growthCurveFallbackMonths
+                ) + LIMITS.growthCurveMonthsPadding
+              )
+            : Math.max(
+                LIMITS.growthWeeksMax,
+                Number(data.weeks || body.weeks || LIMITS.fullTermWeeks) +
+                  LIMITS.growthCurveWeeksPadding
+              ),
         });
-        if (curves) {
-          const childX =
-            curves.age_unit === "months"
-              ? Number(data.age_months != null ? data.age_months : body.age_months)
-              : Number(data.weeks != null ? data.weeks : body.weeks);
-          const childY = Number(data.value != null ? data.value : body.value);
-          svgHtml = renderGrowthSvg(curves, { x: childX, y: childY });
+        state.lastGrowth = { data, body, curves };
+        renderGrowthResult(state.lastGrowth);
+        if (out) {
+          out.scrollIntoView({
+            behavior: prefersReducedMotion() ? "auto" : "smooth",
+            block: "nearest",
+          });
         }
-
-        out.innerHTML = `
-          <h3>${escapeHtml(t("growthResult"))}</h3>
-          ${track ? `<span class="badge ${badgeClass}">${escapeHtml(track.replace(/_/g, " "))}</span>` : ""}
-          <div class="stat-row">
-            <div class="stat"><span class="val">${escapeHtml(centile)}</span><span class="lbl">${escapeHtml(
-              t("centile")
-            )}</span></div>
-            <div class="stat"><span class="val">${escapeHtml(z)}</span><span class="lbl">${escapeHtml(
-              t("zScore")
-            )}</span></div>
-            <div class="stat"><span class="val">${escapeHtml(
-              String(data.value ?? body.value)
-            )}</span><span class="lbl">${escapeHtml(
-              data.units?.[data.measure] || data.units || data.measure || t("value")
-            )}</span></div>
-          </div>
-          ${data.summary ? `<p>${escapeHtml(data.summary)}</p>` : ""}
-          ${
-            svgHtml ||
-            (img
-              ? `<img class="overlay-img" src="${escapeHtml(img)}" alt="${escapeHtml(
-                  t("growthChartAlt")
-                )}" />`
-              : "")
-          }
-          ${!svgHtml && !img ? `<p class="muted">${escapeHtml(t("curveLoadFailed"))}</p>` : ""}
-        `;
-        out.hidden = false;
-        out.scrollIntoView({ behavior: "smooth", block: "nearest" });
       } catch (err) {
+        state.lastGrowth = null;
+        if (!isAbortError(err) && out) {
+          renderMessage(out, err.message, {
+            retry: () => growthForm.requestSubmit(),
+          });
+        }
         toast(err.message, "error");
       } finally {
+        if (out) out.removeAttribute("aria-busy");
         setLoading(btn, false);
       }
     });
@@ -1387,13 +2082,21 @@
 
   function showScreeningPicker() {
     state.quiz = null;
-    $("#screening-picker").hidden = false;
-    $("#screening-quiz").hidden = true;
-    $("#screening-report").hidden = true;
-    $("#screening-title").textContent = t("screeningTitle");
-    $("#screening-sub").textContent = t("screeningSub");
-    $("#screening-back").href = "#/";
-    $("#screening-back").textContent = t("home");
+    clearQuizAdvanceTimer();
+    const picker = $("#screening-picker");
+    const quiz = $("#screening-quiz");
+    const report = $("#screening-report");
+    if (picker) picker.hidden = false;
+    if (quiz) quiz.hidden = true;
+    if (report) report.hidden = true;
+    state.lastReport = null;
+    setI18nText($("#screening-title"), "screeningTitle");
+    setI18nText($("#screening-sub"), "screeningSub");
+    const back = $("#screening-back");
+    if (back) {
+      back.href = "#/";
+      setI18nText(back, "home");
+    }
     refreshScreeningPicker();
   }
 
@@ -1404,19 +2107,13 @@
     if (badge) {
       if (age != null) {
         badge.hidden = false;
-        let text = t("ageKnownBadge", {
-          age: Number.isInteger(age) ? age : Number(age).toFixed(1),
-        });
+        let text = t("ageKnownBadge", { age: fmtNum(age) });
         if (
           ageInfo.source === "dob" &&
           ageInfo.chrono != null &&
-          Math.abs(ageInfo.chrono - age) >= 0.3
+          Math.abs(ageInfo.chrono - age) >= LIMITS.correctedAgeNoticeMonths
         ) {
-          text +=
-            " · " +
-            t("correctedAgeNote", {
-              age: Number.isInteger(age) ? age : Number(age).toFixed(1),
-            });
+          text += " · " + t("correctedAgeNote", { age: fmtNum(age) });
         }
         badge.textContent = text;
       } else {
@@ -1428,10 +2125,31 @@
     if (state.screeningHistoryOpen) renderScreeningHistory();
     const histBtn = $("#btn-prev-results");
     if (histBtn) {
-      histBtn.textContent = state.screeningHistoryOpen
-        ? t("hidePreviousResults")
-        : t("previousResults");
+      setI18nText(
+        histBtn,
+        state.screeningHistoryOpen ? "hidePreviousResults" : "previousResults"
+      );
+      histBtn.setAttribute("aria-expanded", String(state.screeningHistoryOpen));
     }
+  }
+
+  /** One test card; built as DOM nodes so listeners die with the node. */
+  function buildTestCard({ kind, badgeKey, title, sub, onClick, mutedBadge }) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `test-card ${kind}`;
+    const badge = document.createElement("span");
+    badge.className = `test-card-badge${mutedBadge ? " muted-badge" : ""}`;
+    badge.textContent = t(badgeKey);
+    const titleEl = document.createElement("span");
+    titleEl.className = "test-card-title";
+    titleEl.textContent = title;
+    const subEl = document.createElement("span");
+    subEl.className = "test-card-sub";
+    subEl.textContent = sub;
+    btn.append(badge, titleEl, subEl);
+    btn.addEventListener("click", onClick);
+    return btn;
   }
 
   function renderRelevantTests(ageMonths) {
@@ -1440,8 +2158,8 @@
     if (!grid) return;
 
     if (ageMonths == null || Number.isNaN(Number(ageMonths))) {
-      grid.innerHTML = `<p class="muted">${escapeHtml(t("enterAgeForTests"))}</p>`;
-      if (mchatSlot) mchatSlot.innerHTML = "";
+      renderMessage(grid, t("enterAgeForTests"));
+      if (mchatSlot) mchatSlot.textContent = "";
       return;
     }
 
@@ -1449,50 +2167,55 @@
     const cards = [];
     current.forEach((m) => {
       cards.push(
-        `<button type="button" class="test-card current" data-age="${m}">
-          <span class="test-card-badge">${escapeHtml(t("testCurrent"))}</span>
-          <span class="test-card-title">${escapeHtml(t("startAsqAge", { age: m }))}</span>
-          <span class="test-card-sub">${escapeHtml(t("asqTitle"))}</span>
-        </button>`
+        buildTestCard({
+          kind: "current",
+          badgeKey: "testCurrent",
+          title: t("startAsqAge", { age: fmtNum(m, 0) }),
+          sub: t("asqTitle"),
+          onClick: () => startAsq(m),
+        })
       );
     });
     upcoming.forEach((m) => {
       if (current.includes(m)) return;
       cards.push(
-        `<button type="button" class="test-card upcoming" data-age="${m}">
-          <span class="test-card-badge muted-badge">${escapeHtml(t("testUpcoming"))}</span>
-          <span class="test-card-title">${escapeHtml(t("startAsqAge", { age: m }))}</span>
-          <span class="test-card-sub">${escapeHtml(t("asqTitle"))}</span>
-        </button>`
+        buildTestCard({
+          kind: "upcoming",
+          badgeKey: "testUpcoming",
+          mutedBadge: true,
+          title: t("startAsqAge", { age: fmtNum(m, 0) }),
+          sub: t("asqTitle"),
+          onClick: () => startAsq(m),
+        })
       );
     });
 
+    // Rebuilt from scratch: repeated age edits can't duplicate cards.
     if (!cards.length) {
-      grid.innerHTML = `<p class="muted">${escapeHtml(t("noRelevantTests"))}</p>`;
+      renderMessage(grid, t("noRelevantTests"));
     } else {
-      grid.innerHTML = cards.join("");
-      $$(".test-card[data-age]", grid).forEach((btn) => {
-        btn.addEventListener("click", () => startAsq(Number(btn.dataset.age)));
-      });
+      grid.textContent = "";
+      cards.forEach((c) => grid.appendChild(c));
     }
 
     if (mchatSlot) {
-      const showMchat =
-        Number(ageMonths) >= MCHAT_AGE_MIN && Number(ageMonths) <= MCHAT_AGE_MAX;
-      if (showMchat) {
-        const kind =
-          Number(ageMonths) >= MCHAT_AGE_MIN && Number(ageMonths) <= MCHAT_AGE_MAX
-            ? "current"
-            : "upcoming";
-        mchatSlot.innerHTML = `<button type="button" class="test-card ${kind}" id="start-mchat">
-          <span class="test-card-badge">${escapeHtml(t("testCurrent"))}</span>
-          <span class="test-card-title">${escapeHtml(t("startMchat"))}</span>
-          <span class="test-card-sub">${escapeHtml(t("mchatTitle"))} · 16–30m</span>
-        </button>`;
-        const mbtn = $("#start-mchat");
-        if (mbtn) mbtn.addEventListener("click", startMchat);
-      } else {
-        mchatSlot.innerHTML = "";
+      mchatSlot.textContent = "";
+      const age = Number(ageMonths);
+      const inMchatWindow =
+        age >= LIMITS.mchatAgeMinMonths && age <= LIMITS.mchatAgeMaxMonths;
+      if (inMchatWindow) {
+        mchatSlot.appendChild(
+          buildTestCard({
+            kind: "current",
+            badgeKey: "testCurrent",
+            title: t("startMchat"),
+            sub: `${t("mchatTitle")} · ${t("mchatWindow", {
+              min: fmtNum(LIMITS.mchatAgeMinMonths, 0),
+              max: fmtNum(LIMITS.mchatAgeMaxMonths, 0),
+            })}`,
+            onClick: () => startMchat(),
+          })
+        );
       }
     }
   }
@@ -1502,47 +2225,69 @@
     const body = $("#screening-history-body");
     if (!panel || !body) return;
     panel.hidden = false;
-    const childId =
-      ($("#screening-child") && $("#screening-child").value) ||
-      (state.activeChild && (state.activeChild.child_id || state.activeChild.id));
+    const sel = $("#screening-child");
+    const childId = (sel && sel.value) || activeChildId();
     if (!childId) {
-      body.innerHTML = `<p class="muted">${escapeHtml(t("selectChildForHistory"))}</p>`;
+      renderMessage(body, t("selectChildForHistory"));
       return;
     }
-    body.innerHTML = `<p class="muted">${escapeHtml(t("loading"))}</p>`;
+    renderMessage(body, t("loading"));
+    panel.setAttribute("aria-busy", "true");
     try {
-      const data = await api(`/children/${encodeURIComponent(childId)}/dossier`);
+      const data = await api(EP.childDossier(childId));
       const screens = data.screenings || [];
       if (!screens.length) {
-        body.innerHTML = `<p class="muted">${escapeHtml(t("noHistoryYet"))}</p>`;
+        renderMessage(body, t("noHistoryYet"));
         return;
       }
       body.innerHTML = `<ul class="history-list">${screens
         .slice()
         .reverse()
         .map((s) => {
-          const when = (s.recorded_at || "").slice(0, 16).replace("T", " ");
+          const when = formatTimestamp(s.recorded_at);
           const summary =
             (s.result && (s.result.summary || s.result.risk || s.result.parent_report)) ||
             "";
-          const ageBit =
+          const ageValue =
             s.result && s.result.age_months != null
-              ? ` · ${s.result.age_months}m`
+              ? s.result.age_months
               : s.age_months != null
-                ? ` · ${s.age_months}m`
-                : "";
+                ? s.age_months
+                : null;
+          const ageBit =
+            ageValue != null
+              ? ` · ${t("monthsSuffix", { n: fmtNum(ageValue) })}`
+              : "";
           return `<li>
             <div class="history-row">
-              <strong>${escapeHtml(s.instrument || "Screening")}${escapeHtml(ageBit)}</strong>
+              <strong>${escapeHtml(
+                s.instrument || t("screeningFallback")
+              )}${escapeHtml(ageBit)}</strong>
               <span class="meta">${escapeHtml(when)}</span>
             </div>
-            <p>${escapeHtml(summary || t("done"))}</p>
+            <p>${escapeHtml(String(summary || t("done")))}</p>
           </li>`;
         })
         .join("")}</ul>`;
     } catch (err) {
-      body.innerHTML = `<p class="muted">${escapeHtml(err.message)}</p>`;
+      if (isAbortError(err)) return;
+      renderMessage(body, `${t("historyLoadFailed")} ${err.message}`, {
+        retry: () => renderScreeningHistory(),
+      });
+    } finally {
+      panel.removeAttribute("aria-busy");
     }
+  }
+
+  function localizedText(obj) {
+    if (!obj) return "";
+    if (state.lang === "fa" && obj.text_fa) return obj.text_fa;
+    return obj.text_en || obj.text || obj.question || obj.text_fa || "";
+  }
+
+  function domainTitleOf(dom) {
+    if (state.lang === "fa" && dom.title_fa) return dom.title_fa;
+    return dom.title_en || domainLabel(dom.id);
   }
 
   function normalizeQuestions(payload, kind) {
@@ -1554,9 +2299,9 @@
         (dom.questions || []).forEach((q) => {
           items.push({
             domain: dom.id || dom.title_en || "domain",
-            domainTitle: dom.title_en || dom.id || "",
+            domainTitle: domainTitleOf(dom),
             id: q.id,
-            text: (state.lang === "fa" && (q.text_fa || q.text)) || q.text_en || q.text || q.question,
+            text: localizedText(q),
             options: [
               { value: "yes", label: t("yes"), cls: "yes" },
               { value: "sometimes", label: t("sometimes"), cls: "sometimes" },
@@ -1568,11 +2313,12 @@
       return items;
     }
     const qs = payload.questions || payload;
+    const mchatTitle = t("mchatTitle");
     return (Array.isArray(qs) ? qs : []).map((q) => ({
-      domain: "M-CHAT-R",
-      domainTitle: "M-CHAT-R",
+      domain: "mchat",
+      domainTitle: mchatTitle,
       id: q.id,
-      text: (state.lang === "fa" && (q.text_fa || q.text)) || q.text_en || q.text || q.question,
+      text: localizedText(q),
       options: [
         { value: "yes", label: t("yes"), cls: "yes" },
         { value: "no", label: t("no"), cls: "no" },
@@ -1580,94 +2326,170 @@
     }));
   }
 
+  /**
+   * Re-derive question/answer labels in the new language from the cached API
+   * payload, keeping answers (keyed by domain::id, which is language-neutral).
+   */
+  function relabelQuizForLang() {
+    const q = state.quiz;
+    if (!q || !q.payload) return;
+    q.items = normalizeQuestions(q.payload, q.kind);
+    if (q.kind === "asq") {
+      setI18nText($("#screening-title"), "asqMonths", { age: fmtNum(q.age, 0) });
+      setI18nText($("#screening-sub"), "asqAnswerHint");
+    } else {
+      setI18nText($("#screening-title"), "mchatTitle");
+      setI18nText($("#screening-sub"), "mchatAnswerHint");
+    }
+    const back = $("#screening-back");
+    if (back) setI18nText(back, "questionnaires");
+    if (q.index >= q.items.length) q.index = Math.max(0, q.items.length - 1);
+    renderQuizStep();
+  }
+
   async function startAsq(age) {
+    const grid = $("#asq-ages");
     try {
-      toast(t("loadingAsq", { age }));
-      const data = await api(`/asq/${age}/questions`);
+      toast(t("loadingAsq", { age: fmtNum(age, 0) }));
+      const data = await api(EP.asqQuestions(age));
       const items = normalizeQuestions(data, "asq");
       if (!items.length) throw new Error(t("noAsqQuestions"));
       state.quiz = {
         kind: "asq",
         age,
         items,
+        payload: data,
         index: 0,
         answers: {},
       };
-      $("#screening-title").textContent = t("asqMonths", { age });
-      $("#screening-sub").textContent = t("asqAnswerHint");
+      setI18nText($("#screening-title"), "asqMonths", { age: fmtNum(age, 0) });
+      setI18nText($("#screening-sub"), "asqAnswerHint");
       beginQuiz();
     } catch (err) {
+      if (isAbortError(err)) return;
       toast(err.message, "error");
+      if (grid) {
+        renderMessage(grid, err.message, { retry: () => startAsq(age) });
+      }
     }
   }
 
   async function startMchat() {
+    const slot = $("#mchat-slot");
     try {
       toast(t("loadingMchat"));
-      const data = await api("/mchat/questions");
+      const data = await api(EP.mchatQuestions);
       const items = normalizeQuestions(data, "mchat");
       if (!items.length) throw new Error(t("noMchatQuestions"));
       state.quiz = {
         kind: "mchat",
         items,
+        payload: data,
         index: 0,
         answers: {},
       };
-      $("#screening-title").textContent = t("mchatTitle");
-      $("#screening-sub").textContent = t("mchatAnswerHint");
+      setI18nText($("#screening-title"), "mchatTitle");
+      setI18nText($("#screening-sub"), "mchatAnswerHint");
       beginQuiz();
     } catch (err) {
+      if (isAbortError(err)) return;
       toast(err.message, "error");
+      if (slot) {
+        renderMessage(slot, err.message, { retry: () => startMchat() });
+      }
     }
   }
 
   function beginQuiz() {
-    $("#screening-picker").hidden = true;
-    $("#screening-report").hidden = true;
-    $("#screening-quiz").hidden = false;
+    clearQuizAdvanceTimer();
+    const picker = $("#screening-picker");
+    const report = $("#screening-report");
+    const quiz = $("#screening-quiz");
+    if (picker) picker.hidden = true;
+    if (report) report.hidden = true;
+    if (quiz) quiz.hidden = false;
     const back = $("#screening-back");
-    back.href = "#/screening";
-    back.textContent = t("questionnaires");
+    if (back) {
+      back.href = "#/screening";
+      setI18nText(back, "questionnaires");
+    }
     renderQuizStep();
+  }
+
+  function clearQuizAdvanceTimer() {
+    if (state.quizAdvanceTimer) {
+      window.clearTimeout(state.quizAdvanceTimer);
+      state.quizAdvanceTimer = null;
+    }
   }
 
   function renderQuizStep() {
     const q = state.quiz;
     if (!q) return;
+    // A pending auto-advance from the previous answer must never fire into this step.
+    clearQuizAdvanceTimer();
     const item = q.items[q.index];
+    if (!item) return;
     const total = q.items.length;
-    const pct = (q.index / total) * 100;
-    $("#quiz-progress").style.width = `${pct}%`;
-    $("#quiz-meta").textContent = t("questionOf", { n: q.index + 1, total });
-    $("#quiz-domain").textContent = item.domainTitle || item.domain;
-    $("#quiz-question").textContent = item.text;
+    const pct = total ? (q.index / total) * 100 : 0;
+    const fill = $("#quiz-progress");
+    const bar = $("#quiz-progress-bar");
+    if (fill) fill.style.width = `${pct}%`;
+    if (bar) bar.setAttribute("aria-valuenow", String(Math.round(pct)));
+    const meta = $("#quiz-meta");
+    if (meta) {
+      meta.textContent = t("questionOf", {
+        n: fmtNum(q.index + 1, 0),
+        total: fmtNum(total, 0),
+      });
+    }
+    const domainEl = $("#quiz-domain");
+    if (domainEl) domainEl.textContent = item.domainTitle || domainLabel(item.domain);
+    const questionEl = $("#quiz-question");
+    if (questionEl) questionEl.textContent = item.text;
     const row = $("#quiz-answers");
+    const nextBtn = $("#quiz-next");
+    const prevBtn = $("#quiz-prev");
     const key = answerKey(item);
     const current = q.answers[key];
-    row.innerHTML = item.options
-      .map(
-        (o) =>
-          `<button type="button" class="ans-btn ${o.cls}${current === o.value ? " selected" : ""}" data-value="${o.value}">${escapeHtml(o.label)}</button>`
-      )
-      .join("");
-    $$(".ans-btn", row).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        q.answers[key] = btn.dataset.value;
-        $$(".ans-btn", row).forEach((b) => b.classList.toggle("selected", b === btn));
-        $("#quiz-next").disabled = false;
-        setTimeout(() => {
-          if (q.index < q.items.length - 1 && q.answers[key]) {
-            q.index += 1;
-            renderQuizStep();
-          } else if (q.index === q.items.length - 1) {
-            $("#quiz-next").textContent = t("seeResults");
-          }
-        }, 220);
+    if (row) {
+      // Fresh buttons each step, so click handlers can't accumulate.
+      row.textContent = "";
+      item.options.forEach((o) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `ans-btn ${o.cls}${current === o.value ? " selected" : ""}`;
+        btn.dataset.value = o.value;
+        btn.textContent = o.label;
+        btn.setAttribute("aria-pressed", String(current === o.value));
+        btn.addEventListener("click", () => {
+          q.answers[key] = o.value;
+          $$(".ans-btn", row).forEach((b) => {
+            const selected = b === btn;
+            b.classList.toggle("selected", selected);
+            b.setAttribute("aria-pressed", String(selected));
+          });
+          if (nextBtn) nextBtn.disabled = false;
+          clearQuizAdvanceTimer();
+          state.quizAdvanceTimer = window.setTimeout(() => {
+            state.quizAdvanceTimer = null;
+            if (state.quiz !== q) return;
+            if (q.index < q.items.length - 1) {
+              q.index += 1;
+              renderQuizStep();
+            } else if (nextBtn) {
+              setI18nText(nextBtn, "seeResults");
+            }
+          }, TIME.quizAdvanceMs);
+        });
+        row.appendChild(btn);
       });
-    });
-    $("#quiz-prev").disabled = q.index === 0;
-    $("#quiz-next").disabled = !current;
-    $("#quiz-next").textContent = q.index === q.items.length - 1 ? t("seeResults") : t("next");
+    }
+    if (prevBtn) prevBtn.disabled = q.index === 0;
+    if (nextBtn) {
+      nextBtn.disabled = !current;
+      setI18nText(nextBtn, q.index === q.items.length - 1 ? "seeResults" : "next");
+    }
   }
 
   function answerKey(item) {
@@ -1700,48 +2522,59 @@
     });
     const ageInput = $("#screening-age-months");
     if (ageInput) {
+      // Debounced: typing "12" shouldn't rebuild the card list twice per keystroke.
       ageInput.addEventListener("input", () => {
         const v = ageInput.value === "" ? null : Number(ageInput.value);
         state.screeningAgeMonths = v != null && !Number.isNaN(v) ? v : null;
-        refreshScreeningPicker();
+        if (state.ageInputTimer) window.clearTimeout(state.ageInputTimer);
+        state.ageInputTimer = window.setTimeout(() => {
+          state.ageInputTimer = null;
+          refreshScreeningPicker();
+        }, TIME.ageInputDebounceMs);
       });
     }
-    $("#btn-prev-results").addEventListener("click", async () => {
-      state.screeningHistoryOpen = !state.screeningHistoryOpen;
-      const panel = $("#screening-history");
-      if (!state.screeningHistoryOpen) {
-        if (panel) panel.hidden = true;
-        $("#btn-prev-results").textContent = t("previousResults");
-        return;
-      }
-      $("#btn-prev-results").textContent = t("hidePreviousResults");
-      await renderScreeningHistory();
-    });
-    $("#screening-child").addEventListener("change", (e) => {
-      const id = e.target.value;
-      if (!id) {
+    const histBtn = $("#btn-prev-results");
+    if (histBtn) {
+      histBtn.addEventListener("click", () => {
+        state.screeningHistoryOpen = !state.screeningHistoryOpen;
+        const panel = $("#screening-history");
+        setI18nText(
+          histBtn,
+          state.screeningHistoryOpen ? "hidePreviousResults" : "previousResults"
+        );
+        histBtn.setAttribute("aria-expanded", String(state.screeningHistoryOpen));
+        if (!state.screeningHistoryOpen) {
+          if (panel) panel.hidden = true;
+          return;
+        }
+        renderScreeningHistory();
+      });
+    }
+    const childSel = $("#screening-child");
+    if (childSel) {
+      childSel.addEventListener("change", (e) => {
+        const id = e.target.value;
+        if (id) {
+          const child = state.children.find((c) => childIdOf(c) === id);
+          if (child) {
+            saveActiveChild(child);
+            syncScreeningAgeFromChild();
+          }
+        }
         refreshScreeningPicker();
-        return;
-      }
-      const child = state.children.find((c) => (c.child_id || c.id) === id);
-      if (child) {
-        saveActiveChild(child);
-        syncScreeningAgeFromChild();
-      }
-      refreshScreeningPicker();
-      if (state.screeningHistoryOpen) renderScreeningHistory();
-    });
+        if (state.screeningHistoryOpen) renderScreeningHistory();
+      });
+    }
   }
 
   async function submitQuiz() {
     const q = state.quiz;
+    if (!q) return;
     const btn = $("#quiz-next");
     setLoading(btn, true);
     try {
-      const childId =
-        $("#screening-child").value ||
-        (state.activeChild && (state.activeChild.child_id || state.activeChild.id)) ||
-        undefined;
+      const sel = $("#screening-child");
+      const childId = (sel && sel.value) || activeChildId() || undefined;
 
       let data;
       if (q.kind === "asq") {
@@ -1752,7 +2585,7 @@
           if (!domain_answers[item.domain]) domain_answers[item.domain] = [];
           domain_answers[item.domain].push(ans);
         });
-        data = await api("/asq/score", {
+        data = await api(EP.asqScore, {
           method: "POST",
           body: {
             child_id: childId,
@@ -1760,42 +2593,65 @@
             domain_answers,
           },
         });
-        renderAsqReport(data);
+        state.lastReport = { kind: "asq", data };
       } else {
         const answers = {};
         q.items.forEach((item) => {
           answers[item.id] = q.answers[answerKey(item)];
         });
-        data = await api("/mchat/score", {
+        data = await api(EP.mchatScore, {
           method: "POST",
           body: { child_id: childId, answers },
         });
-        renderMchatReport(data);
+        state.lastReport = { kind: "mchat", data };
       }
-      $("#screening-quiz").hidden = true;
-      $("#quiz-progress").style.width = "100%";
+      renderScreeningReport(state.lastReport);
+      const quiz = $("#screening-quiz");
+      if (quiz) quiz.hidden = true;
+      const fill = $("#quiz-progress");
+      const bar = $("#quiz-progress-bar");
+      if (fill) fill.style.width = "100%";
+      if (bar) bar.setAttribute("aria-valuenow", "100");
+      // Quiz is finished: returning to Tests should show the picker, not a stale quiz.
+      state.quiz = null;
+      clearQuizAdvanceTimer();
     } catch (err) {
-      toast(err.message, "error");
+      if (!isAbortError(err)) toast(err.message, "error");
     } finally {
       setLoading(btn, false);
     }
   }
 
+  function renderScreeningReport(cached) {
+    if (!cached) return;
+    if (cached.kind === "asq") renderAsqReport(cached.data);
+    else renderMchatReport(cached.data);
+  }
+
+  function wireScreeningAgain(report) {
+    const again = $("#screening-again", report);
+    if (again) again.addEventListener("click", showScreeningPicker);
+  }
+
   function renderAsqReport(data) {
     const report = $("#screening-report");
+    if (!report) return;
     const result = data.result || data;
     const domains = result.domains || data.domains || {};
-    const needs = result.needs_referral ?? data.needs_referral;
+    const needs = result.needs_referral != null ? result.needs_referral : data.needs_referral;
     const summary = data.parent_report || result.summary || data.summary || "";
     const cutoffSource = result.cutoff_source || data.cutoff_source || "";
     const badge = needs ? "alert" : "";
     const rows = Object.entries(domains)
       .map(([id, d]) => {
-        const below = d.below_cutoff;
-        return `<li><span>${escapeHtml(id.replace(/_/g, " "))}</span>
-          <span class="badge ${below ? "alert" : ""}">${escapeHtml(String(d.total ?? "—"))}${
-          d.cutoff != null ? ` / cut ${d.cutoff}` : ""
-        }</span></li>`;
+        const below = d && d.below_cutoff;
+        const total = d && d.total != null ? fmtNum(d.total, 0) : "—";
+        const cut =
+          d && d.cutoff != null ? ` / ${t("cutoffShort", { n: fmtNum(d.cutoff, 0) })}` : "";
+        return `<li><span>${escapeHtml(domainLabel(id))}</span>
+          <span class="badge ${below ? "alert" : ""}">${escapeHtml(total)}${escapeHtml(
+            cut
+          )}</span></li>`;
       })
       .join("");
     const cutoffNote =
@@ -1809,46 +2665,94 @@
       <span class="badge ${badge}">${escapeHtml(
         needs ? t("referralSuggested") : t("noDomainBelow")
       )}</span>
-      <p>${escapeHtml(summary)}</p>
+      <p>${escapeHtml(String(summary))}</p>
       ${cutoffNote}
       <ul class="domain-list">${rows}</ul>
-      <button type="button" class="btn btn-secondary btn-block" id="screening-again" style="margin-top:1rem">${escapeHtml(
+      <button type="button" class="btn btn-secondary btn-block report-again" id="screening-again">${escapeHtml(
         t("anotherQuestionnaire")
       )}</button>
     `;
     report.hidden = false;
-    $("#screening-again").addEventListener("click", showScreeningPicker);
+    wireScreeningAgain(report);
   }
 
   function renderMchatReport(data) {
     const report = $("#screening-report");
+    if (!report) return;
     const result = data.result || data;
     const risk = String(result.risk || data.risk || "").toLowerCase();
     const badge = risk === "high" ? "alert" : risk === "medium" ? "warn" : "";
     const summary = data.parent_report || result.summary || data.summary || "";
     const note = result.note || data.note || "";
+    const failed =
+      result.total_failed != null
+        ? result.total_failed
+        : data.total_failed != null
+          ? data.total_failed
+          : null;
     report.innerHTML = `
       <h3>${escapeHtml(t("mchatReport"))}</h3>
       <span class="badge ${badge}">${escapeHtml(t("riskLabel", { risk: risk || "—" }))}</span>
       <div class="stat-row">
         <div class="stat"><span class="val">${escapeHtml(
-          String(result.total_failed ?? data.total_failed ?? "—")
+          failed != null ? fmtNum(failed, 0) : "—"
         )}</span><span class="lbl">${escapeHtml(t("failedItems"))}</span></div>
       </div>
-      <p>${escapeHtml(summary)}</p>
-      ${note ? `<p class="muted">${escapeHtml(note)}</p>` : ""}
-      <button type="button" class="btn btn-secondary btn-block" id="screening-again" style="margin-top:1rem">${escapeHtml(
+      <p>${escapeHtml(String(summary))}</p>
+      ${note ? `<p class="muted">${escapeHtml(String(note))}</p>` : ""}
+      <button type="button" class="btn btn-secondary btn-block report-again" id="screening-again">${escapeHtml(
         t("anotherQuestionnaire")
       )}</button>
     `;
     report.hidden = false;
-    $("#screening-again").addEventListener("click", showScreeningPicker);
+    wireScreeningAgain(report);
+  }
+
+  /* —— Field constraints (single source: config.js) —— */
+  const FIELD_CONSTRAINTS = {
+    childName: { maxLength: LIMITS.childNameMaxChars },
+    chatMessage: { maxLength: LIMITS.chatMessageMaxChars },
+    gaWeeks: {
+      min: LIMITS.gaWeeksMin,
+      max: LIMITS.gaWeeksMax,
+      step: LIMITS.gaStepWeeks,
+    },
+    growthWeeks: {
+      min: LIMITS.growthWeeksMin,
+      max: LIMITS.growthWeeksMax,
+      step: LIMITS.ageStepMonths,
+    },
+    growthMonths: {
+      min: LIMITS.growthMonthsMin,
+      max: LIMITS.growthMonthsMax,
+      step: LIMITS.ageStepMonths,
+    },
+    growthValue: { min: LIMITS.growthValueMin, step: LIMITS.growthValueStep },
+    screeningAge: {
+      min: LIMITS.screeningAgeMonthsMin,
+      max: LIMITS.screeningAgeMonthsMax,
+      step: LIMITS.ageStepMonths,
+    },
+  };
+
+  function applyFieldConstraints() {
+    $$("[data-constraint]").forEach((el) => {
+      const spec = FIELD_CONSTRAINTS[el.getAttribute("data-constraint")];
+      if (!spec) return;
+      if (spec.min != null) el.min = String(spec.min);
+      if (spec.max != null) el.max = String(spec.max);
+      if (spec.step != null) el.step = String(spec.step);
+      if (spec.maxLength != null) el.maxLength = spec.maxLength;
+    });
+    const file = $("#chat-file");
+    if (file) file.accept = LIMITS.acceptedImageTypes.join(",");
   }
 
   /* —— Boot —— */
   async function boot() {
-    state.activeChild = normalizeChild(loadJson(STORAGE_CHILD, null));
+    state.activeChild = normalizeChild(loadJson(STORAGE.activeChild, null));
     applyI18n();
+    applyFieldConstraints();
     const langBtn = $("#lang-toggle");
     if (langBtn) {
       langBtn.addEventListener("click", () => setLang(state.lang === "fa" ? "en" : "fa"));
@@ -1859,15 +2763,17 @@
     wireGrowth();
     wireQuizNav();
     window.addEventListener("hashchange", navigate);
+    // Leaving the page shouldn't leave a stream half-read.
+    window.addEventListener("pagehide", () => abortChat());
     if (!location.hash) location.hash = "#/";
     navigate();
     checkHealth();
     try {
-      const data = await api("/children");
+      const data = await api(EP.children);
       state.children = Array.isArray(data) ? data : data.children || [];
       fillChildSelects();
-    } catch {
-      /* offline ok */
+    } catch (_) {
+      /* offline is fine — views show their own error/empty states */
     }
   }
 

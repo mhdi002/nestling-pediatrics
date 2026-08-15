@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,9 @@ import intergrowth_preterm_equations as ig
 from assistant.tools import who_term_equations as who
 from assistant.config import EN_DIR, EXTRACTED, OVERLAY_DIR
 from assistant.refdata import asq_scoring, clinical_bounds, mchat_config, weeks_per_month
+from assistant.settings import get_settings
+
+log = logging.getLogger(__name__)
 
 AnswerASQ = Literal["yes", "sometimes", "not_yet", "بله", "گاهی", "هنوز نه", "No", "Yes", "Sometimes", "Not yet"]
 
@@ -39,8 +43,42 @@ VALUE_RANGES = {
 }
 WEEKS_PER_MONTH = _wpm()
 
+# Chart presentation only — clinical percentile values come from the equations.
+CHART_PERCENTILE_STYLES = {
+    97: ("#c0392b", "-"),
+    90: ("#2c3e50", "--"),
+    50: ("#27ae60", "-"),
+    10: ("#2c3e50", "--"),
+    3: ("#c0392b", "-"),
+}
+CHILD_POINT_COLOR = "#2980b9"
+CHART_GRID_ALPHA = 0.3
+
+# A `weeks` value within this many weeks of age_months * weeks_per_month was
+# derived from the chronological age, so it is postnatal life-weeks, not a
+# postmenstrual age. Treating it as PMA (and subtracting GA) once reported a
+# 13.5-month-old as ~7 months.
+POSTNATAL_WEEKS_TOLERANCE = 0.75
+
+# How much history the child summary carries back to the agent.
+GROWTH_HISTORY_SUMMARY_POINTS = 10
+SCREENING_SUMMARY_LINES = 3
+RECENT_SCREENINGS = 5
+SUMMARY_CHART_NAMES = 3
+
 # Optional ChildMemoryDB injected by ParentAssistant for get_child_summary
 _CHILD_DB = None
+
+
+def _axis_points(lo: float, hi: float, step: float) -> list[float]:
+    """Inclusive [lo, hi] sample points at `step` spacing for curve plotting."""
+    if step <= 0 or hi < lo:
+        return [float(lo)]
+    n = int(round((hi - lo) / step))
+    pts = [lo + i * step for i in range(n + 1)]
+    if pts[-1] < hi - 1e-9:
+        pts.append(hi)
+    return pts
 
 
 def set_child_db(db) -> None:
@@ -81,6 +119,8 @@ def _validate_weeks(weeks: Any) -> float | dict:
         w = float(weeks)
     except (TypeError, ValueError):
         return tool_error("validation", f"Invalid weeks: {weeks!r}. Expected a number.")
+    if w != w:
+        return tool_error("validation", f"Invalid weeks: {weeks!r}. Expected a finite number.")
     if not (WEEKS_MIN <= w <= WEEKS_MAX):
         return tool_error(
             "validation",
@@ -95,7 +135,12 @@ def _validate_value(measure: str, value: Any) -> float | dict:
         v = float(value)
     except (TypeError, ValueError):
         return tool_error("validation", f"Invalid value: {value!r}. Expected a number.")
-    lo, hi = VALUE_RANGES[measure]
+    if v != v or v in (float("inf"), float("-inf")):
+        return tool_error("validation", f"Invalid value: {value!r}. Expected a finite number.")
+    bounds = VALUE_RANGES.get(measure)
+    if bounds is None:
+        return tool_error("validation", f"No configured value range for measure: {measure!r}.")
+    lo, hi = bounds
     unit = "kg" if measure == "weight" else "cm"
     if not (lo <= v <= hi):
         return tool_error(
@@ -139,7 +184,8 @@ def _asq_cutoff(domain: str | None = None, age_months: int | None = None) -> tup
         by_age = domain_cutoffs.get(key) or domain_cutoffs.get(str(age_months))
         if isinstance(by_age, dict) and domain in by_age:
             return float(by_age[domain]), source
-    return float(cfg.get("default_cutoff", 30)), source
+    fallback = _bounds().get("asq_default_cutoff", 30)
+    return float(cfg.get("default_cutoff", fallback)), source
 
 
 def score_asq_domain(
@@ -281,14 +327,16 @@ def _term_age_months_from_weeks(
     """
     w = float(weeks)
     wpm = _wpm()
-    band = _bounds().get("term_pma_band", [37, 45])
+    bounds = _bounds()
+    band = bounds.get("term_pma_band", [37, 45])
+    full_term = float(bounds.get("full_term_weeks", 40))
     if gestational_age_weeks is not None:
         ga = float(gestational_age_weeks)
         if w + 1e-9 >= ga:
             return max(0.0, w - ga) / wpm
         return w / wpm
     if float(band[0]) <= w <= float(band[1]):
-        return max(0.0, w - 40.0) / wpm
+        return max(0.0, w - full_term) / wpm
     return w / wpm
 
 
@@ -301,7 +349,9 @@ def corrected_age_months(
     until ~24 months chronological. Returns both ages and which to use for form selection.
     """
     chrono = float(chronological_age_months)
-    thr = float(_bounds().get("preterm_ga_threshold_weeks", 37))
+    bounds = _bounds()
+    thr = float(bounds.get("preterm_ga_threshold_weeks", 37))
+    full_term = float(bounds.get("full_term_weeks", 40))
     if gestational_age_weeks is None:
         return {
             "chronological_age_months": chrono,
@@ -319,7 +369,7 @@ def corrected_age_months(
             "used_corrected": False,
             "gestational_age_weeks": ga,
         }
-    weeks_early = max(0.0, 40.0 - ga)
+    weeks_early = max(0.0, full_term - ga)
     corrected = max(0.0, chrono - weeks_early / _wpm())
     return {
         "chronological_age_months": chrono,
@@ -428,7 +478,7 @@ def resolve_chart_route(
     if (
         age_months is not None
         and weeks is not None
-        and abs(float(weeks) - float(age_months) * wpm) <= 0.75
+        and abs(float(weeks) - float(age_months) * wpm) <= POSTNATAL_WEEKS_TOLERANCE
     ):
         weeks_looks_postnatal = True
 
@@ -593,8 +643,8 @@ def growth_percentile(
             out["precision_note"] = pmeta.get("precision_note")
             out["lms_anchors"] = pmeta.get("anchors")
             out["lms_anchor_sources"] = pmeta.get("anchor_sources")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("WHO precision metadata unavailable: %s", exc)
     if value_n is not None:
         if route["chart_standard"] == "who_term":
             z = who.z_score(sex_n, meas_n, route["age_months"], value_n)
@@ -651,7 +701,14 @@ def growth_percentile_curves(
         std = "intergrowth_preterm" if maturity == "preterm" else "who_term"
 
     pcts = list(ig.CHART_PERCENTILES)
-    step = 0.5
+    settings = get_settings()
+    step = (
+        settings.chart_curve_step_months
+        if std == "who_term"
+        else settings.chart_curve_step_weeks
+    )
+    if step <= 0:
+        return tool_error("growth_curves", "chart curve step must be positive.")
 
     if std == "who_term":
         who_lo, who_hi = who.age_bounds()
@@ -752,7 +809,10 @@ def overlay_growth_on_chart(
         import matplotlib
 
         matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        # Figure/FigureCanvasAgg instead of pyplot: pyplot keeps global figure
+        # state that is not safe across the threadpool serving sync endpoints.
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
     except Exception as exc:
         return {
             **assessment,
@@ -762,56 +822,58 @@ def overlay_growth_on_chart(
             "note": "Numeric assessment computed; chart image not generated.",
         }
 
+    settings = get_settings()
     try:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        styles = {
-            97: ("#c0392b", "-"),
-            90: ("#2c3e50", "--"),
-            50: ("#27ae60", "-"),
-            10: ("#2c3e50", "--"),
-            3: ("#c0392b", "-"),
-        }
+        fig = Figure(figsize=(settings.chart_figsize_w, settings.chart_figsize_h))
+        FigureCanvasAgg(fig)
+        ax = fig.subplots()
+        styles = CHART_PERCENTILE_STYLES
         std = assessment["chart_standard"]
+        # Use the normalized sex/measure from the assessment: the caller may have
+        # passed parent language ("boy"), which the equation tables do not accept.
+        sex_n = assessment["sex"]
+        measure_n = assessment["measure"]
         if std == "who_term":
-            xs = [i / 2 for i in range(0, 24 * 2 + 1)]
+            who_lo, who_hi = who.age_bounds()
+            xs = _axis_points(who_lo, who_hi, settings.chart_curve_step_months)
             for p, (color, ls) in styles.items():
-                ys = [who.percentile(sex, measure, m, p) for m in xs]
+                ys = [who.percentile(sex_n, measure_n, m, p) for m in xs]
                 ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.5, label=f"P{p}")
             x_child = assessment["age_months"]
-            ax.plot([x_child], [value], "o", color="#2980b9", markersize=9, label="Child")
+            ax.plot([x_child], [value], "o", color=CHILD_POINT_COLOR, markersize=9, label="Child")
             ax.set_xlabel("Age (months)")
-            title = f"WHO {assessment['measure']} ({assessment['sex']}, term) — child overlay"
+            title = f"WHO {measure_n} ({sex_n}, term) — child overlay"
             tag = f"{x_child:.1f}m"
         else:
-            xs = [w / 2 for w in range(27 * 2, 64 * 2 + 1)]
+            xs = _axis_points(WEEKS_MIN, WEEKS_MAX, settings.chart_curve_step_weeks)
             for p, (color, ls) in styles.items():
-                ys = [ig.percentile(sex, measure, w, p) for w in xs]
+                ys = [ig.percentile(sex_n, measure_n, w, p) for w in xs]
                 ax.plot(xs, ys, color=color, linestyle=ls, linewidth=1.5, label=f"P{p}")
             pts = list(history or []) + [{"weeks": assessment["weeks"], "value": value}]
             ax.plot(
                 [p["weeks"] for p in pts],
                 [p["value"] for p in pts],
                 "o-",
-                color="#2980b9",
+                color=CHILD_POINT_COLOR,
                 markersize=8,
                 label="Child",
             )
             ax.set_xlabel("Postmenstrual age (weeks)")
             title = (
-                f"INTERGROWTH-21st {assessment['measure']} "
-                f"({assessment['sex']}, preterm) — child overlay"
+                f"INTERGROWTH-21st {measure_n} "
+                f"({sex_n}, preterm) — child overlay"
             )
             tag = f"{assessment['weeks']}w"
 
         unit = assessment["units"]
-        ax.set_ylabel(f"{assessment['measure']} ({unit})")
+        ax.set_ylabel(f"{measure_n} ({unit})")
         # Include value so parents can tell replots apart; we still replace older files.
         title = f"{title} · {value:g} {unit}"
         ax.set_title(title)
         ax.legend(loc="upper left")
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=CHART_GRID_ALPHA)
         fig.tight_layout()
-        measure_key = str(assessment["measure"]).replace(" ", "")
+        measure_key = str(measure_n).replace(" ", "")
         value_tag = f"{value:g}".replace(".", "p")
         name = (
             f"overlay_{child_id or 'child'}_{measure_key}_{tag}_{value_tag}.png"
@@ -825,15 +887,10 @@ def overlay_growth_on_chart(
                     continue
                 try:
                     old.unlink()
-                except OSError:
-                    pass
-        fig.savefig(path, dpi=140)
-        plt.close(fig)
+                except OSError as exc:
+                    log.debug("Could not remove stale overlay %s: %s", old, exc)
+        fig.savefig(path, dpi=settings.chart_dpi)
     except Exception as exc:
-        try:
-            plt.close("all")
-        except Exception:
-            pass
         return {
             **assessment,
             "tool": "overlay_growth_on_chart",
@@ -887,8 +944,12 @@ def list_asq_questions(
         chrono = float(age_months)
     except (TypeError, ValueError):
         return tool_error("list_asq_questions", f"Invalid age_months: {age_months!r}")
-    if chrono < 0 or chrono > 72:
-        return tool_error("list_asq_questions", f"age_months out of range: {chrono}")
+    asq_max = float(_bounds().get("asq_age_months_max", 72))
+    if not (0 <= chrono <= asq_max):
+        return tool_error(
+            "list_asq_questions",
+            f"age_months out of range: {chrono} (supported 0–{asq_max:g}).",
+        )
 
     age_info: dict[str, Any] = {
         "chronological_age_months": chrono,
@@ -1021,7 +1082,7 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
         latest_growth_by_measure[g["measure"]] = g
 
     ga = child.get("gestational_age_weeks")
-    maturity = "preterm" if ga is not None and float(ga) < 37 else ("term" if ga is not None else "unknown")
+    maturity = who.classify_maturity(ga)
     overlays = []
     try:
         # Latest overlay per measure only (avoid confusing duplicate/conflicting charts).
@@ -1041,9 +1102,11 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
                 "url": f"/api/overlays/{p.name}",
                 "measure": measure,
             }
-        overlays = list(latest_overlay_by_measure.values())[:8]
-    except Exception:
-        pass
+        overlays = list(latest_overlay_by_measure.values())[
+            : get_settings().nestling_tool_overlay_limit
+        ]
+    except OSError as exc:
+        log.warning("Could not list overlays for child %s: %s", cid, exc)
 
     lines = [
         f"{child.get('name')} ({child.get('sex')})",
@@ -1068,10 +1131,11 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
             f"- latest {measure}: {g.get('value')} at {age_txt} "
             f"(centile≈{cent_txt}, {g.get('track_status')})"
         )
-    for s in screens[-3:]:
+    for s in screens[-SCREENING_SUMMARY_LINES:]:
         lines.append(f"- screening {s.get('instrument')}: {(s.get('result') or {}).get('summary')}")
     if overlays:
-        lines.append(f"Saved charts: {', '.join(o['filename'] for o in overlays[:3])}")
+        names = ", ".join(o["filename"] for o in overlays[:SUMMARY_CHART_NAMES])
+        lines.append(f"Saved charts: {names}")
 
     return {
         "ok": True,
@@ -1086,8 +1150,8 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
             "maturity": maturity,
         },
         "growth_count": len(growth),
-        "latest_growth": latest_by_measure,
-        "growth_history": growth[-10:],
+        "latest_growth": latest_growth_by_measure,
+        "growth_history": growth[-GROWTH_HISTORY_SUMMARY_POINTS:],
         "screening_count": len(screens),
         "recent_screenings": [
             {
@@ -1096,7 +1160,7 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
                 "summary": (s.get("result") or {}).get("summary"),
                 "recorded_at": s.get("recorded_at"),
             }
-            for s in screens[-5:]
+            for s in screens[-RECENT_SCREENINGS:]
         ],
         "overlays": overlays,
         "summary": "\n".join(lines),
@@ -1279,7 +1343,12 @@ def dispatch_tool(name: str, arguments: dict, db=None) -> dict:
             raw = args.get("answers", {})
             if not isinstance(raw, dict):
                 return tool_error("score_mchat", "answers must be an object.")
-            answers = {int(k): v for k, v in raw.items()}
+            try:
+                answers = {int(k): v for k, v in raw.items()}
+            except (TypeError, ValueError):
+                return tool_error(
+                    "score_mchat", "answers keys must be question numbers (1-20)."
+                )
             return score_mchat(answers)
         if name == "list_mchat_questions":
             return list_mchat_questions()

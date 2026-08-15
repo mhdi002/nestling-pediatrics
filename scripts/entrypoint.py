@@ -10,8 +10,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-SEED = Path("/opt/nestling-seed")
+ROOT = Path(os.environ.get("NESTLING_ROOT") or Path(__file__).resolve().parent.parent)
+# Baked into the image by the Dockerfile; overridable so the bootstrap can be
+# exercised outside a container.
+SEED = Path(os.environ.get("NESTLING_SEED_DIR", "/opt/nestling-seed"))
+DEFAULT_HOST = os.environ.get("NESTLING_HOST", "0.0.0.0")
+DEFAULT_PORT = os.environ.get("NESTLING_PORT", "8000")
 
 
 def _nonempty_dir(p: Path) -> bool:
@@ -21,11 +25,12 @@ def _nonempty_dir(p: Path) -> bool:
 def _feeding_count(path: Path) -> int:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, list):
-            return 0
-        return sum(1 for c in data if "feeding" in str(c.get("id", "")).lower())
-    except Exception:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"[entrypoint] could not read {path}: {exc}", flush=True)
         return 0
+    if not isinstance(data, list):
+        return 0
+    return sum(1 for c in data if isinstance(c, dict) and "feeding" in str(c.get("id", "")).lower())
 
 
 def _seed_knowledge() -> None:
@@ -140,7 +145,7 @@ def main() -> int:
 
     argv = sys.argv[1:]
     if not argv:
-        argv = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+        argv = ["uvicorn", "app.main:app", "--host", DEFAULT_HOST, "--port", DEFAULT_PORT]
     print(f"[entrypoint] starting: {' '.join(argv)}", flush=True)
     os.execvp(argv[0], argv)
     return 1

@@ -1,9 +1,11 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
 .pytest_cache/
+**/.pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -11,6 +13,26 @@ htmlcov/
 .venv/
 venv/
 env/
+
+# Agent / debugging scratch files (never commit — see docs/PERFORMANCE.md "Repo hygiene").
+# Dunder module files are re-included below: `_*.py` would otherwise swallow __init__.py.
+_*.py
+_*.txt
+_*.json
+_*.log
+_*.png
+_*.md
+_*.csv
+_*.html
+!__init__.py
+!__main__.py
+!**/__init__.py
+!**/__main__.py
+docs/debug-*.log
+docs/debug-*.txt
+
+# Intermediate PDF extraction output (regenerable via extract_texts.py)
+extracted/
 
 # Secrets / env
 .env
@@ -52,3 +74,9 @@ Thumbs.db
 dist/
 build/
 data/children/rag_index/
+
+# Performance test artifacts (harness is committed, results are not)
+perf/results/
+perf/*.csv
+perf/*.html
+perf/*.prof
