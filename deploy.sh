@@ -19,6 +19,8 @@ HUB_SUBDIR="models--Qwen--Qwen3.5-4B"
 LB_PORT="${NESTLING_LB_HOST_PORT:-8080}"
 LLM_PORT="${NESTLING_LLM_HOST_PORT:-8001}"
 HF_CMD=""
+# Fallback location for the huggingface_hub CLI on PEP 668 systems.
+HF_VENV="$ROOT/.venv-hf"
 
 MODE=full
 SKIP_MODEL_DOWNLOAD=0
@@ -167,6 +169,10 @@ model_downloaded() {
 install_hf_cli() {
   if have_cmd hf; then HF_CMD=hf; return; fi
   if have_cmd huggingface-cli; then HF_CMD=huggingface-cli; return; fi
+  # left behind by a previous run
+  if [ -x "$HF_VENV/bin/hf" ]; then HF_CMD="$HF_VENV/bin/hf"; return; fi
+  if [ -x "$HF_VENV/bin/huggingface-cli" ]; then HF_CMD="$HF_VENV/bin/huggingface-cli"; return; fi
+
   step "installing huggingface_hub CLI"
   local py=python3
   have_cmd python3 || py=python
@@ -174,10 +180,32 @@ install_hf_cli() {
     err "no python3/python found -- install Python 3 to download the model, or download it manually."
     exit 1
   fi
-  "$py" -m pip install --user -U "huggingface_hub[cli]"
-  if have_cmd hf; then HF_CMD=hf; return; fi
-  if have_cmd huggingface-cli; then HF_CMD=huggingface-cli; return; fi
-  err "huggingface_hub CLI still not on PATH after install. Try: $py -m pip install -U 'huggingface_hub[cli]' and re-run."
+
+  # Try a plain --user install first. Note that ~/.local/bin is frequently not
+  # on PATH (root shells especially), so probe the install location directly
+  # rather than trusting have_cmd alone.
+  if "$py" -m pip install --user -q -U "huggingface_hub[cli]" >/dev/null 2>&1; then
+    have_cmd hf && { HF_CMD=hf; return; }
+    have_cmd huggingface-cli && { HF_CMD=huggingface-cli; return; }
+    [ -x "$HOME/.local/bin/hf" ] && { HF_CMD="$HOME/.local/bin/hf"; return; }
+    [ -x "$HOME/.local/bin/huggingface-cli" ] && { HF_CMD="$HOME/.local/bin/huggingface-cli"; return; }
+  fi
+
+  # Debian/Ubuntu (24.04+) mark the system Python "externally managed" (PEP 668)
+  # and refuse --user installs. Use an isolated venv rather than
+  # --break-system-packages, which can damage the distro's own Python.
+  warn "system pip install unavailable (PEP 668) -- using an isolated venv"
+  if ! "$py" -m venv "$HF_VENV" >/dev/null 2>&1; then
+    err "could not create a venv at $HF_VENV. Install the venv module first: apt-get install -y python3-venv"
+    exit 1
+  fi
+  if ! "$HF_VENV/bin/pip" install -q -U "huggingface_hub[cli]" >/dev/null 2>&1; then
+    err "pip install huggingface_hub failed inside $HF_VENV"
+    exit 1
+  fi
+  [ -x "$HF_VENV/bin/hf" ] && { HF_CMD="$HF_VENV/bin/hf"; return; }
+  [ -x "$HF_VENV/bin/huggingface-cli" ] && { HF_CMD="$HF_VENV/bin/huggingface-cli"; return; }
+  err "huggingface_hub CLI not found after installing into $HF_VENV"
   exit 1
 }
 
