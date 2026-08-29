@@ -774,6 +774,10 @@
       `<strong>${escapeHtml(CFG.api.username || "—")}</strong></p>` +
       `<p class="nestling-modal-note">${escapeHtml(t("accountDataNote"))}</p>` +
       `<p class="nestling-modal-note">${escapeHtml(t("accountSessionNote"))}</p>` +
+      `<button type="button" class="btn btn-ghost btn-sm nestling-modal-danger" id="nestling-clear-history">${escapeHtml(
+        t("clearHistory")
+      )}</button>` +
+      `<p class="nestling-modal-note">${escapeHtml(t("clearHistoryNote"))}</p>` +
       `<div class="nestling-modal-actions">` +
       `<button type="button" class="btn btn-ghost btn-sm" id="nestling-account-close">${escapeHtml(
         t("close")
@@ -785,6 +789,24 @@
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     card.querySelector("#nestling-account-close").addEventListener("click", () => overlay.remove());
+    card.querySelector("#nestling-clear-history").addEventListener("click", async (ev) => {
+      if (!window.confirm(t("clearHistoryConfirm"))) return;
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      try {
+        const res = await api(EP.sessions, { method: "DELETE" });
+        // The open conversation no longer exists server-side; drop the local
+        // pointer too or the next turn would post to a deleted session.
+        store.remove(STORAGE.chatSession);
+        state.chatSessionId = null;
+        toast(t("clearHistoryDone", { count: (res && res.deleted) || 0 }));
+        overlay.remove();
+        if (location.hash.startsWith("#/chat")) location.reload();
+      } catch (err) {
+        toast(err.message || t("clearHistoryFailed"), "error");
+        btn.disabled = false;
+      }
+    });
     card.querySelector("#nestling-account-logout").addEventListener("click", () => {
       if (window.confirm(t("logOutConfirm"))) logOut();
     });

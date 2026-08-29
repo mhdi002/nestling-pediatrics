@@ -423,6 +423,52 @@ class ChatMemory:
         return cur.rowcount
 
     @_synchronized
+    def delete_session(self, session_id: str, owner_user_id: str | None = None) -> bool:
+        """
+        Remove a session and everything attached to it.
+
+        Ownership is enforced here rather than only at the route, so no future
+        caller can delete another account's conversation by id. Facts and
+        messages go first: `sessions` is their foreign-key parent.
+        """
+        row = self.conn.execute(
+            "SELECT owner_user_id FROM sessions WHERE session_id=?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        if owner_user_id and row["owner_user_id"] != owner_user_id:
+            return False
+        self.conn.execute("DELETE FROM session_facts WHERE session_id=?", (session_id,))
+        self.conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+        self.conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+        self.conn.commit()
+        return True
+
+    @_synchronized
+    def delete_all_sessions(self, owner_user_id: str) -> int:
+        """
+        Delete every session belonging to one account.
+
+        Requires an owner: without one this would wipe the whole table,
+        including other families' conversations, which is exactly the mistake
+        a "clear my history" button must never be able to make.
+        """
+        if not owner_user_id:
+            raise ValueError("owner_user_id is required to clear history")
+        ids = [
+            r["session_id"]
+            for r in self.conn.execute(
+                "SELECT session_id FROM sessions WHERE owner_user_id=?", (owner_user_id,)
+            )
+        ]
+        for sid in ids:
+            self.conn.execute("DELETE FROM session_facts WHERE session_id=?", (sid,))
+            self.conn.execute("DELETE FROM messages WHERE session_id=?", (sid,))
+        self.conn.execute("DELETE FROM sessions WHERE owner_user_id=?", (owner_user_id,))
+        self.conn.commit()
+        return len(ids)
+
+    @_synchronized
     def list_sessions(
         self,
         child_id: str | None = None,

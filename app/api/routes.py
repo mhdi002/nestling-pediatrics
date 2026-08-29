@@ -332,6 +332,36 @@ def list_sessions(
     }
 
 
+@router.delete("/sessions")
+def clear_all_sessions(request: Request):
+    """
+    Delete every chat session for the signed-in account.
+
+    Requires an authenticated user: without one there is no safe scope to
+    delete, and wiping unscoped would take other families' conversations with
+    it. Children, growth measurements and screenings are deliberately left
+    alone -- this clears conversation history, not the medical record.
+    """
+    user_id = current_user(request)
+    if not user_id:
+        raise _err(
+            401, "sign_in_required", "Sign in to clear your chat history"
+        )
+    removed = get_services().chat.delete_all_sessions(user_id)
+    return {"deleted": removed}
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, request: Request):
+    """Delete one conversation. Ownership is enforced in the store as well."""
+    ok = get_services().chat.delete_session(session_id, owner_user_id=current_user(request))
+    if not ok:
+        # Same 404 whether it is missing or someone else's, so ids cannot be
+        # probed for existence.
+        raise _err(404, "session_not_found", session_id)
+    return {"deleted": 1}
+
+
 @router.get("/sessions/{session_id}")
 def get_session(session_id: str, request: Request, limit: int | None = Query(None, ge=1)):
     svc = get_services()

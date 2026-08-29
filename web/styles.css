@@ -1822,3 +1822,12 @@ textarea:focus {
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+.nestling-modal-danger {
+  display: block;
+  width: 100%;
+  margin-top: 0.5rem;
+  color: #b91c1c;
+  border: 1px solid rgba(185, 28, 28, 0.35);
+}
+.nestling-modal-danger:disabled { opacity: 0.5; cursor: default; }
