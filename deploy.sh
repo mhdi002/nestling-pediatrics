@@ -508,6 +508,12 @@ compose_up() {
   else
     docker compose up --build -d nestling nginx
   fi
+  # nginx resolves its upstream once at startup, so a recreated app container
+  # leaves it proxying an address that no longer exists and every request
+  # hangs until the proxy timeout -- a 504 that looks like a slow backend
+  # rather than a stale route. Restarting it last forces re-resolution.
+  step "restarting the load balancer so it re-resolves the app"
+  docker compose restart nginx >/dev/null 2>&1 || warn "could not restart nginx"
 }
 
 wait_health() {
