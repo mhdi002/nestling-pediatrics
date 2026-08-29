@@ -790,21 +790,9 @@
     document.body.appendChild(overlay);
     card.querySelector("#nestling-account-close").addEventListener("click", () => overlay.remove());
     card.querySelector("#nestling-clear-history").addEventListener("click", async (ev) => {
-      if (!window.confirm(t("clearHistoryConfirm"))) return;
-      const btn = ev.currentTarget;
-      btn.disabled = true;
-      try {
-        const res = await api(EP.sessions, { method: "DELETE" });
-        // The open conversation no longer exists server-side; drop the local
-        // pointer too or the next turn would post to a deleted session.
-        store.remove(STORAGE.chatSession);
-        state.chatSessionId = null;
-        toast(t("clearHistoryDone", { count: (res && res.deleted) || 0 }));
+      if (await clearAllChatHistory(ev.currentTarget)) {
         overlay.remove();
         if (location.hash.startsWith("#/chat")) location.reload();
-      } catch (err) {
-        toast(err.message || t("clearHistoryFailed"), "error");
-        btn.disabled = false;
       }
     });
     card.querySelector("#nestling-account-logout").addEventListener("click", () => {
@@ -1318,6 +1306,32 @@
     if (btn) btn.setAttribute("aria-expanded", String(!!open));
   }
 
+  /**
+   * Delete every conversation for this account.
+   *
+   * Exposed both here (beside the history list, where a parent looks for it)
+   * and in Account settings. The server clears only the caller's sessions and
+   * leaves children, growth and screenings untouched.
+   */
+  async function clearAllChatHistory(btn) {
+    if (!window.confirm(t("clearHistoryConfirm"))) return false;
+    if (btn) btn.disabled = true;
+    try {
+      const res = await api(EP.sessions, { method: "DELETE" });
+      // The open session no longer exists server-side; drop the local pointer
+      // or the next turn would post to a deleted session.
+      store.remove(STORAGE.chatSession);
+      state.chatSessionId = null;
+      toast(t("clearHistoryDone"));
+      return true;
+    } catch (err) {
+      toast(err.message || t("clearHistoryFailed"), "error");
+      return false;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function loadChatHistoryList() {
     const list = $("#chat-history-list");
     if (!list) return;
@@ -1429,6 +1443,16 @@
           return;
         }
         loadChatHistoryList();
+      });
+    }
+    const clearBtn = $("#chat-history-clear");
+    if (clearBtn && !clearBtn.dataset.wired) {
+      clearBtn.dataset.wired = "1";
+      clearBtn.addEventListener("click", async (ev) => {
+        if (await clearAllChatHistory(ev.currentTarget)) {
+          setChatHistoryOpen(false);
+          location.reload();
+        }
       });
     }
   }

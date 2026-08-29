@@ -166,7 +166,15 @@
           </div>
         </header>
         <div id="chat-history-panel" class="panel chat-history-panel" hidden>
-          <h3 class="panel-title" data-i18n="chatHistory">Chat history</h3>
+          <div class="chat-history-head">
+            <h3 class="panel-title" data-i18n="chatHistory">Chat history</h3>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm chat-history-clear"
+              id="chat-history-clear"
+              data-i18n="clearHistory"
+            >Clear chat history</button>
+          </div>
           <div id="chat-history-list" class="chat-history-list"></div>
         </div>
         <div

@@ -1831,3 +1831,16 @@ textarea:focus {
   border: 1px solid rgba(185, 28, 28, 0.35);
 }
 .nestling-modal-danger:disabled { opacity: 0.5; cursor: default; }
+
+.chat-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.chat-history-clear {
+  color: #b91c1c;
+  border: 1px solid rgba(185, 28, 28, 0.3);
+}
+.chat-history-clear:disabled { opacity: 0.5; cursor: default; }
