@@ -42,18 +42,6 @@
           <span class="account-avatar" id="account-initial" aria-hidden="true"></span>
         </button>
       </div>
-      <div class="account-menu" id="account-menu" role="dialog" aria-modal="false" hidden>
-        <p class="account-menu-user">
-          <span class="account-menu-label" data-i18n="signedInAs">Signed in as</span>
-          <strong id="account-menu-name"></strong>
-        </p>
-        <button type="button" class="btn btn-ghost btn-sm account-menu-item" id="account-settings-btn" data-i18n="accountSettings">
-          Account settings
-        </button>
-        <button type="button" class="btn btn-ghost btn-sm account-menu-item account-menu-danger" id="logout-btn" data-i18n="logOut">
-          Log out
-        </button>
-      </div>
     </header>
 
     <main id="main" class="main">
@@ -198,19 +186,31 @@
               rows="1"
               data-constraint="chatMessage"
               data-i18n-placeholder="chatPh"
-              placeholder="Type a message…"
+              placeholder="Ask anything…"
               required
             ></textarea>
           </div>
-          <button type="button" class="btn btn-ghost btn-icon btn-attach-plus" id="chat-attach" data-i18n-title="attachPhoto" aria-label="Attach a photo">
-            <span class="attach-plus-glyph" aria-hidden="true"></span>
-          </button>
-          <input type="file" id="chat-file" class="sr-only" accept="image/*" tabindex="-1" aria-hidden="true" />
-          <button type="button" class="btn btn-ghost btn-send" id="chat-cancel" hidden data-i18n="cancel" data-i18n-title="cancel" title="Cancel" aria-label="Cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-send" id="chat-send" data-i18n-title="send" title="Send" aria-label="Send">
-            <span class="btn-label" data-i18n="send">Send</span>
-            <span class="spinner" hidden aria-hidden="true"></span>
-          </button>
+          <div class="composer-tools">
+            <button type="button" class="composer-icon-btn" id="chat-attach" data-i18n-title="attachPhoto" aria-label="Attach a photo">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+            <input type="file" id="chat-file" class="sr-only" accept="image/*" tabindex="-1" aria-hidden="true" />
+            <div class="composer-tools-end">
+              <button type="button" class="composer-icon-btn composer-cancel" id="chat-cancel" hidden data-i18n-title="cancel" title="Cancel" aria-label="Cancel">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </button>
+              <button type="submit" class="composer-send" id="chat-send" data-i18n-title="send" title="Send" aria-label="Send">
+                <svg class="composer-send-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span class="spinner" hidden aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
         </form>
       </section>
 

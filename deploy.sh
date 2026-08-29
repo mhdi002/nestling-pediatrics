@@ -94,8 +94,22 @@ have_apt()   { have_cmd apt-get; }
 # far more confusing "Unable to locate package" later on.
 # A freshly-booted Ubuntu box usually runs unattended-upgrades for several
 # minutes, holding the dpkg lock. Wait it out rather than racing it.
+# Ubuntu cloud images run unattended-upgrades on boot, and it can sit on the
+# dpkg lock for many minutes (or wedge entirely on broken packages). Stopping
+# the service is not enough: apt-daily.timer / apt-daily-upgrade.timer simply
+# start it again, so the timers have to be masked for the duration too.
+# Opt out with NESTLING_KEEP_AUTO_UPGRADES=1 if a host must keep them running.
+pause_auto_upgrades() {
+  [ "${NESTLING_KEEP_AUTO_UPGRADES:-0}" = "1" ] && return 0
+  is_root || return 0
+  have_cmd systemctl || return 0
+  systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades >/dev/null 2>&1 || true
+  systemctl mask apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+}
+
 wait_for_apt_lock() {
   local i announced=0
+  pause_auto_upgrades
   for i in $(seq 1 60); do
     # `apt-get check` acquires the same locks a real install needs, so it is
     # an accurate probe. Matching process names is NOT: the harmless
@@ -115,8 +129,8 @@ wait_for_apt_lock() {
   # broken packages, holding the lock indefinitely. Say so plainly rather than
   # failing later with a confusing "Unable to locate package".
   warn "dpkg lock still held after 10 minutes."
-  warn "if this persists, check: ps -eo pid,etime,args | grep unattended-upgrade"
-  warn "a wedged upgrader can be cleared with: systemctl stop unattended-upgrades"
+  warn "check the holder with: ps -eo pid,etime,args | grep -E 'apt|dpkg|unattended'"
+  warn "a wedged upgrader can be cleared with: pkill -9 -f /usr/bin/unattended-upgrade"
   return 1
 }
 

@@ -738,57 +738,24 @@
   /** Refresh the account button/menu from the current session token. */
   function renderAccountUi() {
     const btn = document.getElementById("account-btn");
-    const nameEl = document.getElementById("account-menu-name");
     const initialEl = document.getElementById("account-initial");
     if (!btn) return;
     const username = CFG.api.username || "";
     const signedIn = !!CFG.api.key;
     btn.hidden = !signedIn;
     if (!signedIn) return;
-    if (nameEl) nameEl.textContent = username || "—";
     if (initialEl) {
       initialEl.textContent = (username.trim()[0] || "?").toUpperCase();
     }
   }
 
-  function closeAccountMenu() {
-    const menu = document.getElementById("account-menu");
-    const btn = document.getElementById("account-btn");
-    if (menu) menu.hidden = true;
-    if (btn) btn.setAttribute("aria-expanded", "false");
-  }
-
   function initAccountUi() {
     const btn = document.getElementById("account-btn");
-    const menu = document.getElementById("account-menu");
-    const logoutBtn = document.getElementById("logout-btn");
-    const settingsBtn = document.getElementById("account-settings-btn");
-    if (!btn || !menu) return;
-
-    btn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      const open = menu.hidden;
-      menu.hidden = !open;
-      btn.setAttribute("aria-expanded", String(open));
-    });
-    document.addEventListener("click", (ev) => {
-      if (!menu.hidden && !menu.contains(ev.target) && ev.target !== btn) closeAccountMenu();
-    });
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") closeAccountMenu();
-    });
-    if (logoutBtn) {
-      logoutBtn.addEventListener("click", () => {
-        closeAccountMenu();
-        if (window.confirm(t("logOutConfirm"))) logOut();
-      });
-    }
-    if (settingsBtn) {
-      settingsBtn.addEventListener("click", () => {
-        closeAccountMenu();
-        showAccountSettings();
-      });
-    }
+    if (!btn) return;
+    // The avatar opens Account settings directly. An always-mounted dropdown
+    // was both a second place for sign-out to live and a rendering hazard:
+    // its `display: flex` beat the `hidden` attribute, so it never hid.
+    btn.addEventListener("click", () => showAccountSettings());
     renderAccountUi();
   }
 
