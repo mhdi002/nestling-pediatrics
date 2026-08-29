@@ -50,17 +50,31 @@ def _seed_knowledge() -> None:
                 f"(volume feeding={cur_feed}, seed feeding={seed_feed})",
                 flush=True,
             )
-            shutil.copy2(seed_chunks, chunks)
+            try:
+                shutil.copy2(seed_chunks, chunks)
+            except OSError as exc:
+                # docker-compose bind-mounts chunks.json read-only, so the
+                # operator is supplying it deliberately and the image seed is
+                # not authoritative. Seeding is an optional repair step and
+                # must never take the container down.
+                print(
+                    f"[entrypoint] cannot refresh chunks.json ({exc}); "
+                    "keeping the mounted copy",
+                    flush=True,
+                )
         for item in (SEED / "knowledge").iterdir():
             if item.name == "chunks.json":
                 continue
             dest = knowledge / item.name
             if dest.exists():
                 continue
-            if item.is_dir():
-                shutil.copytree(item, dest)
-            else:
-                shutil.copy2(item, dest)
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+            except OSError as exc:
+                print(f"[entrypoint] could not seed {item.name}: {exc}", flush=True)
     elif not chunks.exists():
         print("[entrypoint] WARNING: no chunks.json and no image seed", flush=True)
 
