@@ -132,15 +132,35 @@ def growth_plot_chat(res: dict[str, Any], *, fa: bool = False) -> str:
 
 
 def _measure_label(measure: str, *, fa: bool) -> str:
+    """
+    Localised name for a measure, taken from config/intent_rules.yaml.
+
+    That file already lists each measure's synonyms per language
+    (`slots.measure`), and it is the file operators edit to add a measure or a
+    language. Duplicating those words here would mean a new measure silently
+    displaying its internal key to parents until someone remembered to update
+    a second list.
+    """
+    key = str(measure).strip().lower()
     if not fa:
-        return str(measure)
-    return {
-        "weight": "وزن",
-        "length": "قد",
-        "height": "قد",
-        "head": "دور سر",
-        "head_circumference": "دور سر",
-    }.get(str(measure).lower(), str(measure))
+        return key.replace("_", " ")
+    try:
+        from assistant.agent.rules import load_intent_rules
+        from assistant.runtime_translate import has_persian
+
+        synonyms = (load_intent_rules().get("slots") or {}).get("measure") or {}
+    except Exception:
+        return key.replace("_", " ")
+
+    for canonical, words in synonyms.items():
+        if str(canonical).lower() != key and key not in {str(w).lower() for w in words}:
+            continue
+        # First entry written in the target script is the display label.
+        for word in words:
+            if has_persian(str(word)):
+                return str(word)
+        break
+    return key.replace("_", " ")
 
 
 def child_summary_chat(result: dict | str, *, fa: bool = False) -> str:

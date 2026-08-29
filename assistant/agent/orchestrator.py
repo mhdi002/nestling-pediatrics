@@ -407,15 +407,20 @@ def interpret_track_status(track_status: str | None, centile: float | None, *, f
 def latest_growth_snapshot(db: ChildMemoryDB, child_id: str | None, slots: dict) -> dict | None:
     """Prefer last computed result in session slots; else child's latest saved growth."""
     if slots.get("last_centile") is not None or slots.get("last_track_status"):
+        # Every field comes from the same plotted result. Mixing `last_*` values
+        # with the live `weeks`/`value` slots let the analysis quote a centile
+        # from one measurement next to the age of another, which is how a point
+        # plotted above the 97th centile was described as "43rd, usual range".
         return {
-            "measure": slots.get("last_measure") or slots.get("measure"),
-            "value": slots.get("last_value") if slots.get("last_value") is not None else slots.get("value"),
+            "measure": slots.get("last_measure"),
+            "value": slots.get("last_value"),
             "centile": slots.get("last_centile"),
             "z_score": slots.get("last_z_score"),
             "track_status": slots.get("last_track_status"),
             "age_months": slots.get("last_age_months"),
-            "weeks": slots.get("weeks"),
-            "chart_standard": slots.get("last_chart_standard") or slots.get("chart_standard"),
+            "weeks": slots.get("last_weeks"),
+            "overlay_filename": slots.get("last_overlay_filename"),
+            "chart_standard": slots.get("last_chart_standard"),
             "sex": slots.get("sex"),
         }
     if not child_id:
@@ -1091,6 +1096,13 @@ class ParentAssistant:
                     "last_measure": res.get("measure"),
                     "last_value": res.get("value"),
                     "last_chart_standard": res.get("chart_standard"),
+                    # The age this result was actually computed and plotted at.
+                    # Without it the follow-up analysis fell back to the raw
+                    # `weeks` slot, which can describe a different measurement
+                    # than the centile beside it -- so the chart and the text
+                    # disagreed about the same child.
+                    "last_weeks": res.get("weeks"),
+                    "last_overlay_filename": res.get("overlay_filename"),
                     "want_overlay": True,
                 }
                 if age_m is not None:

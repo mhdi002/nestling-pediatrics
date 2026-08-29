@@ -81,3 +81,29 @@ def test_opinion_requests_route_to_analysis():
     clear_rules_cache()
     for phrase in ("نظری نداری ؟", "نظرت چیه؟", "any thoughts?", "what do you think"):
         assert "growth_analysis" in match_intents_from_rules(phrase), phrase
+
+
+def test_measure_labels_come_from_config_not_python():
+    """
+    Adding a measure to config/intent_rules.yaml must be enough to have it
+    named correctly for parents. A second list inside Python would silently
+    show the internal key until someone remembered to update it too.
+    """
+    import assistant.parent_voice as pv
+    from assistant.agent.rules import clear_rules_cache, load_intent_rules
+
+    clear_rules_cache()
+    configured = (load_intent_rules().get("slots") or {}).get("measure") or {}
+    assert configured, "expected slots.measure in config/intent_rules.yaml"
+
+    for canonical, words in configured.items():
+        label = pv._measure_label(canonical, fa=True)
+        # The label must be one of the words the config supplies, never a
+        # value invented in code.
+        assert label in {str(w) for w in words} or label == canonical.replace("_", " "), (
+            canonical,
+            label,
+        )
+
+    # An unconfigured measure degrades to a readable key rather than raising.
+    assert pv._measure_label("bmi", fa=True) == "bmi"
