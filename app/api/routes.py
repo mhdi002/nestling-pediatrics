@@ -392,12 +392,15 @@ def _run_vision_turn(
     session_id: str | None,
     child_id: str | None,
     ui_lang: str | None,
+    owner_user_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Blocking half of the vision turn (SQLite + model call), run off the event loop."""
     svc = get_services()
     sid = session_id
     if not sid or not svc.chat.get_session(sid):
-        sid = svc.chat.create_session(child_id=child_id)
+        # Must carry the owner: an unowned session is invisible to the account
+        # that created it under the per-user scoping.
+        sid = svc.chat.create_session(child_id=child_id, owner_user_id=owner_user_id)
     user_msg = f"[photo:{fname}] {caption}" if caption else f"[photo:{fname}]"
     svc.chat.add_message(sid, "user", user_msg)
     out = svc.assistant.analyze_parent_photo(clean, mime=mime, prompt=caption, ui_lang=ui_lang)
@@ -407,6 +410,7 @@ def _run_vision_turn(
 
 @router.post("/chat/vision")
 async def chat_vision(
+    request: Request,
     message: str = Form(""),
     session_id: str | None = Form(None),
     child_id: str | None = Form(None),
@@ -450,6 +454,7 @@ async def chat_vision(
         session_id=session_id,
         child_id=child_id,
         ui_lang=ui_lang,
+        owner_user_id=current_user(request),
     )
     return {
         "session_id": sid,
