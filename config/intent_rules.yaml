@@ -72,8 +72,15 @@ intents:
     priority: 50
     patterns_en:
       - "history|remember|summary|child profile|what do you know"
+      # "how is Monica doing" / "what's Monica's status" — a status question about
+      # a named child is a request for that child's record, not small talk.
+      - 'how(?:''s| is| are)\s+\S+.*\bdoing\b'
+      - 'how(?:''s| is| are)\s+\S+\s*\?*$'
+      - '\bstatus\b'
+      - '\bupdate on\b'
     patterns_fa:
       - "تاریخچه|پرونده|اطلاعات (فرزند|کودک)|یادت"
+      - 'وضعیت|حالِ?\s*\S+\s*(چطور|چجور)'
 
 slots:
   sex:

@@ -98,6 +98,22 @@ def main() -> None:
                 added += 1
             by_id[cid] = chunk
 
+    # Drop chunks that came from a curated_*.md which no longer exists.
+    # Without this the merge is append-only: renaming or deleting a source
+    # file leaves orphans behind that duplicate the replacement content and
+    # compete with it in retrieval.
+    present = {p.name for p in EN_DIR.glob("curated_*.md")}
+    orphans = [
+        cid
+        for cid, c in by_id.items()
+        if str(c.get("source", "")).startswith("curated_")
+        and c.get("source") not in present
+    ]
+    for cid in orphans:
+        by_id.pop(cid, None)
+    if orphans:
+        print(f"pruned {len(orphans)} orphaned chunk(s) from removed curated files")
+
     merged = list(by_id.values())
     CHUNKS_PATH.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     n = MedicalRAG().build_from_chunks()

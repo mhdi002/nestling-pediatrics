@@ -486,7 +486,11 @@ def _run_chat_turn(body: ChatBody, owner_user_id: str | None = None) -> dict[str
         # Auto-create when UI has no session yet, or stale localStorage id after DB reset.
         sid = svc.chat.create_session(child_id=body.child_id, owner_user_id=owner_user_id)
     out = svc.assistant.chat(
-        sid, body.message, child_id=body.child_id, ui_lang=_normalized_ui_lang(body.ui_lang)
+        sid,
+        body.message,
+        child_id=body.child_id,
+        ui_lang=_normalized_ui_lang(body.ui_lang),
+        owner_user_id=owner_user_id,
     )
     # Auto-title from first user message
     s = svc.chat.get_session(sid) or {}

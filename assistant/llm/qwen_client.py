@@ -145,6 +145,13 @@ class QwenClient:
         max_tokens = settings.llm_max_tokens_default if max_tokens is None else max_tokens
         if not self.base_url:
             raise RuntimeError("NESTLING_LLM_URL is not set")
+        # Fail fast when the sidecar is down. Without this the request waits
+        # out the full generation timeout (180s by default) on every turn,
+        # leaving the UI on "Thinking..." for minutes instead of falling back
+        # to extractive RAG. The probe is 1.5s and TTL-cached, so a healthy
+        # sidecar pays almost nothing.
+        if not self._probe(self.base_url):
+            raise RuntimeError(f"LLM not reachable at {self.base_url}")
         payload = {
             "model": self.model,
             "messages": messages,
@@ -186,6 +193,10 @@ class QwenClient:
         max_tokens = settings.llm_max_tokens_vision if max_tokens is None else max_tokens
         if not self.vision_url:
             raise RuntimeError("NESTLING_VISION_LLM_URL is not set")
+        # Same fail-fast gate as chat(): a down sidecar must not hold a photo
+        # turn open for the full timeout.
+        if not self._probe(self.vision_url):
+            raise RuntimeError(f"Vision LLM not reachable at {self.vision_url}")
         data_url = (
             f"data:{mime};base64," + base64.b64encode(image_bytes).decode("ascii")
         )

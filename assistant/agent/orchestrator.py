@@ -857,12 +857,37 @@ class ParentAssistant:
     def start_session(self, child_id: str | None = None) -> str:
         return self.chat_memory.create_session(child_id=child_id)
 
+    def _children_named_in(
+        self, owner_user_id: str | None, *messages: str
+    ) -> list[dict]:
+        """
+        Children whose stored name appears in any of `messages`.
+
+        The roster is read from the DB every turn rather than matched against a
+        list in code, so adding a child needs no rule change. Matching both the
+        raw and the translated message matters because transliteration mangles
+        Persian names ("مونیکا" does not reliably come back as "Monica").
+        """
+        min_chars = get_settings().nestling_child_name_min_chars
+        haystacks = [(m or "").lower() for m in messages if m]
+        hits: dict[str, dict] = {}
+        for row in self.db.list_children(owner_user_id=owner_user_id):
+            name = str(row.get("name") or "").strip()
+            if len(name) < min_chars:
+                continue
+            if not any(name.lower() in hay for hay in haystacks):
+                continue
+            for match in self.db.find_children_by_name(name, owner_user_id=owner_user_id):
+                hits[match["child_id"]] = match
+        return list(hits.values())
+
     def chat(
         self,
         session_id: str,
         user_message: str,
         child_id: str | None = None,
         ui_lang: str | None = None,
+        owner_user_id: str | None = None,
     ) -> dict:
         """
         Full multi-turn chat with persistent memory.
@@ -880,6 +905,20 @@ class ParentAssistant:
 
         reply_lang, en_message = translate_for_models(user_message, ui_lang=ui_lang)
         self.chat_memory.add_message(session_id, "user", user_message)
+
+        # A parent can name the child instead of picking one in the UI
+        # ("how is Monica doing?"). Scope to the session owner so a name can
+        # never reach another account's record.
+        owner_user_id = owner_user_id or (session.get("owner_user_id") or None)
+        ambiguous_children: list[dict] = []
+        if not child_id:
+            named = self._children_named_in(owner_user_id, user_message, en_message)
+            if len(named) == 1:
+                child_id = named[0]["child_id"]
+                self.chat_memory.set_child(session_id, child_id)
+            elif len(named) > 1:
+                # Never guess between siblings — the reply asks which one.
+                ambiguous_children = named
 
         new_slots = extract_growth_slots(en_message)
         for k, v in extract_growth_slots(user_message).items():
@@ -926,6 +965,10 @@ class ParentAssistant:
                 intents.discard("reassure")
                 intents.discard("slot_update")
 
+        # The collapses below can drop "history"; remember that the parent asked
+        # for a child's status so a name-resolved turn still pulls the record.
+        history_requested = "history" in intents
+
         show_chart = bool(SHOW_CHART_RE.search(user_message) or SHOW_CHART_RE.search(en_message))
         bare_show = bool(BARE_SHOW_RE.search(user_message) or BARE_SHOW_RE.search(en_message))
         if bare_show and child_id and (self.db.growth_history(child_id) or []):
@@ -969,6 +1012,11 @@ class ParentAssistant:
             intents.discard("growth_analysis")
             intents.discard("chat")
 
+        if history_requested and child_id and not (intents & {"growth", "medical", "screening"}):
+            intents.add("history")
+            intents.discard("chat")
+            intents.discard("reassure")
+
         # Re-plot from saved child measurements when parent asks to show the chart
         if "growth" in intents and child_id and (
             show_chart
@@ -990,7 +1038,17 @@ class ParentAssistant:
             window=_s.nestling_history_window,
             summary_trigger=_s.nestling_summary_trigger_turns,
         )
+        # Long-term memory: what earlier sessions already established about
+        # THIS child. Scoped to the session owner so one account's history can
+        # never surface in another's chat.
+        owner_user_id = session.get("owner_user_id")
+        child_ctx = ""
+        if child_id and _s.nestling_child_memory_enabled:
+            child_ctx = self.db.child_context_text(child_id, owner_user_id=owner_user_id)
+        mem_ctx["child_context"] = child_ctx
         ctx_parts = []
+        if child_ctx:
+            ctx_parts.append(f"[CHILD_MEMORY]\n{child_ctx}")
         if mem_ctx.get("summary"):
             ctx_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
         if mem_ctx.get("recent_text"):
@@ -1092,6 +1150,8 @@ class ParentAssistant:
             )
 
             memory_parts: list[str] = []
+            if mem_ctx.get("child_context"):
+                memory_parts.append(f"[CHILD_MEMORY]\n{mem_ctx['child_context']}")
             if mem_ctx.get("summary"):
                 memory_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
             if mem_ctx.get("recent_text"):
@@ -1223,6 +1283,11 @@ class ParentAssistant:
                 missing.append("age (weeks or months)")
             if "value" not in slots:
                 missing.append("value")
+        if ambiguous_children:
+            missing.append("child (which one?)")
+        out["ambiguous_children"] = [
+            {"child_id": c["child_id"], "name": c.get("name")} for c in ambiguous_children
+        ]
         out["missing_slots"] = missing
         out["needs_gestational_age"] = needs_ga
         # Remember what we were mid-way through so the next turn can resume it
@@ -1237,6 +1302,7 @@ class ParentAssistant:
             "summary": mem_ctx.get("summary") or "",
             "recent_turns": len((mem_ctx.get("recent_text") or "").splitlines()),
             "facts": list((mem_ctx.get("facts") or {}).keys()),
+            "child_context": mem_ctx.get("child_context") or "",
         }
         out["explain_measure"] = bool(
             MEASURE_EXPLAIN_RE.search(user_message) or MEASURE_EXPLAIN_RE.search(en_message)
@@ -1281,8 +1347,56 @@ class ParentAssistant:
             tool_calls=public_tools,
             meta={"slots": slots, "missing_slots": missing, "intents": sorted(intents)},
         )
+        self._remember_for_child(
+            child_id,
+            owner_user_id=owner_user_id,
+            user_message=en_message or user_message,
+            intents=intents,
+            slots=slots,
+            session_id=session_id,
+        )
         out["history"] = self.chat_memory.get_history(session_id)
         return out
+
+    def _remember_for_child(
+        self,
+        child_id: str | None,
+        *,
+        owner_user_id: str | None,
+        user_message: str,
+        intents: set[str],
+        slots: dict,
+        session_id: str,
+    ) -> None:
+        """
+        Write one salient turn to the child's durable timeline.
+
+        Only clinically meaningful intents are kept: everything the parent says
+        would otherwise accumulate as noise and crowd out the facts a later
+        session actually needs. The note records the parent's own words — the
+        assistant reply is largely derived from them plus retrieved guidance,
+        so storing the concern is what makes the follow-up possible.
+        """
+        settings = get_settings()
+        if not child_id or not settings.nestling_child_memory_enabled:
+            return
+        if not (intents & settings.child_memory_intents):
+            return
+        text = (user_message or "").strip()
+        if not text:
+            return
+        topic = str(slots.get("last_topic") or "").strip()
+        summary = f"{topic}: {text}" if topic and topic not in {"chat", ""} else text
+        self.db.remember_note(
+            child_id,
+            summary,
+            payload={
+                "intents": sorted(intents),
+                "session_id": session_id,
+                "topic": topic or None,
+            },
+            owner_user_id=owner_user_id,
+        )
 
     def _format_reply(
         self, out: dict, intents: set[str] | None = None, reply_lang: str = "en"
@@ -1320,7 +1434,15 @@ class ParentAssistant:
             }
         ) or bool(set(slots.get("last_intents") or []) & {"medical", "screening"})
 
-        if out.get("needs_gestational_age"):
+        options = [str(c.get("name") or "") for c in (out.get("ambiguous_children") or [])]
+        if options:
+            joined = "، ".join(options) if fa else ", ".join(options)
+            parts.append(
+                f"چند فرزند با این نام دارید: {joined}. کدام‌یک را می‌گویید؟"
+                if fa
+                else f"I have more than one child by that name: {joined}. Which one do you mean?"
+            )
+        elif out.get("needs_gestational_age"):
             parts.append(
                 "برای انتخاب درست نمودار رشد (نارس / طبیعی) سن بارداری هنگام تولد را بگویید "
                 "(مثلاً ۳۲ هفته)، یا بنویسید نارس / طبیعی."

@@ -86,3 +86,31 @@ def test_clear_slots_removes_key(assistant):
 
     assistant.chat_memory.clear_slots(session_id, ["pending_intent"])
     assert "pending_intent" not in assistant.chat_memory.get_slots(session_id)
+
+
+def test_age_in_years_is_parsed(assistant):
+    """
+    "2 years old" is how parents state a toddler's age. Before this was
+    handled the extractor returned no age at all, so the assistant re-asked
+    for an age the parent had just given, in English and Persian alike.
+    """
+    from assistant.agent.slots import extract_growth_slots
+
+    for text in ("girl 2 years old 3 kg", "2 years", "2yo", "دختر ۲ ساله ۳ کیلو", "۲ سال"):
+        slots = extract_growth_slots(text)
+        assert slots.get("age_months") == 24.0, f"{text!r} -> {slots}"
+
+    # Weeks and months must keep working unchanged.
+    assert extract_growth_slots("18 months").get("age_months") == 18.0
+    assert extract_growth_slots("40 weeks").get("weeks") == 40.0
+    assert "age_months" not in extract_growth_slots("32 weeks at birth")
+
+
+def test_year_age_answer_resumes_growth_request(assistant):
+    """A follow-up given in years must complete the plot, not restart it."""
+    session_id = assistant.chat_memory.create_session()
+    _reply(assistant, session_id, "plot weight for my girl, 3 kg")
+    out = _reply(assistant, session_id, "2 years")
+    slots = assistant.chat_memory.get_slots(session_id)
+    assert slots.get("age_months") == 24.0, slots
+    assert "growth" in set(out.get("intents") or []), out.get("intents")

@@ -83,6 +83,25 @@ class Settings(BaseSettings):
     nestling_summary_turn_chars: int = 180
     nestling_memory_recent_chars: int = 1200
     nestling_medical_query_chars: int = 500
+    # Shortest child name we will look for inside a free-text message; one-letter
+    # names would match almost any sentence.
+    nestling_child_name_min_chars: int = 2
+
+    # Long-term, per-CHILD memory. Chat sessions are disposable; a child's
+    # developmental thread is not, so salient turns are written to the child's
+    # event timeline and replayed into every later session about that child.
+    nestling_child_memory_enabled: bool = True
+    nestling_child_memory_kind: str = "chat_note"
+    # Which intents make a turn worth remembering beyond the session. Small
+    # talk and slot corrections are deliberately excluded — they would drown
+    # the digest in noise within a few sessions.
+    nestling_child_memory_intents: str = "medical,screening,growth_analysis,growth"
+    nestling_child_memory_events: int = 8
+    nestling_child_memory_event_chars: int = 200
+    nestling_child_memory_note_chars: int = 240
+    nestling_child_memory_growth: int = 3
+    nestling_child_memory_screenings: int = 2
+    nestling_child_memory_max_chars: int = 1500
 
     # LLM generation defaults
     llm_temperature: float = 0.7
@@ -128,6 +147,11 @@ class Settings(BaseSettings):
         if raw == "*":
             return ["*"]
         return [o.strip() for o in raw.split(",") if o.strip()]
+
+    @property
+    def child_memory_intents(self) -> frozenset[str]:
+        raw = (self.nestling_child_memory_intents or "").strip()
+        return frozenset(i.strip().lower() for i in raw.split(",") if i.strip())
 
     @property
     def allowed_upload_types(self) -> frozenset[str]:

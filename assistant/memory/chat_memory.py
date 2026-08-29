@@ -107,6 +107,14 @@ class ChatMemory:
         # could read every other account's conversation history.
         if "owner_user_id" not in cols:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN owner_user_id TEXT")
+        # How many turns have already been folded into `summary`. Without this
+        # watermark every call re-folded the same older turns (duplicating them
+        # in the summary) while turns pushed out between two calls could be
+        # skipped entirely — i.e. silently forgotten in a long session.
+        if "summarized_upto" not in cols:
+            self.conn.execute(
+                "ALTER TABLE sessions ADD COLUMN summarized_upto INTEGER DEFAULT 0"
+            )
         self.conn.commit()
 
     @_synchronized
@@ -298,9 +306,16 @@ class ChatMemory:
         all_msgs = self.get_history(session_id)
         summary = (session.get("summary") or "").strip()
         if len(all_msgs) > summary_trigger:
-            older = all_msgs[:-window] if window else all_msgs
+            # Everything before the window is about to fall out of `recent`;
+            # fold exactly the stretch not yet folded, so nothing is lost and
+            # nothing is folded twice. This is pure Python: the rolling summary
+            # keeps working when the LLM sidecar is down (NESTLING_USE_LLM=0).
+            keep_from = len(all_msgs) - window if window else len(all_msgs)
             # Exclude the latest user turn (added before context is built)
-            fold = older[:-1] if older and older[-1].get("role") == "user" else older
+            if all_msgs and all_msgs[-1].get("role") == "user":
+                keep_from = min(keep_from, len(all_msgs) - 1)
+            folded_upto = max(0, int(session.get("summarized_upto") or 0))
+            fold = all_msgs[folded_upto:keep_from] if keep_from > folded_upto else []
             if fold:
                 bits = []
                 turn_cap = settings.nestling_summary_turn_chars
@@ -314,6 +329,11 @@ class ChatMemory:
                     summary = (summary + " | " + folded).strip(" |") if summary else folded
                     summary = summary[-settings.nestling_summary_fold_max_chars :]
                     self.set_summary(session_id, summary)
+                self.conn.execute(
+                    "UPDATE sessions SET summarized_upto=? WHERE session_id=?",
+                    (int(keep_from), session_id),
+                )
+                self.conn.commit()
         recent = self.get_history(session_id, limit=window)
         # Drop the trailing user message from "recent" display — it's the current turn
         if recent and recent[-1].get("role") == "user":
@@ -396,7 +416,7 @@ class ChatMemory:
     def clear_session(self, session_id: str) -> int:
         cur = self.conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
         self.conn.execute(
-            "UPDATE sessions SET slots_json=?, updated_at=? WHERE session_id=?",
+            "UPDATE sessions SET slots_json=?, summarized_upto=0, updated_at=? WHERE session_id=?",
             ("{}", _utc(), session_id),
         )
         self.conn.commit()

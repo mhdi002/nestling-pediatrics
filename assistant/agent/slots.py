@@ -55,6 +55,20 @@ def extract_growth_slots(text: str) -> dict:
     elif re.search(r"\b(weight|وزن|کilo|کیلو)\b", text, re.I):
         slots["measure"] = "weight"
 
+    # Age in years — parents routinely say "2 years old" / "۲ ساله" rather
+    # than "24 months". Must run before the months and bare-number rules so
+    # that "2 years" is not left unparsed (which previously made the agent
+    # re-ask for an age the parent had already given).
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:y(?:ea)?rs?\b|yo\b|سال(?:ه|گی)?)",
+        text,
+        re.I,
+    )
+    if m:
+        years = float(m.group(1))
+        slots["age_months"] = years * 12.0
+        slots["weeks"] = years * 12.0 * weeks_per_month()
+
     # Age in months (chronological) — term WHO path
     m = re.search(
         r"(\d+(?:\.\d+)?)\s*(?:months?|mos?|ماه(?:ه|گی)?)",

@@ -10,13 +10,29 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Matplotlib / Pillow runtime libs + curl for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libfreetype6 \
-    libpng16-16 \
-    libjpeg62-turbo \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Debian package mirror. Defaults to deb.debian.org; override when that host is
+# unreachable from the build network (it is blocked in some regions), e.g.
+#   docker compose build --build-arg DEBIAN_MIRROR=https://cloudflaremirrors.com/debian
+# or set NESTLING_DEBIAN_MIRROR in .env and let compose pass it through.
+ARG DEBIAN_MIRROR=""
+
+# Matplotlib / Pillow runtime libs + curl for healthcheck.
+# Retried because a single transient mirror failure otherwise fails the build.
+RUN set -eux; \
+    if [ -n "$DEBIAN_MIRROR" ]; then \
+      printf 'deb %s bookworm main\ndeb %s bookworm-updates main\n' \
+        "$DEBIAN_MIRROR" "$DEBIAN_MIRROR" > /etc/apt/sources.list; \
+      rm -f /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    for i in 1 2 3; do \
+      apt-get update && break || { echo "apt-get update failed (attempt $i)"; sleep 5; }; \
+    done; \
+    apt-get install -y --no-install-recommends \
+      libfreetype6 \
+      libpng16-16 \
+      libjpeg62-turbo \
+      curl; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY requirements-core.txt requirements.txt ./
 

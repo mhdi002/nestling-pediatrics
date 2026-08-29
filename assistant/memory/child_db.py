@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from assistant.config import CHILD_DB_PATH
+from assistant.settings import get_settings
 
 # Recent-history caps used when summarizing a child for the agent.
 RECENT_SCREENINGS = 5
@@ -174,6 +175,36 @@ class ChildMemoryDB:
             )
         return [dict(r) for r in rows]
 
+    @_synchronized
+    def find_children_by_name(
+        self, name: str, owner_user_id: str | None = None
+    ) -> list[dict]:
+        """
+        Children whose name matches `name`, best match first.
+
+        Parents refer to a child by name mid-conversation ("how is Monica
+        doing?"), so the agent needs a way from a spoken name back to the
+        record. Matching is case-insensitive and accent-preserving, and tries
+        exact match before substring so "Ann" cannot shadow "Anna" when both
+        exist. Scoped by owner so one account can never resolve another's child.
+        """
+        needle = (name or "").strip().lower()
+        if not needle:
+            return []
+        rows = self.list_children(owner_user_id=owner_user_id)
+        exact = [r for r in rows if str(r.get("name", "")).strip().lower() == needle]
+        if exact:
+            return exact
+        # Whole-word containment in either direction, so "monica"
+        # matches "Monica R." and a fuller spoken name still finds the record.
+        partial = [
+            r
+            for r in rows
+            if needle in str(r.get("name", "")).strip().lower()
+            or str(r.get("name", "")).strip().lower() in needle
+        ]
+        return partial
+
     # --- user accounts -------------------------------------------------
 
     @_synchronized
@@ -278,6 +309,120 @@ class ChildMemoryDB:
         )
         self.conn.commit()
         return eid
+
+    @_synchronized
+    def recent_events(
+        self,
+        child_id: str,
+        kinds: tuple[str, ...] | list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Newest-last events for a child, optionally filtered by kind."""
+        if limit is None:
+            limit = get_settings().nestling_child_memory_events
+        limit = max(0, int(limit))
+        if not limit:
+            return []
+        sql = "SELECT * FROM events WHERE child_id=?"
+        params: list = [child_id]
+        if kinds:
+            sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
+            params.extend(kinds)
+        sql += " ORDER BY recorded_at DESC, rowid DESC LIMIT ?"
+        params.append(limit)
+        rows = list(reversed(self.conn.execute(sql, params).fetchall()))
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["payload"] = json.loads(d.pop("payload_json") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                d["payload"] = {}
+            out.append(d)
+        return out
+
+    @_synchronized
+    def remember_note(
+        self,
+        child_id: str,
+        summary: str,
+        payload: dict | None = None,
+        owner_user_id: str | None = None,
+    ) -> str | None:
+        """
+        Persist one salient conversational fact against the CHILD.
+
+        Reuses the `events` timeline rather than adding a parallel store: events
+        are already FK'd to `children` (so ownership is inherited), already
+        replayed by timeline_documents() into child RAG, and already share this
+        connection's lock. Returns None when the child is not readable by
+        `owner_user_id` — memory must never cross accounts.
+        """
+        settings = get_settings()
+        text = (summary or "").strip()
+        if not text or not settings.nestling_child_memory_enabled:
+            return None
+        if not self.get_child(child_id, owner_user_id):
+            return None
+        kind = settings.nestling_child_memory_kind
+        text = text[: settings.nestling_child_memory_note_chars]
+        # Consecutive identical notes add nothing but crowd the digest out.
+        prev = self.conn.execute(
+            "SELECT summary FROM events WHERE child_id=? AND kind=? "
+            "ORDER BY recorded_at DESC, rowid DESC LIMIT 1",
+            (child_id, kind),
+        ).fetchone()
+        if prev and (prev["summary"] or "").strip() == text:
+            return None
+        return self.add_event(child_id, kind, text, payload)
+
+    @_synchronized
+    def child_context_text(self, child_id: str, owner_user_id: str | None = None) -> str:
+        """
+        Compact cross-session digest of what is already known about a child:
+        remembered conversation notes, latest growth, recent screenings.
+
+        Scoped by owner: an unreadable child yields an empty digest, so a
+        session belonging to one account can never surface another's data.
+        """
+        settings = get_settings()
+        child = self.get_child(child_id, owner_user_id)
+        if not child:
+            return ""
+        lines: list[str] = []
+        profile = ", ".join(
+            p
+            for p in (
+                child.get("name"),
+                child.get("sex"),
+                f"DOB {child.get('date_of_birth')}" if child.get("date_of_birth") else "",
+                f"GA {child.get('gestational_age_weeks')}w"
+                if child.get("gestational_age_weeks") is not None
+                else "",
+            )
+            if p
+        )
+        if profile:
+            lines.append(f"Profile: {profile}")
+        if (child.get("notes") or "").strip():
+            lines.append(f"Notes: {child['notes'].strip()}")
+
+        growth = self.growth_history(child_id)
+        for g in growth[-max(0, settings.nestling_child_memory_growth) :]:
+            lines.append(
+                f"Growth: {g['measure']}={g['value']} at {g['weeks']}w "
+                f"(centile {g.get('centile')}, {g.get('track_status')})"
+            )
+        for s in self.screenings(child_id)[-max(0, settings.nestling_child_memory_screenings) :]:
+            lines.append(
+                f"Screening: {s['instrument']} at {s.get('age_months')} months -> "
+                f"{(s.get('result') or {}).get('summary') or (s.get('result') or {})}"
+            )
+        cap = settings.nestling_child_memory_event_chars
+        for e in self.recent_events(child_id, kinds=(settings.nestling_child_memory_kind,)):
+            lines.append(f"Earlier: {(e.get('summary') or '')[:cap]}")
+        text = "\n".join(l for l in lines if l.strip())
+        return text[: settings.nestling_child_memory_max_chars]
 
     @_synchronized
     def growth_history(self, child_id: str, measure: str | None = None) -> list[dict]:
