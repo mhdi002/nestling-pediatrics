@@ -62,7 +62,14 @@ class ChildMemoryDB:
               gestational_age_weeks REAL,
               notes TEXT,
               created_at TEXT,
-              updated_at TEXT
+              updated_at TEXT,
+              owner_user_id TEXT
+            );
+            CREATE TABLE IF NOT EXISTS users (
+              user_id TEXT PRIMARY KEY,
+              username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+              password_hash TEXT NOT NULL,
+              created_at TEXT
             );
             CREATE TABLE IF NOT EXISTS growth_measurements (
               id TEXT PRIMARY KEY,
@@ -109,6 +116,14 @@ class ChildMemoryDB:
                 "ALTER TABLE growth_measurements ADD COLUMN age_months REAL"
             )
             self.conn.commit()
+        # Migrate DBs created before per-user ownership. Pre-existing rows get
+        # a NULL owner and are therefore not visible to any account.
+        child_cols = {
+            r[1] for r in self.conn.execute("PRAGMA table_info(children)").fetchall()
+        }
+        if "owner_user_id" not in child_cols:
+            self.conn.execute("ALTER TABLE children ADD COLUMN owner_user_id TEXT")
+            self.conn.commit()
 
     @_synchronized
     def create_child(
@@ -119,26 +134,72 @@ class ChildMemoryDB:
         gestational_age_weeks: float | None = None,
         notes: str = "",
         child_id: str | None = None,
+        owner_user_id: str | None = None,
     ) -> str:
         cid = child_id or str(uuid.uuid4())
         now = _utc()
         self.conn.execute(
-            "INSERT INTO children(child_id,name,sex,date_of_birth,gestational_age_weeks,notes,created_at,updated_at) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (cid, name, sex, date_of_birth, gestational_age_weeks, notes, now, now),
+            "INSERT INTO children(child_id,name,sex,date_of_birth,gestational_age_weeks,notes,created_at,updated_at,owner_user_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
+            (cid, name, sex, date_of_birth, gestational_age_weeks, notes, now, now, owner_user_id),
         )
         self.conn.commit()
         self.add_event(cid, "child_created", f"Created child profile for {name}", {"sex": sex})
         return cid
 
     @_synchronized
-    def get_child(self, child_id: str) -> dict | None:
-        row = self.conn.execute("SELECT * FROM children WHERE child_id=?", (child_id,)).fetchone()
+    def get_child(self, child_id: str, owner_user_id: str | None = None) -> dict | None:
+        # Strict ownership: a signed-in account sees only its own children.
+        # Unowned legacy rows are not shared, so one family can never read
+        # another's record by guessing an id.
+        if owner_user_id is None:
+            row = self.conn.execute(
+                "SELECT * FROM children WHERE child_id=?", (child_id,)
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                "SELECT * FROM children WHERE child_id=? AND owner_user_id=?",
+                (child_id, owner_user_id),
+            ).fetchone()
         return dict(row) if row else None
 
     @_synchronized
-    def list_children(self) -> list[dict]:
-        return [dict(r) for r in self.conn.execute("SELECT * FROM children ORDER BY created_at")]
+    def list_children(self, owner_user_id: str | None = None) -> list[dict]:
+        if owner_user_id is None:
+            rows = self.conn.execute("SELECT * FROM children ORDER BY created_at")
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM children WHERE owner_user_id=? ORDER BY created_at",
+                (owner_user_id,),
+            )
+        return [dict(r) for r in rows]
+
+    # --- user accounts -------------------------------------------------
+
+    @_synchronized
+    def create_user(self, username: str, password_hash: str) -> str | None:
+        """Create a user. Returns None if the username is already taken."""
+        uid = str(uuid.uuid4())
+        try:
+            self.conn.execute(
+                "INSERT INTO users(user_id,username,password_hash,created_at) VALUES(?,?,?,?)",
+                (uid, username, password_hash, _utc()),
+            )
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            return None
+        return uid
+
+    @_synchronized
+    def get_user(self, username: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    @_synchronized
+    def count_users(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
 
     @_synchronized
     def add_growth(

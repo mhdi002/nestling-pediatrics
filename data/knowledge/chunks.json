@@ -1533,10 +1533,10 @@
   },
   {
     "id": "info_vitamins_infant",
-    "source": "curated_iron_nutrition_en.md",
+    "source": "curated_who_feeding_nutrition_en.md",
     "collection": "medical",
-    "title": "Vitamin D, vitamin K, and other supplements",
-    "text": "## Vitamin D, vitamin K, and other supplements\nVitamin K is routinely given at birth to prevent bleeding disorder of the newborn. Vitamin D supports bone health; breastfed infants commonly receive 400 IU (10 mcg) daily vitamin D from the first days of life per many guidelines, including formula-fed babies until about 1 liter formula daily. Vitamin A supplementation may be recommended in deficiency-prone regions per WHO programs. Multivitamins are not automatically needed for all healthy children — targeted supplementation based on diet and risk is preferred. Fluoride supplementation depends on local water fluoride and dental guidance. Always use infant-specific products and measured dispensers; store supplements locked away from children."
+    "title": "Micronutrients: iron, vitamin D, vitamin A, zinc",
+    "text": "## Micronutrients: iron, vitamin D, vitamin A, zinc\n- **Iron.** Needs rise sharply after 6 months as birth stores are used up.\n  Offer iron-rich foods daily — meat, fish, eggs, pulses, and iron-fortified\n  cereals. Preterm and low-birth-weight infants often need supplementation.\n- **Vitamin D.** Breast milk is low in vitamin D. Many national guidelines\n  recommend a daily supplement of about 400 IU (10 micrograms) for breastfed\n  infants. Follow local guidance.\n- **Vitamin A.** WHO recommends periodic vitamin A supplementation for children\n  6–59 months in settings where deficiency is a public health problem.\n- **Zinc.** WHO recommends zinc during diarrhoea — see the diarrhoea guidance.\n\nDo not give supplements beyond those advised for your child; some vitamins are\nharmful in excess."
   },
   {
     "id": "guidance_curated_iron_nutrition_en_recognizing_possible_iron_deficiency_when_to_test",
@@ -1698,5 +1698,180 @@
     "collection": "medical",
     "title": "Walking 9–18 months",
     "text": "## Walking 9–18 months\nIndependent walking timing varies widely. Many toddlers take first independent steps between about 9 and 15 months; cruising and walking with hand-hold often come first. Around 13–14 months it is common not to walk alone yet if the child is pulling to stand, cruising, or taking steps with support — that can still be within a typical range. Encourage safe floor play, standing practice, and barefoot time indoors when safe. Seek pediatric advice sooner if there is little weight-bearing on the legs, marked asymmetry, loss of motor skills, very low muscle tone, or you remain worried; many clinicians discuss evaluation if walking has not begun by about 18 months (earlier when other red flags are present). Premature infants often use corrected age for milestone comparison — ask your clinician."
+  },
+  {
+    "id": "guidance_curated_safety_immunization_en_safe_sleep_for_infants",
+    "source": "curated_safety_immunization_en.md",
+    "collection": "medical",
+    "title": "Safe sleep for infants",
+    "text": "## Safe sleep for infants\nSafe sleep practice substantially reduces the risk of sudden unexpected infant\ndeath:\n\n- place the baby **on their back** for every sleep, day and night, until 12 months\n- use a firm, flat, separate sleep surface — a cot, crib, or bassinet with a\n  fitted sheet\n- keep the sleep space clear: no pillows, duvets, bumpers, positioners, or soft\n  toys\n- room-share without bed-sharing for at least the first 6 months; the baby's\n  cot beside the parents' bed is safest\n- avoid sofas and armchairs for sleeping with a baby, which are especially\n  hazardous\n- keep the baby smoke-free before and after birth\n- avoid overheating: dress in one more layer than an adult would need and keep\n  the head uncovered indoors\n- offer breastfeeding, which is associated with reduced risk\n\nOnce a baby can roll both ways independently, they may be left in the position\nthey adopt, but should still be placed on the back to start.\n\nSupervised tummy time while awake supports motor development and helps prevent\nflat spots on the head."
+  },
+  {
+    "id": "guidance_curated_safety_immunization_en_choking_and_safe_feeding",
+    "source": "curated_safety_immunization_en.md",
+    "collection": "medical",
+    "title": "Choking and safe feeding",
+    "text": "## Choking and safe feeding\nChoking is a leading cause of injury in young children:\n\n- always supervise eating and keep the child sitting, never walking or lying\n- cut round foods lengthways — grapes, cherry tomatoes, and sausage into\n  quarters\n- avoid whole nuts, popcorn, hard sweets, chunks of raw carrot or apple, and\n  marshmallows before about 4 years\n- keep small objects, button batteries, and magnets out of reach; a swallowed\n  button battery is an emergency requiring immediate care\n- never prop a bottle or leave a baby alone with one\n\nLearning infant and child choking first aid is strongly recommended."
+  },
+  {
+    "id": "guidance_curated_safety_immunization_en_home_and_travel_safety",
+    "source": "curated_safety_immunization_en.md",
+    "collection": "medical",
+    "title": "Home and travel safety",
+    "text": "## Home and travel safety\n- **Water.** Supervise closely at all times near water. Drowning is silent and\n  can occur in very shallow water, including baths and buckets. Empty\n  containers after use.\n- **Falls.** Never leave a baby unattended on a raised surface. Use stair gates\n  and window restrictors, and avoid baby walkers.\n- **Burns.** Set hot water below 50 °C, turn pan handles inward, and keep hot\n  drinks well away from children. Treat a burn with cool running water for\n  20 minutes and seek care.\n- **Poisoning.** Store medicines, cleaning products, and detergent capsules\n  locked and out of sight. Keep the local poison centre number accessible.\n- **Vehicles.** Use an age- and size-appropriate car seat on every journey, and\n  keep children rear-facing for as long as the seat allows.\n- **Sun.** Keep infants under 6 months out of direct sun; use shade, clothing,\n  and hats, with sunscreen on exposed skin for older children."
+  },
+  {
+    "id": "guidance_curated_safety_immunization_en_why_immunization_matters_and_how_the_schedule_works",
+    "source": "curated_safety_immunization_en.md",
+    "collection": "medical",
+    "title": "Why immunization matters and how the schedule works",
+    "text": "## Why immunization matters and how the schedule works\nVaccines protect children during the ages when infections are most dangerous,\nand protect others who cannot be vaccinated.\n\n- follow your national schedule, which sets the ages and intervals for each\n  vaccine\n- WHO's Essential Programme on Immunization covers diseases including\n  tuberculosis, polio, diphtheria, tetanus, pertussis, hepatitis B,\n  *Haemophilus influenzae* type b, pneumococcal disease, rotavirus, and measles\n- doses are timed so protection develops before the period of greatest risk;\n  giving them early or skipping doses reduces protection\n- a delayed schedule can usually be caught up without restarting the series —\n  ask a health worker rather than abandoning remaining doses\n- minor illness with or without low fever is generally not a reason to postpone\n\nKeep the child's immunization record safe and bring it to every visit."
+  },
+  {
+    "id": "guidance_curated_safety_immunization_en_after_a_vaccination",
+    "source": "curated_safety_immunization_en.md",
+    "collection": "medical",
+    "title": "After a vaccination",
+    "text": "## After a vaccination\nCommon, expected reactions:\n\n- soreness, redness, or mild swelling where the injection was given\n- mild fever, irritability, drowsiness, or reduced appetite for a day or two\n- with some vaccines, a mild rash a week or more later\n\nComfort measures: extra fluids and feeds, a cool cloth on the injection site,\nand paracetamol dosed by weight if the child is uncomfortable. Routine\npreventive paracetamol before vaccination is not recommended, as it may slightly\nreduce the immune response.\n\nSeek care for a high fever that persists beyond 48 hours, a convulsion,\npersistent inconsolable crying for over 3 hours, or any sign of a severe\nallergic reaction such as difficulty breathing or facial swelling — the latter\nis a medical emergency."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_diarrhoea_oral_rehydration_and_zinc",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Diarrhoea: oral rehydration and zinc",
+    "text": "## Diarrhoea: oral rehydration and zinc\nWHO defines diarrhoea as the passage of 3 or more loose or liquid stools per\nday, or more frequently than is normal for that person. It is the third\nleading cause of death in children under 5. WHO recognises three clinical\ntypes: acute watery diarrhoea (including cholera), acute bloody diarrhoea\n(dysentery), and persistent diarrhoea lasting 14 days or longer.\n\nThe dangers are dehydration and undernutrition, so the priorities are fluids,\nzinc, and continued feeding.\n\n- give oral rehydration salts (ORS) — a mixture of clean water, salt and sugar\n  — after each loose stool; roughly 50–100 ml for a child under 2 years and\n  100–200 ml for ages 2–10\n- give ORS in small frequent sips; a spoon or syringe helps if the child vomits\n- if the child vomits, wait about 10 minutes and then continue more slowly\n- give zinc daily for 10–14 days: 20 mg for 6 months and older, 10 mg under\n  6 months. WHO reports zinc reduces the duration of an episode by about 25%\n  and stool volume by about 30%. Trial evidence since the recommendation\n  suggests lower doses (5–10 mg) work as well with less vomiting, so follow\n  the dose a local health worker prescribes.\n- keep breastfeeding and keep offering nutritious food; do not fast the child\n- offer an extra meal each day for two weeks after recovery to regain weight\n\nAvoid sugary drinks, undiluted juice, and fizzy drinks, which can worsen\ndiarrhoea. Anti-diarrhoeal medicines are not recommended for young children.\n\nWHO grades dehydration by observable signs:\n\n- **severe** — lethargy or unconsciousness, sunken eyes, unable to drink or\n  drinking poorly, and a skin pinch that returns very slowly (2 seconds or\n  more). This is an emergency needing immediate treatment.\n- **some** — restlessness and irritability, sunken eyes, and drinking eagerly\n  or appearing very thirsty.\n- **none** — not enough signs to classify as dehydration.\n\nSeek urgent care for blood in the stool, any sign of dehydration, diarrhoea\nlasting more than 14 days, repeated vomiting, or a child too weak to drink.\n\nPrevention: safe drinking water, improved sanitation, handwashing with soap,\nexclusive breastfeeding for the first 6 months, rotavirus vaccination, and good\nfood hygiene and storage."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_cough_and_colds",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Cough and colds",
+    "text": "## Cough and colds\nYoung children average 6–8 respiratory infections a year, and cough may persist\nfor 2–3 weeks after other symptoms resolve.\n\n- offer extra fluids and small frequent feeds\n- for a blocked nose, saline drops before feeds can help\n- keep the child away from smoke, including cooking smoke and tobacco\n- honey may soothe cough in children over 12 months, but never give honey under\n  12 months\n- over-the-counter cough and cold medicines are not recommended under 6 years\n  and offer no proven benefit\n\nSeek care for fast or difficult breathing, chest indrawing, inability to drink,\npersistent fever beyond 3 days, or a cough lasting more than 3 weeks."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_fever_comfort_measures",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Fever: comfort measures",
+    "text": "## Fever: comfort measures\nTreat the child's discomfort rather than the number on the thermometer.\n\n- offer fluids frequently; fever increases fluid losses\n- dress in light clothing and keep the room comfortable\n- paracetamol or ibuprofen may be used for discomfort, dosed by weight and\n  according to the package or a health worker's instruction; do not exceed the\n  stated frequency\n- do not give ibuprofen to a dehydrated child or one with chickenpox without\n  advice\n- never give aspirin to a child, because of the risk of Reye syndrome\n- do not use cold baths, ice, or alcohol rubs\n\nFebrile convulsions occur in some young children. Keep the child safe on their\nside, do not put anything in the mouth, time the episode, and seek urgent care\n— particularly for a first convulsion or one lasting over 5 minutes."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_skin_nappy_rash_eczema_and_infections",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Skin: nappy rash, eczema, and infections",
+    "text": "## Skin: nappy rash, eczema, and infections\n- **Nappy rash.** Change nappies frequently, clean gently, allow nappy-free\n  time, and apply a barrier cream. A bright red rash with satellite spots that\n  persists may be thrush and needs treatment.\n- **Eczema.** Use fragrance-free emollients generously and often, bathe in warm\n  rather than hot water, and use prescribed treatments as directed. Seek care\n  if skin becomes weeping, crusted, or painful, which suggests infection.\n- **Urgent.** A rash that does not fade when pressed with a glass, especially\n  with fever, drowsiness, or a stiff neck, needs emergency assessment."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_teething",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Teething",
+    "text": "## Teething\nThe first teeth usually appear between 4 and 10 months, though timing varies\nwidely and later eruption is often normal.\n\n- expect drooling, gum discomfort, and increased chewing\n- a chilled — not frozen — teething ring may help, as may gentle gum pressure\n- teething does not cause high fever, diarrhoea, or vomiting; look for another\n  cause if these occur\n- avoid teething gels containing benzocaine or salicylates, and amber necklaces,\n  which pose choking and strangulation risks\n\nBegin brushing as soon as the first tooth appears, twice daily with a smear of\nfluoride toothpaste."
+  },
+  {
+    "id": "guidance_curated_who_common_illness_en_constipation",
+    "source": "curated_who_common_illness_en.md",
+    "collection": "medical",
+    "title": "Constipation",
+    "text": "## Constipation\nStool patterns vary widely; exclusively breastfed babies may pass stool once\nevery several days and still be normal. Constipation means hard, painful, or\ndifficult stools.\n\n- for infants under 6 months, seek advice rather than changing feeds yourself\n- from 6 months, offer extra water and fibre-containing foods such as fruit,\n  vegetables, and pulses\n- encourage activity, and for toilet-trained children a relaxed unhurried\n  routine after meals\n\nSeek care for constipation in a baby under 8 weeks, blood in stool, vomiting,\nabdominal swelling, poor weight gain, or failure to pass meconium in the first\n48 hours after birth."
+  },
+  {
+    "id": "guidance_curated_who_danger_signs_en_general_danger_signs_in_a_sick_child",
+    "source": "curated_who_danger_signs_en.md",
+    "collection": "medical",
+    "title": "General danger signs in a sick child",
+    "text": "## General danger signs in a sick child\nWHO IMCI treats four findings as general danger signs in a child aged 2 months\nto 5 years, and any one of them means the child needs urgent assessment at a\nhealth facility:\n\n- unable to drink or breastfeed\n- vomits everything\n- has had convulsions (fits) with this illness\n- is lethargic or unconscious — unusually sleepy, difficult to wake, or not\n  responding normally\n\nA child with any general danger sign should be taken for emergency care\nwithout waiting to see whether other symptoms improve. Do not delay to give\nfood or fluids first if the child cannot swallow."
+  },
+  {
+    "id": "guidance_curated_who_danger_signs_en_danger_signs_in_a_young_infant_under_2_months",
+    "source": "curated_who_danger_signs_en.md",
+    "collection": "medical",
+    "title": "Danger signs in a young infant under 2 months",
+    "text": "## Danger signs in a young infant under 2 months\nNewborns and small infants deteriorate quickly and show fewer specific signs.\nSeek urgent care if a baby under 2 months has any of:\n\n- not feeding well or refusing to feed\n- convulsions\n- fast breathing (60 breaths per minute or more)\n- severe chest indrawing — the lower chest wall pulls in sharply on breathing in\n- fever (37.5 °C / 99.5 °F or higher) or low body temperature\n  (below 35.5 °C / 95.9 °F)\n- movement only when stimulated, or no movement at all\n- yellow palms and soles (jaundice reaching the hands and feet)\n- a red or draining umbilicus, or skin pustules\n\nAny fever in an infant under 3 months warrants same-day medical assessment,\neven if the baby otherwise looks well."
+  },
+  {
+    "id": "guidance_curated_who_danger_signs_en_fast_breathing_thresholds_by_age",
+    "source": "curated_who_danger_signs_en.md",
+    "collection": "medical",
+    "title": "Fast breathing thresholds by age",
+    "text": "## Fast breathing thresholds by age\nWHO defines fast breathing by age. Count breaths for a full 60 seconds while\nthe child is calm and not crying:\n\n- under 2 months: 60 breaths per minute or more\n- 2 to 11 months: 50 breaths per minute or more\n- 12 months to 5 years: 40 breaths per minute or more\n\nFast breathing with cough or difficult breathing suggests pneumonia and needs\nprompt assessment. Chest indrawing, grunting, blue lips or tongue, or inability\nto drink indicate severe disease and need emergency care."
+  },
+  {
+    "id": "guidance_curated_who_danger_signs_en_signs_of_dehydration",
+    "source": "curated_who_danger_signs_en.md",
+    "collection": "medical",
+    "title": "Signs of dehydration",
+    "text": "## Signs of dehydration\nAssess a child with diarrhoea or vomiting for dehydration. Seek urgent care if\nyou see:\n\n- sunken eyes, and in infants a sunken soft spot (fontanelle)\n- skin that returns slowly when gently pinched\n- restlessness and irritability, or lethargy\n- drinking eagerly and appearing very thirsty, or being unable to drink\n- markedly reduced urine — for example no wet nappy for 6 hours or more\n- no tears when crying\n\nSevere dehydration is a medical emergency requiring immediate treatment."
+  },
+  {
+    "id": "guidance_curated_who_danger_signs_en_when_to_seek_care_for_fever",
+    "source": "curated_who_danger_signs_en.md",
+    "collection": "medical",
+    "title": "When to seek care for fever",
+    "text": "## When to seek care for fever\nFever is a symptom, not a diagnosis, and its cause matters more than the\nnumber. Seek medical assessment when:\n\n- the child is under 3 months and has any fever\n- fever lasts more than 3 days\n- fever occurs with a stiff neck, a rash that does not fade when pressed,\n  persistent vomiting, or a convulsion\n- the child is very drowsy, difficult to wake, or unusually irritable\n- there are breathing difficulties\n\nFocus on how the child looks and behaves rather than the temperature alone. A\nchild who is alert, drinking and playing between fever peaks is usually less\nconcerning than a child who is listless when the fever comes down."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_who_breastfeeding_recommendations",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "WHO breastfeeding recommendations",
+    "text": "## WHO breastfeeding recommendations\nWHO recommends that:\n\n- all infants initiate breastfeeding within 1 hour of birth\n- infants are breastfed exclusively — fed only breast milk — for the first\n  6 months of life\n- nutritionally adequate, safe complementary foods are introduced from\n  6 months\n- breastfeeding continues up to 2 years of age or beyond\n\nWHO estimates that nearly 400 000 deaths among children under 5 could be\nprevented each year through optimal breastfeeding practices. Globally only\nabout 47% of infants aged 0–6 months are exclusively breastfed.\n\nExclusive breastfeeding means no other food or drink, not even water. Vitamin\nsupplements, oral rehydration salts, and prescribed medicines do not break\nexclusive breastfeeding."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_signs_a_baby_is_getting_enough_milk",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Signs a baby is getting enough milk",
+    "text": "## Signs a baby is getting enough milk\nPractical indicators that feeding is going well in the early weeks:\n\n- at least 6 heavy wet nappies in 24 hours once the milk supply is established\n- regular stools, typically soft and yellow in breastfed babies after the first\n  week\n- steady weight gain after the initial newborn weight loss, with birth weight\n  usually regained by around 2 weeks\n- 8 or more feeds in 24 hours in the newborn period, including at night\n- audible or visible swallowing during feeds\n\nMost babies lose up to 7–10% of birth weight in the first days. Loss beyond\n10%, or failure to regain birth weight by 2 weeks, needs review by a health\nworker."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_starting_complementary_foods_at_6_months",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Starting complementary foods at 6 months",
+    "text": "## Starting complementary foods at 6 months\nFrom 6 months breast milk alone no longer meets a baby's energy and nutrient\nneeds, particularly for iron and zinc.\n\n- start at around 6 months, when the baby can sit with support, has good head\n  control, and shows interest in food\n- begin with small amounts — a few teaspoons once or twice a day — and build up\n- increase thickness and variety gradually; move from puréed to mashed, then to\n  finely chopped and finger foods by around 8–10 months\n- offer iron-rich foods from the start: meat, fish, eggs, pulses, and iron\n  fortified cereals\n- continue breastfeeding on demand\n\nBy 12 months most children eat a varied family diet with three meals and one\nto two nutritious snacks a day."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_foods_and_drinks_to_avoid_in_the_first_years",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Foods and drinks to avoid in the first years",
+    "text": "## Foods and drinks to avoid in the first years\n- honey before 12 months, because of the risk of infant botulism\n- whole cow's milk as a main drink before 12 months, though small amounts in\n  cooked food are fine\n- added salt and added sugar; sugary drinks and fruit juice are not recommended\n  for infants\n- whole nuts, whole grapes, popcorn, and other hard round foods, which are\n  choking hazards under about 4 years — cut grapes lengthways into quarters\n- unpasteurised milk, and undercooked eggs or meat\n- tea and coffee, which reduce iron absorption\n\nAlways supervise a child while eating and keep them seated."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_responsive_feeding",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Responsive feeding",
+    "text": "## Responsive feeding\nHow a child is fed matters as much as what is offered:\n\n- feed slowly and patiently, and encourage but never force\n- respond to hunger and fullness cues rather than aiming to empty a bowl\n- minimise distractions such as screens during meals\n- keep offering a refused food on later occasions; acceptance often takes\n  repeated exposures\n- let the child self-feed with hands or a spoon as skills develop\n\nPressure to eat and using food as a reward both tend to reduce acceptance over\ntime."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_recognising_undernutrition",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Recognising undernutrition",
+    "text": "## Recognising undernutrition\nWHO uses growth indicators to describe undernutrition:\n\n- **wasting** — low weight-for-height, indicating recent, acute weight loss\n- **stunting** — low height-for-age, indicating chronic undernutrition\n- **underweight** — low weight-for-age, which may reflect either\n\nMid-upper arm circumference (MUAC) is used for children 6–59 months: below\n115 mm indicates severe acute malnutrition and needs urgent treatment, and\n115–125 mm indicates moderate acute malnutrition. Bilateral pitting oedema of\nboth feet is a sign of severe acute malnutrition regardless of measurements\nand always requires immediate care.\n\nA child crossing downward through growth chart centiles over time needs\nassessment even when a single measurement still looks acceptable."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_meal_frequency_for_complementary_feeding",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Meal frequency for complementary feeding",
+    "text": "## Meal frequency for complementary feeding\nFrom 6 months breast milk alone no longer meets a child's energy and nutrient\nneeds. WHO advises:\n\n- 6–8 months: 2–3 meals per day\n- 9–23 months: 3–4 meals per day\n- plus 1–2 nutritious snacks per day as needed\n- continued frequent breastfeeding through age 2 and beyond\n\nStart with small amounts and gradually increase the consistency and variety of\nfood as the child grows, adapting to their abilities and needs."
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_responsive_feeding_and_hygiene",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Responsive feeding and hygiene",
+    "text": "## Responsive feeding and hygiene\nWHO's complementary feeding principles include:\n\n- practising responsive feeding — recognising and answering hunger and fullness\n  cues rather than aiming to empty a bowl\n- feeding slowly and patiently, encouraging but never forcing\n- maintaining good hygiene and safe food handling, since contaminated food is a\n  leading cause of diarrhoea\n- continuing to offer a refused food on later occasions, as acceptance often\n  takes repeated exposure"
+  },
+  {
+    "id": "guidance_curated_who_feeding_nutrition_en_undernutrition_who_definitions",
+    "source": "curated_who_feeding_nutrition_en.md",
+    "collection": "medical",
+    "title": "Undernutrition: WHO definitions",
+    "text": "## Undernutrition: WHO definitions\nWHO describes undernutrition using three growth indicators:\n\n- **wasting** — low weight-for-height, indicating recent or severe weight loss,\n  resulting from insufficient food intake or infectious disease. Moderately or\n  severely wasted children face an increased risk of death.\n- **stunting** — low height-for-age, resulting from chronic or recurrent\n  undernutrition, which prevents children reaching their physical and cognitive\n  potential.\n- **underweight** — low weight-for-age. An underweight child may be stunted,\n  wasted, or both.\n\nWHO estimated in 2022 that 149 million children under 5 were stunted and\n45 million were wasted. Nearly half of all deaths in children under 5 are\nlinked to undernutrition.\n\nMid-upper arm circumference (MUAC) is used in children aged 6–59 months as a\nscreening measure: below 115 mm indicates severe acute malnutrition needing\nurgent treatment, and 115 mm to under 125 mm indicates moderate acute\nmalnutrition. Bilateral pitting oedema of both feet indicates severe acute\nmalnutrition regardless of measurements and always requires immediate care.\n\nA child crossing downward through growth chart centiles over time needs\nassessment even when a single measurement still looks acceptable."
   }
 ]

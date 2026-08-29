@@ -28,6 +28,31 @@
       <div class="topbar-actions">
         <button type="button" class="lang-toggle" id="lang-toggle" data-i18n="langToggle">فارسی</button>
         <div class="topbar-child" id="active-child-chip" hidden></div>
+        <button
+          type="button"
+          class="account-btn"
+          id="account-btn"
+          hidden
+          aria-haspopup="dialog"
+          aria-expanded="false"
+          data-i18n-title="accountTitle"
+          title="Account"
+          aria-label="Account"
+        >
+          <span class="account-avatar" id="account-initial" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="account-menu" id="account-menu" role="dialog" aria-modal="false" hidden>
+        <p class="account-menu-user">
+          <span class="account-menu-label" data-i18n="signedInAs">Signed in as</span>
+          <strong id="account-menu-name"></strong>
+        </p>
+        <button type="button" class="btn btn-ghost btn-sm account-menu-item" id="account-settings-btn" data-i18n="accountSettings">
+          Account settings
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm account-menu-item account-menu-danger" id="logout-btn" data-i18n="logOut">
+          Log out
+        </button>
       </div>
     </header>
 

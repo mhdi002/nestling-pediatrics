@@ -11,7 +11,9 @@ MAX_NUM_SEQS="${VLLM_MAX_NUM_SEQS:-1}"
 KV_DTYPE="${VLLM_KV_CACHE_DTYPE:-fp8}"
 QUANTIZATION="${VLLM_QUANTIZATION:-fp8}"
 HF_HOME_DIR="${HF_HOME:-/root/.cache/huggingface}"
-HUB_MODEL_DIR="${HF_HOME_DIR}/hub/models--Qwen--Qwen3.5-4B"
+# Derive the HF cache dir from the model id (org/name -> models--org--name)
+# instead of hardcoding it, so overriding NESTLING_LLM_MODEL actually works.
+HUB_MODEL_DIR="${HF_HOME_DIR}/hub/models--$(printf '%s' "$SERVED_MODEL" | sed 's#/#--#g')"
 MODEL_ROOT="${NESTLING_LLM_MODEL_PATH:-}"
 
 if command -v python3 >/dev/null 2>&1; then PY=python3

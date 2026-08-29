@@ -68,7 +68,8 @@ class ChatMemory:
               title TEXT,
               summary TEXT,
               created_at TEXT,
-              updated_at TEXT
+              updated_at TEXT,
+              owner_user_id TEXT
             );
             CREATE TABLE IF NOT EXISTS messages (
               id TEXT PRIMARY KEY,
@@ -102,16 +103,25 @@ class ChatMemory:
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(sessions)").fetchall()}
         if "summary" not in cols:
             self.conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT")
+        # Chat sessions are per-account; without this every signed-in user
+        # could read every other account's conversation history.
+        if "owner_user_id" not in cols:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN owner_user_id TEXT")
         self.conn.commit()
 
     @_synchronized
-    def create_session(self, child_id: str | None = None, title: str | None = None) -> str:
+    def create_session(
+        self,
+        child_id: str | None = None,
+        title: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> str:
         sid = str(uuid.uuid4())
         now = _utc()
         self.conn.execute(
-            "INSERT INTO sessions(session_id, child_id, slots_json, title, summary, created_at, updated_at) "
-            "VALUES(?,?,?,?,?,?,?)",
-            (sid, child_id, "{}", title or "", "", now, now),
+            "INSERT INTO sessions(session_id, child_id, slots_json, title, summary, created_at, updated_at, owner_user_id) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (sid, child_id, "{}", title or "", "", now, now, owner_user_id),
         )
         self.conn.commit()
         return sid
@@ -140,6 +150,27 @@ class ChatMemory:
     def get_slots(self, session_id: str) -> dict:
         s = self.get_session(session_id)
         return dict(s["slots"]) if s else {}
+
+    @_synchronized
+    def clear_slots(self, session_id: str, keys: list[str] | tuple[str, ...]) -> dict:
+        """
+        Remove slots outright. merge_slots() deliberately ignores empty values,
+        so it cannot unset anything -- needed for transient state such as
+        `pending_intent`.
+        """
+        slots = self.get_slots(session_id)
+        changed = False
+        for key in keys:
+            if key in slots:
+                slots.pop(key, None)
+                changed = True
+        if changed:
+            self.conn.execute(
+                "UPDATE sessions SET slots_json=?, updated_at=? WHERE session_id=?",
+                (json.dumps(slots, ensure_ascii=False), _utc(), session_id),
+            )
+            self.conn.commit()
+        return slots
 
     @_synchronized
     def merge_slots(self, session_id: str, updates: dict) -> dict:
@@ -372,15 +403,36 @@ class ChatMemory:
         return cur.rowcount
 
     @_synchronized
-    def list_sessions(self, child_id: str | None = None, limit: int | None = None) -> list[dict]:
+    def list_sessions(
+        self,
+        child_id: str | None = None,
+        limit: int | None = None,
+        owner_user_id: str | None = None,
+    ) -> list[dict]:
         settings = get_settings()
         if limit is None:
             limit = settings.nestling_session_list_limit
         limit = max(0, min(int(limit), settings.nestling_session_list_max_limit))
+        # Strict ownership: a signed-in account sees only its own sessions.
+        # Unowned legacy rows are deliberately NOT shared — chat history is
+        # health data, and showing pre-existing conversations to every new
+        # account is the exact leak this scoping exists to prevent.
+        owner_sql = " AND owner_user_id=?" if owner_user_id else ""
         if child_id:
+            params: list = [child_id]
+            if owner_user_id:
+                params.append(owner_user_id)
+            params.append(int(limit))
             rows = self.conn.execute(
-                "SELECT * FROM sessions WHERE child_id=? ORDER BY updated_at DESC LIMIT ?",
-                (child_id, int(limit)),
+                f"SELECT * FROM sessions WHERE child_id=?{owner_sql} "
+                f"ORDER BY updated_at DESC LIMIT ?",
+                params,
+            ).fetchall()
+        elif owner_user_id:
+            rows = self.conn.execute(
+                "SELECT * FROM sessions WHERE owner_user_id=? "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (owner_user_id, int(limit)),
             ).fetchall()
         else:
             rows = self.conn.execute(

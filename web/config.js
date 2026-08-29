@@ -22,11 +22,81 @@
     }
   }
 
+  /**
+   * API key for deployments that set NESTLING_API_KEY. Read from (in order):
+   *   1. <meta name="nestling-api-key" content="..."> — server-rendered
+   *   2. localStorage "nestling_api_key" — entered once by the operator
+   * Returns "" when unset, in which case no auth header is sent and an
+   * unauthenticated backend behaves exactly as before.
+   */
+  function resolveApiKey() {
+    const meta = document.querySelector('meta[name="nestling-api-key"]');
+    const fromMeta = meta && meta.getAttribute("content");
+    if (fromMeta && fromMeta.trim()) return fromMeta.trim();
+    try {
+      return (
+        window.localStorage.getItem("nestling_session_token") ||
+        window.localStorage.getItem("nestling_api_key") ||
+        ""
+      ).trim();
+    } catch (_) {
+      // Private mode / blocked storage — treat as no key rather than throwing.
+      return "";
+    }
+  }
+
   const ASQ_AGES = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 27, 30, 33, 36, 42, 48, 54, 60];
 
   window.NESTLING_CONFIG = {
     api: {
       base: resolveApiBase(),
+      /** Empty string when the backend runs unauthenticated. */
+      key: resolveApiKey(),
+      /** Persist a key entered by the operator (used on a 401). */
+      setKey(value) {
+        const v = (value || "").trim();
+        try {
+          if (v) window.localStorage.setItem("nestling_api_key", v);
+          else window.localStorage.removeItem("nestling_api_key");
+        } catch (_) {
+          /* storage unavailable — key stays in memory only */
+        }
+        this.key = v;
+        return v;
+      },
+      /** Display name of the signed-in account, "" when unauthenticated. */
+      username: (function () {
+        try {
+          return window.localStorage.getItem("nestling_username") || "";
+        } catch (_) {
+          return "";
+        }
+      })(),
+      /** Store a session token (and optionally the username) from /auth/login. */
+      setToken(token, username) {
+        const v = (token || "").trim();
+        try {
+          if (v) window.localStorage.setItem("nestling_session_token", v);
+          else window.localStorage.removeItem("nestling_session_token");
+          if (username) window.localStorage.setItem("nestling_username", username);
+          else if (!v) window.localStorage.removeItem("nestling_username");
+        } catch (_) {
+          /* storage unavailable — token stays in memory only */
+        }
+        this.key = v;
+        if (username) this.username = username;
+        else if (!v) this.username = "";
+        return v;
+      },
+      /**
+       * Auth headers for every request; {} when unauthenticated.
+       * Sent as both a bearer token and X-API-Key so the same value works
+       * whether it is a login session token or a shared API key.
+       */
+      authHeaders() {
+        if (!this.key) return {};
+        return { Authorization: `Bearer ${this.key}`, "X-API-Key": this.key };
+      },
       /** Every API path lives here — no '/api/...' literals elsewhere. */
       paths: {
         health: "/health",

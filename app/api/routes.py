@@ -7,12 +7,19 @@ import logging
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.api.auth import require_api_key
+from app.api.auth import (
+    authenticate,
+    current_user,
+    hash_password,
+    login_enabled,
+    make_token,
+    require_api_key,
+)
 from app.services import get_services
 from assistant.config import OVERLAY_DIR, UPLOAD_DIR
 from assistant.refdata import clinical_bounds
@@ -99,6 +106,84 @@ class MchatScoreBody(BaseModel):
     child_id: str | None = None
 
 
+class LoginBody(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=512)
+
+
+# Brute-force throttle for the one unauthenticated write endpoint. In-memory
+# and per-process, which is sufficient because the app runs a single worker by
+# default; a multi-worker or multi-replica deployment needs the shared limiter
+# in nginx (see docker/nginx/nestling.conf.template) as the real control.
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_LOGIN_MAX_ATTEMPTS = 10
+_LOGIN_WINDOW_SECONDS = 300.0
+
+
+def _login_rate_limited(client_ip: str) -> bool:
+    import time as _time
+
+    now = _time.monotonic()
+    hits = [t for t in _LOGIN_ATTEMPTS.get(client_ip, []) if now - t < _LOGIN_WINDOW_SECONDS]
+    # Bound the dict so a spray of spoofed IPs cannot grow it without limit.
+    if len(_LOGIN_ATTEMPTS) > 2048:
+        _LOGIN_ATTEMPTS.clear()
+    hits.append(now)
+    _LOGIN_ATTEMPTS[client_ip] = hits
+    return len(hits) > _LOGIN_MAX_ATTEMPTS
+
+
+@router.get("/auth/config")
+def auth_config():
+    """Tells the UI whether to show a sign-in form. Never exposes credentials."""
+    return {"login_required": login_enabled()}
+
+
+@router.post("/auth/register")
+def register(body: LoginBody, request: Request):
+    """Create an account. Each account only ever sees the children it creates."""
+    client_ip = (request.client.host if request.client else None) or "unknown"
+    if _login_rate_limited(client_ip):
+        raise _err(429, "too_many_attempts", "Too many attempts. Try again in a few minutes.")
+    username = body.username.strip()
+    if len(username) < 3:
+        raise _err(400, "invalid_username", "Username must be at least 3 characters")
+    if len(body.password) < 8:
+        raise _err(400, "weak_password", "Password must be at least 8 characters")
+    svc = get_services()
+    user_id = svc.db.create_user(username, hash_password(body.password))
+    if user_id is None:
+        raise _err(409, "username_taken", "That username is already registered")
+    settings = get_settings()
+    return {
+        "token": make_token(user_id),
+        "expires_in": settings.nestling_session_ttl_hours * 3600,
+        "username": username,
+    }
+
+
+@router.post("/auth/login")
+def login(body: LoginBody, request: Request):
+    """Exchange username/password for a bearer token used by the web UI."""
+    if not login_enabled():
+        raise _err(400, "login_disabled", "This deployment has no login configured")
+    client_ip = (request.client.host if request.client else None) or "unknown"
+    if _login_rate_limited(client_ip):
+        raise _err(429, "too_many_attempts", "Too many sign-in attempts. Try again in a few minutes.")
+    user_id = authenticate(body.username, body.password)
+    if not user_id:
+        # Deliberately identical message for bad user vs bad password.
+        raise _err(401, "invalid_credentials", "Incorrect username or password")
+    settings = get_settings()
+    return {
+        # The token subject is the user id, so data scoping follows the account
+        # rather than a display name that could later change.
+        "token": make_token(user_id),
+        "expires_in": settings.nestling_session_ttl_hours * 3600,
+        "username": body.username,
+    }
+
+
 @router.get("/ready")
 def ready():
     """Fast readiness for load balancers — no LLM probe, no external I/O."""
@@ -147,12 +232,13 @@ def health():
 
 
 @router.post("/children")
-def create_child(body: ChildCreate):
+def create_child(body: ChildCreate, request: Request):
     svc = get_services()
     try:
         cid = svc.db.create_child(
             body.name,
             body.sex,
+            owner_user_id=current_user(request),
             date_of_birth=body.date_of_birth,
             gestational_age_weeks=body.gestational_age_weeks,
             notes=body.notes,
@@ -163,14 +249,18 @@ def create_child(body: ChildCreate):
 
 
 @router.get("/children")
-def list_children():
-    return {"children": get_services().db.list_children()}
+def list_children(request: Request):
+    # Scoped to the signed-in account so one family cannot enumerate another's
+    # children. API-key callers (no user) still see everything, as before.
+    return {"children": get_services().db.list_children(owner_user_id=current_user(request))}
 
 
 @router.get("/children/{child_id}")
-def get_child(child_id: str):
-    child = get_services().db.get_child(child_id)
+def get_child(child_id: str, request: Request):
+    child = get_services().db.get_child(child_id, owner_user_id=current_user(request))
     if not child:
+        # Same 404 whether the child is missing or owned by someone else, so
+        # ids cannot be probed for existence.
         raise _err(404, "not_found", f"Unknown child_id: {child_id}")
     return {"child": child}
 
@@ -218,23 +308,41 @@ def child_dossier(child_id: str):
 
 
 @router.post("/sessions")
-def create_session(body: SessionCreate):
+def create_session(body: SessionCreate, request: Request):
     svc = get_services()
-    sid = svc.chat.create_session(child_id=body.child_id, title=body.title)
+    sid = svc.chat.create_session(
+        child_id=body.child_id, title=body.title, owner_user_id=current_user(request)
+    )
     return {"session_id": sid, "child_id": body.child_id}
 
 
 @router.get("/sessions")
-def list_sessions(child_id: str | None = None, limit: int | None = Query(None, ge=1)):
+def list_sessions(
+    request: Request,
+    child_id: str | None = None,
+    limit: int | None = Query(None, ge=1),
+):
+    # Scoped to the signed-in account: chat history is health data and must not
+    # be readable across accounts.
     svc = get_services()
-    return {"sessions": svc.chat.list_sessions(child_id=child_id, limit=limit)}
+    return {
+        "sessions": svc.chat.list_sessions(
+            child_id=child_id, limit=limit, owner_user_id=current_user(request)
+        )
+    }
 
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str, limit: int | None = Query(None, ge=1)):
+def get_session(session_id: str, request: Request, limit: int | None = Query(None, ge=1)):
     svc = get_services()
     s = svc.chat.get_session(session_id)
     if not s:
+        raise _err(404, "session_not_found", session_id)
+    user_id = current_user(request)
+    owner = s.get("owner_user_id")
+    # Same 404 as "missing" so session ids cannot be probed for existence.
+    # Strict: an unowned legacy session is not readable by an account either.
+    if user_id and owner != user_id:
         raise _err(404, "session_not_found", session_id)
     # Bounded by default: a long-running session must not serialize its whole history.
     max_history = get_settings().nestling_history_response_limit
@@ -365,13 +473,13 @@ def _normalized_ui_lang(ui_lang: str | None) -> str | None:
     return lang if lang in UI_LANGS else None
 
 
-def _run_chat_turn(body: ChatBody) -> dict[str, Any]:
+def _run_chat_turn(body: ChatBody, owner_user_id: str | None = None) -> dict[str, Any]:
     """Full chat turn. Sync on purpose — FastAPI runs `def` routes in a worker thread."""
     svc = get_services()
     sid = body.session_id
     if not sid or not svc.chat.get_session(sid):
         # Auto-create when UI has no session yet, or stale localStorage id after DB reset.
-        sid = svc.chat.create_session(child_id=body.child_id)
+        sid = svc.chat.create_session(child_id=body.child_id, owner_user_id=owner_user_id)
     out = svc.assistant.chat(
         sid, body.message, child_id=body.child_id, ui_lang=_normalized_ui_lang(body.ui_lang)
     )
@@ -385,25 +493,26 @@ def _run_chat_turn(body: ChatBody) -> dict[str, Any]:
 
 
 @router.post("/chat")
-def chat(body: ChatBody):
+def chat(body: ChatBody, request: Request):
     try:
-        return _run_chat_turn(body)
+        return _run_chat_turn(body, current_user(request))
     except Exception as exc:
         log.exception("Chat turn failed")
         raise _err(500, "chat_failed", str(exc)) from exc
 
 
 @router.post("/chat/stream")
-def chat_stream(body: ChatBody):
+def chat_stream(body: ChatBody, request: Request):
     """
     SSE stream: runs the full chat turn, then streams the reply text in chunks,
     then emits a final `result` event with the full JSON payload.
     """
     chunk_chars = get_settings().nestling_stream_chunk_chars
+    owner_user_id = current_user(request)
 
     def gen() -> Iterator[str]:
         try:
-            out = _run_chat_turn(body)
+            out = _run_chat_turn(body, owner_user_id)
             reply = out.get("reply") or ""
             # Stream reply in word-ish chunks for UX (tools already finished)
             buf = ""

@@ -440,7 +440,7 @@
               (o) =>
                 `<a href="${escapeHtml(o.url)}" target="_blank" rel="noopener" title="${escapeHtml(
                   o.label
-                )}"><img class="overlay-img" src="${escapeHtml(o.url)}" alt="${escapeHtml(
+                )}"><img class="overlay-img" data-authed-src="${escapeHtml(o.url)}" alt="${escapeHtml(
                   o.label
                 )}" loading="lazy" /></a>`
             )
@@ -508,6 +508,7 @@
           <a class="btn btn-primary btn-sm" href="#/screening">${escapeHtml(t("openScreening"))}</a>
         </div>
       `;
+      hydrateAuthedImages(panel);
       panel.hidden = false;
     } catch (err) {
       if (token !== state.dossierToken || isAbortError(err)) return;
@@ -606,17 +607,267 @@
   }
 
   /**
+   * Ask the operator for the API key when the backend demands one. Kept
+   * deliberately minimal (window.prompt) so it works before any UI has
+   * rendered — a 401 can happen on the very first request.
+   */
+  /**
+   * Show a blocking sign-in overlay and resolve once the user authenticates.
+   * Built as an overlay rather than a separate page so a 401 on any request
+   * can recover in place without losing what the user was doing.
+   */
+  function showLoginOverlay(message) {
+    return new Promise((resolve) => {
+      const existing = document.getElementById("nestling-login-overlay");
+      if (existing) existing.remove();
+
+      const overlay = document.createElement("div");
+      overlay.id = "nestling-login-overlay";
+      overlay.setAttribute("role", "dialog");
+      overlay.setAttribute("aria-modal", "true");
+      overlay.style.cssText =
+        "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;" +
+        "justify-content:center;background:rgba(15,23,42,.72);backdrop-filter:blur(4px);" +
+        "padding:16px;";
+
+      const card = document.createElement("form");
+      card.style.cssText =
+        "background:#fff;color:#0f172a;border-radius:16px;padding:24px;width:100%;" +
+        "max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:inherit;" +
+        "display:flex;flex-direction:column;gap:12px;";
+      const inputCss =
+        "padding:12px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px;";
+      card.innerHTML =
+        '<h2 id="nestling-auth-title" style="margin:0;font-size:1.15rem;">Sign in to Nestling</h2>' +
+        '<p id="nestling-login-msg" style="margin:0;font-size:.85rem;color:#64748b;"></p>' +
+        '<input id="nestling-login-user" name="username" autocomplete="username" ' +
+        'placeholder="Username" style="' + inputCss + '">' +
+        '<input id="nestling-login-pass" name="password" type="password" autocomplete="current-password" ' +
+        'placeholder="Password" style="' + inputCss + '">' +
+        '<button id="nestling-auth-submit" type="submit" style="padding:12px;border:0;border-radius:10px;' +
+        'background:#0f766e;color:#fff;font-size:16px;font-weight:600;cursor:pointer;">Sign in</button>' +
+        '<button id="nestling-auth-toggle" type="button" style="background:none;border:0;color:#0f766e;' +
+        'font-size:.85rem;cursor:pointer;text-decoration:underline;padding:4px;">' +
+        "Don't have an account? Create one</button>";
+
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+
+      const msgEl = card.querySelector("#nestling-login-msg");
+      const userEl = card.querySelector("#nestling-login-user");
+      const passEl = card.querySelector("#nestling-login-pass");
+      const titleEl = card.querySelector("#nestling-auth-title");
+      const submitEl = card.querySelector("#nestling-auth-submit");
+      const toggleEl = card.querySelector("#nestling-auth-toggle");
+      let mode = "login";
+
+      msgEl.textContent = message || "Please sign in to continue.";
+      setTimeout(() => userEl.focus(), 50);
+
+      toggleEl.addEventListener("click", () => {
+        mode = mode === "login" ? "register" : "login";
+        const registering = mode === "register";
+        titleEl.textContent = registering ? "Create your account" : "Sign in to Nestling";
+        submitEl.textContent = registering ? "Create account" : "Sign in";
+        toggleEl.textContent = registering
+          ? "Already have an account? Sign in"
+          : "Don't have an account? Create one";
+        passEl.setAttribute("autocomplete", registering ? "new-password" : "current-password");
+        msgEl.style.color = "#64748b";
+        msgEl.textContent = registering
+          ? "Your children's data is private to your account."
+          : "Please sign in to continue.";
+      });
+
+      card.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const registering = mode === "register";
+        msgEl.style.color = "#64748b";
+        msgEl.textContent = registering ? "Creating account…" : "Signing in…";
+        try {
+          const res = await fetch(apiUrl(registering ? "/auth/register" : "/auth/login"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ username: userEl.value, password: passEl.value }),
+          });
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            const detail =
+              (data && data.detail && data.detail.detail) ||
+              (registering ? "Could not create account" : "Sign-in failed");
+            msgEl.textContent = detail;
+            msgEl.style.color = "#b91c1c";
+            passEl.value = "";
+            return;
+          }
+          CFG.api.setToken(data.token, data.username);
+          overlay.remove();
+          renderAccountUi();
+          resolve(true);
+        } catch (_) {
+          msgEl.textContent = "Could not reach the server.";
+          msgEl.style.color = "#b91c1c";
+        }
+      });
+    });
+  }
+
+  /**
+   * Sign out on this device.
+   *
+   * Clears the session token *and* the per-account view state. Leaving the
+   * active child or chat-session id behind would show the next account this
+   * one's data, which is exactly the leak the server-side scoping prevents.
+   */
+  function logOut() {
+    CFG.api.setToken("");
+    try {
+      window.localStorage.removeItem("nestling_api_key");
+    } catch (_) {
+      /* storage unavailable */
+    }
+    store.remove(STORAGE.activeChild);
+    store.remove(STORAGE.chatSession);
+    state.chatSessionId = null;
+    state.activeChildId = null;
+    state.lastDossier = null;
+    window.location.hash = "#/";
+    window.location.reload();
+  }
+
+  /** Refresh the account button/menu from the current session token. */
+  function renderAccountUi() {
+    const btn = document.getElementById("account-btn");
+    const nameEl = document.getElementById("account-menu-name");
+    const initialEl = document.getElementById("account-initial");
+    if (!btn) return;
+    const username = CFG.api.username || "";
+    const signedIn = !!CFG.api.key;
+    btn.hidden = !signedIn;
+    if (!signedIn) return;
+    if (nameEl) nameEl.textContent = username || "—";
+    if (initialEl) {
+      initialEl.textContent = (username.trim()[0] || "?").toUpperCase();
+    }
+  }
+
+  function closeAccountMenu() {
+    const menu = document.getElementById("account-menu");
+    const btn = document.getElementById("account-btn");
+    if (menu) menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+
+  function initAccountUi() {
+    const btn = document.getElementById("account-btn");
+    const menu = document.getElementById("account-menu");
+    const logoutBtn = document.getElementById("logout-btn");
+    const settingsBtn = document.getElementById("account-settings-btn");
+    if (!btn || !menu) return;
+
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const open = menu.hidden;
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", (ev) => {
+      if (!menu.hidden && !menu.contains(ev.target) && ev.target !== btn) closeAccountMenu();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeAccountMenu();
+    });
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", () => {
+        closeAccountMenu();
+        if (window.confirm(t("logOutConfirm"))) logOut();
+      });
+    }
+    if (settingsBtn) {
+      settingsBtn.addEventListener("click", () => {
+        closeAccountMenu();
+        showAccountSettings();
+      });
+    }
+    renderAccountUi();
+  }
+
+  /** Account settings panel: identity, privacy note, and sign-out. */
+  function showAccountSettings() {
+    const existing = document.getElementById("nestling-account-overlay");
+    if (existing) existing.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "nestling-account-overlay";
+    overlay.className = "nestling-modal-overlay";
+    const card = document.createElement("div");
+    card.className = "nestling-modal-card";
+    card.innerHTML =
+      `<h2 class="nestling-modal-title">${escapeHtml(t("accountSettingsTitle"))}</h2>` +
+      `<p class="nestling-modal-row"><span>${escapeHtml(t("accountUsername"))}</span>` +
+      `<strong>${escapeHtml(CFG.api.username || "—")}</strong></p>` +
+      `<p class="nestling-modal-note">${escapeHtml(t("accountDataNote"))}</p>` +
+      `<p class="nestling-modal-note">${escapeHtml(t("accountSessionNote"))}</p>` +
+      `<div class="nestling-modal-actions">` +
+      `<button type="button" class="btn btn-ghost btn-sm" id="nestling-account-close">${escapeHtml(
+        t("close")
+      )}</button>` +
+      `<button type="button" class="btn btn-primary btn-sm" id="nestling-account-logout">${escapeHtml(
+        t("logOut")
+      )}</button>` +
+      `</div>`;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    card.querySelector("#nestling-account-close").addEventListener("click", () => overlay.remove());
+    card.querySelector("#nestling-account-logout").addEventListener("click", () => {
+      if (window.confirm(t("logOutConfirm"))) logOut();
+    });
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) overlay.remove();
+    });
+  }
+
+  async function promptForApiKey() {
+    // Prefer the interactive form when the server has login configured;
+    // fall back to pasting a raw API key for headless/private deployments.
+    let loginRequired = false;
+    try {
+      const res = await fetch(apiUrl("/auth/config"), { headers: { Accept: "application/json" } });
+      if (res.ok) loginRequired = !!(await res.json()).login_required;
+    } catch (_) {
+      /* fall through to the key prompt */
+    }
+    if (loginRequired) {
+      await showLoginOverlay("Your session expired or you are not signed in.");
+      return CFG.api.key;
+    }
+    const entered = window.prompt(
+      "This Nestling server requires an API key.\n" +
+        "Paste the NESTLING_API_KEY value from the server's .env file:",
+      CFG.api.key || ""
+    );
+    if (entered === null) return "";
+    return CFG.api.setKey(entered);
+  }
+
+  /**
    * Single fetch wrapper: JSON encoding, caller-provided AbortSignal, hard
    * timeout so a hung backend can never leave the UI spinning, and typed errors.
    */
   async function api(path, options = {}) {
-    const { timeoutMs = TIME.requestTimeoutMs, signal: outerSignal, ...rest } = options;
+    const {
+      timeoutMs = TIME.requestTimeoutMs,
+      signal: outerSignal,
+      _retriedAuth = false,
+      ...rest
+    } = options;
     const isForm = typeof FormData !== "undefined" && rest.body instanceof FormData;
     const opts = {
       ...rest,
       headers: {
         Accept: "application/json",
         ...(rest.body && !isForm ? { "Content-Type": "application/json" } : {}),
+        // No-op unless the deployment sets NESTLING_API_KEY.
+        ...(CFG.api.authHeaders ? CFG.api.authHeaders() : {}),
         ...(rest.headers || {}),
       },
     };
@@ -665,6 +916,15 @@
         }
       }
       if (!res.ok) {
+        // The deployment requires an API key we don't have yet (or ours was
+        // rotated). Ask once, store it, and retry transparently so the
+        // operator isn't left staring at a dead UI.
+        if (res.status === 401 && !_retriedAuth) {
+          const entered = await promptForApiKey();
+          if (entered) {
+            return api(path, { ...options, _retriedAuth: true });
+          }
+        }
         const e = new Error(errorMessage(data, res.status));
         e.status = res.status;
         e.data = data;
@@ -681,6 +941,50 @@
    * Only same-origin (or configured API origin) image URLs are rendered, so a
    * compromised/odd API payload cannot inject `javascript:` or third-party URLs.
    */
+  /**
+   * Point an <img> at an API-served image.
+   *
+   * A plain src= cannot carry the Authorization header, so once the server
+   * requires auth every /api/overlays/* request 401s and the chart renders
+   * broken. Fetch it with credentials instead and hand the element a blob URL.
+   * data: URIs and cross-origin URLs are passed straight through.
+   */
+  function setAuthedImageSrc(img, url) {
+    if (!url) return;
+    const isApiPath = /^\/?api\//.test(url) || url.indexOf(CFG.api.base) === 0;
+    if (!isApiPath || url.startsWith("data:")) {
+      img.src = url;
+      return;
+    }
+    const headers = CFG.api.authHeaders ? CFG.api.authHeaders() : {};
+    if (!headers.Authorization && !headers["X-API-Key"]) {
+      img.src = url; // unauthenticated deployment — direct src still works
+      return;
+    }
+    fetch(url, { headers })
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error(String(res.status)))))
+      .then((blob) => {
+        const objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
+        // Release the blob once the browser has decoded it.
+        img.addEventListener("load", () => URL.revokeObjectURL(objectUrl), { once: true });
+      })
+      .catch(() => {
+        img.alt = t("chartOverlayAlt");
+        img.classList.add("overlay-img-failed");
+      });
+  }
+
+  /** Attach authenticated sources to any [data-authed-src] images under `root`. */
+  function hydrateAuthedImages(root) {
+    if (!root) return;
+    root.querySelectorAll("img[data-authed-src]").forEach((img) => {
+      const url = img.getAttribute("data-authed-src");
+      img.removeAttribute("data-authed-src");
+      setAuthedImageSrc(img, url);
+    });
+  }
+
   function safeOverlayUrl(raw) {
     if (!raw) return null;
     const s = String(raw).trim();
@@ -1282,9 +1586,9 @@
       block.className = "tool-block clean";
       const img = document.createElement("img");
       img.className = "overlay-img";
-      img.src = src;
       img.alt = t("chartOverlayAlt");
       img.loading = "lazy";
+      setAuthedImageSrc(img, src);
       block.appendChild(img);
       thread.appendChild(block);
     });
@@ -1327,6 +1631,7 @@
         headers: {
           Accept: "text/event-stream",
           "Content-Type": "application/json",
+          ...(CFG.api.authHeaders ? CFG.api.authHeaders() : {}),
         },
         body: JSON.stringify(body),
         signal: ctrl.signal,
@@ -1961,13 +2266,15 @@
       ${
         svgHtml ||
         (img
-          ? `<img class="overlay-img" src="${escapeHtml(img)}" alt="${escapeHtml(
+          ? `<img class="overlay-img" data-authed-src="${escapeHtml(img)}" alt="${escapeHtml(
               t("growthChartAlt")
             )}" loading="lazy" />`
           : "")
       }
       ${!svgHtml && !img ? `<p class="muted">${escapeHtml(t("curveLoadFailed"))}</p>` : ""}
     `;
+    // src is set after insertion so the request can carry auth headers.
+    hydrateAuthedImages(out);
     out.hidden = false;
   }
 
@@ -2758,6 +3065,7 @@
       langBtn.addEventListener("click", () => setLang(state.lang === "fa" ? "en" : "fa"));
     }
     renderChildChip();
+    initAccountUi();
     wireChildForm();
     wireChat();
     wireGrowth();

@@ -55,6 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_facts_session
 """
 
 CHILDREN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+  user_id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS children (
   child_id TEXT PRIMARY KEY,
   name TEXT,
@@ -63,7 +69,8 @@ CREATE TABLE IF NOT EXISTS children (
   gestational_age_weeks REAL,
   notes TEXT,
   created_at TEXT,
-  updated_at TEXT
+  updated_at TEXT,
+  owner_user_id TEXT
 );
 CREATE TABLE IF NOT EXISTS growth_measurements (
   id TEXT PRIMARY KEY,
@@ -135,6 +142,12 @@ def migrate_children_db(path: Path) -> list[str]:
     try:
         conn.executescript(CHILDREN_SCHEMA)
         actions.append("children schema ensured")
+        # Upgrade path for databases created before multi-user support.
+        if _add_column_if_missing(conn, "children", "owner_user_id", "TEXT"):
+            actions.append("children.owner_user_id added")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_children_owner ON children(owner_user_id)"
+        )
         conn.commit()
     finally:
         conn.close()

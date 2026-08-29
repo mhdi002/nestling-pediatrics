@@ -953,19 +953,27 @@ textarea:focus {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 0.55rem;
-  align-items: end;
+  /*
+   * Flex, not grid: the control count changes at runtime (Cancel only exists
+   * mid-request). A fixed column template silently wrapped Send onto its own
+   * full-width row whenever the count and the template disagreed — which is
+   * what happens if :has() does not match. Flex keeps every control on one
+   * line regardless of how many are present.
+   */
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  align-items: flex-end;
   padding: 0.75rem 0 max(0.5rem, env(safe-area-inset-bottom));
   background: linear-gradient(180deg, transparent, rgba(232, 246, 250, 0.98) 22%);
 }
 
-.chat-composer:has(#chat-cancel:not([hidden])) {
-  grid-template-columns: 1fr auto auto auto;
+.chat-composer > .btn {
+  flex: 0 0 auto;
 }
 
 .composer-field {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -1599,9 +1607,10 @@ textarea:focus {
   .summary-grid { gap: 0.6rem; }
   .stat-row { gap: 0.4rem; }
   .stat .val { font-size: 1.1rem; }
-  /* Keep the send control tappable when the composer has 4 children */
-  .chat-composer { column-gap: 0.4rem; }
-  .btn-send { padding-inline: 0.75rem; }
+  /* Keep every composer control tappable and on one line on narrow phones. */
+  .chat-composer { gap: 0.35rem; }
+  .btn-send { padding-inline: 0.6rem; }
+  .chat-composer textarea { padding-inline: 0.7rem; }
   .quiz-nav { gap: 0.5rem; }
   .child-chip { max-width: 100%; }
   .test-card { padding: 0.65rem 0.7rem; }
@@ -1649,4 +1658,103 @@ textarea:focus {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* —— Account button, menu and modal —— */
+.account-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  padding: 0;
+  border: 2px solid var(--border-sky);
+  border-radius: 50%;
+  background: var(--surface-solid);
+  cursor: pointer;
+}
+.account-avatar {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--mint-deep);
+  line-height: 1;
+}
+.account-menu {
+  position: absolute;
+  top: 3.4rem;
+  inset-inline-end: 0.9rem;
+  z-index: 40;
+  min-width: 13rem;
+  padding: 0.6rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-sky);
+  background: var(--surface-solid);
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.account-menu-user {
+  margin: 0 0 0.35rem;
+  padding: 0 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--border-sky);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.account-menu-label {
+  display: block;
+  color: var(--ink-soft, #64748b);
+  font-size: 0.72rem;
+}
+.account-menu-item {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: start;
+}
+.account-menu-danger {
+  color: #b91c1c;
+}
+
+.nestling-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.6);
+}
+.nestling-modal-card {
+  width: 100%;
+  max-width: 22rem;
+  padding: 1.25rem;
+  border-radius: 16px;
+  background: var(--surface-solid);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.nestling-modal-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+.nestling-modal-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+.nestling-modal-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft, #64748b);
+  line-height: 1.45;
+}
+.nestling-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
 }

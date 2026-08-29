@@ -910,6 +910,22 @@ class ParentAssistant:
         for k, v in (decision.slots or {}).items():
             if v is not None and v != "" and k not in slots:
                 slots = self.chat_memory.merge_slots(session_id, {k: v})
+        # Resume an interrupted request. When the previous turn asked for a
+        # missing slot, the user's answer is often a bare word ("boy", "term",
+        # "37") that carries no intent of its own, so the router classifies it
+        # as small talk and the original request is silently dropped. If we
+        # were waiting on something and this turn supplied a slot, put the
+        # pending intent back.
+        pending_intent = session_slots.get("pending_intent")
+        if pending_intent:
+            supplied = {k for k, v in (new_slots or {}).items() if v not in (None, "")}
+            supplied |= {k for k, v in (decision.slots or {}).items() if v not in (None, "")}
+            if supplied and not (intents & {"medical", "screening"}):
+                intents.add(pending_intent)
+                intents.discard("chat")
+                intents.discard("reassure")
+                intents.discard("slot_update")
+
         show_chart = bool(SHOW_CHART_RE.search(user_message) or SHOW_CHART_RE.search(en_message))
         bare_show = bool(BARE_SHOW_RE.search(user_message) or BARE_SHOW_RE.search(en_message))
         if bare_show and child_id and (self.db.growth_history(child_id) or []):
@@ -1209,6 +1225,14 @@ class ParentAssistant:
                 missing.append("value")
         out["missing_slots"] = missing
         out["needs_gestational_age"] = needs_ga
+        # Remember what we were mid-way through so the next turn can resume it
+        # (see the pending_intent block above); clear it once nothing is
+        # outstanding, otherwise later unrelated turns would be hijacked.
+        if missing and ("growth" in intents or needs_ga):
+            self.chat_memory.merge_slots(session_id, {"pending_intent": "growth"})
+        elif not missing and slots.get("pending_intent"):
+            self.chat_memory.clear_slots(session_id, ["pending_intent"])
+            slots.pop("pending_intent", None)
         out["memory"] = {
             "summary": mem_ctx.get("summary") or "",
             "recent_turns": len((mem_ctx.get("recent_text") or "").splitlines()),
