@@ -234,18 +234,52 @@ _PARSERS = {
 
 
 def search(query: str, *, max_results: int | None = None) -> list[SearchResult]:
-    """Run one search. Never raises: any failure degrades to no results."""
+    """Run one search. Never raises: any failure degrades to no results.
+
+    A provider may declare a `fallback` in config/websearch.yaml. Some endpoints
+    answer only a narrow slice of questions -- DuckDuckGo's Instant Answer API
+    returns nothing at all for most real parent questions -- so an empty result
+    is not the same as "the web has no answer". We walk the chain until one
+    provider returns something, which is what makes the fallback fire in
+    practice rather than only in theory.
+    """
     settings = get_settings()
     query = (query or "").strip()[: settings.nestling_websearch_query_chars]
     if not query:
         return []
     limit = max_results or settings.nestling_websearch_max_results
     provider = (settings.nestling_websearch_provider or "").strip()
-    cfg = _provider_config(provider)
-    if not cfg:
-        log.warning("Unknown websearch provider %r — search skipped", provider)
-        return []
-    endpoint = (settings.nestling_websearch_endpoint or cfg.get("endpoint") or "").strip()
+    seen: set[str] = set()
+    # Only the primary provider honours the endpoint override; a fallback has
+    # its own endpoint and would be broken by another provider's URL.
+    override = (settings.nestling_websearch_endpoint or "").strip()
+    while provider and provider not in seen:
+        seen.add(provider)
+        cfg = _provider_config(provider)
+        if not cfg:
+            log.warning("Unknown websearch provider %r — search skipped", provider)
+            return []
+        hits = _search_one(provider, cfg, query, limit, override)
+        if hits:
+            return hits
+        override = ""
+        nxt = str(cfg.get("fallback") or "").strip()
+        if nxt:
+            log.info("Provider %r returned nothing; trying fallback %r", provider, nxt)
+        provider = nxt
+    return []
+
+
+def _search_one(
+    provider: str,
+    cfg: dict,
+    query: str,
+    limit: int,
+    endpoint_override: str = "",
+) -> list[SearchResult]:
+    """Query a single configured provider."""
+    settings = get_settings()
+    endpoint = (endpoint_override or cfg.get("endpoint") or "").strip()
     if not endpoint:
         log.warning("No endpoint configured for websearch provider %r", provider)
         return []

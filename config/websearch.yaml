@@ -11,6 +11,10 @@ providers:
     endpoint: "https://api.duckduckgo.com/"
     query_param: q
     format: duckduckgo_ia
+    # The Instant Answer API only answers encyclopaedic lookups; it returns
+    # nothing for most parent questions, which is why the fallback never used
+    # to produce an answer in practice. Chain to the organic-results endpoint.
+    fallback: duckduckgo_html
     params:
       format: json
       no_html: 1

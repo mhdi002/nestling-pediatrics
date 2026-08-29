@@ -463,3 +463,93 @@ def test_snippets_are_length_capped(enabled, monkeypatch):
     results = search("anything")
     assert results and len(results[0].snippet) <= 41
     get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------
+# Provider fallback chain
+# --------------------------------------------------------------------------
+
+
+def _reset():
+    from assistant.settings import reset_settings
+
+    reset_settings()
+
+
+def test_configured_default_provider_declares_a_fallback():
+    """The IA endpoint answers almost no parent question on its own."""
+    from assistant.websearch import _provider_config
+
+    cfg = _provider_config("duckduckgo")
+    assert cfg.get("fallback"), "default provider must chain to organic results"
+    assert _provider_config(cfg["fallback"]), "fallback names an unknown provider"
+
+
+def test_search_falls_through_to_the_next_provider(monkeypatch):
+    import assistant.websearch as ws
+
+    calls = []
+
+    def _one(provider, cfg, query, limit, endpoint_override=""):
+        calls.append(provider)
+        if provider == "duckduckgo":
+            return []
+        return [ws.SearchResult(title="t", url="https://example.org", snippet="s")]
+
+    monkeypatch.setattr(ws, "_search_one", _one)
+    monkeypatch.setenv("NESTLING_WEBSEARCH_ENABLED", "1")
+    _reset()
+    hits = ws.search("some question")
+    assert calls == ["duckduckgo", "duckduckgo_html"]
+    assert len(hits) == 1
+
+
+def test_search_stops_at_the_first_provider_that_answers(monkeypatch):
+    import assistant.websearch as ws
+
+    calls = []
+
+    def _one(provider, cfg, query, limit, endpoint_override=""):
+        calls.append(provider)
+        return [ws.SearchResult(title="t", url="https://example.org", snippet="s")]
+
+    monkeypatch.setattr(ws, "_search_one", _one)
+    _reset()
+    assert len(ws.search("some question")) == 1
+    assert calls == ["duckduckgo"]
+
+
+def test_fallback_chain_cannot_loop(monkeypatch):
+    import assistant.websearch as ws
+
+    calls = []
+
+    def _cfg(name):
+        return {"fallback": "duckduckgo" if name == "duckduckgo_html" else "duckduckgo_html"}
+
+    monkeypatch.setattr(ws, "_provider_config", _cfg)
+    monkeypatch.setattr(
+        ws, "_search_one", lambda *a, **k: calls.append(a[0]) or []
+    )
+    _reset()
+    assert ws.search("q") == []
+    assert calls == ["duckduckgo", "duckduckgo_html"]
+
+
+def test_endpoint_override_applies_only_to_the_primary_provider(monkeypatch):
+    import assistant.websearch as ws
+
+    seen = []
+
+    def _one(provider, cfg, query, limit, endpoint_override=""):
+        seen.append((provider, endpoint_override))
+        return []
+
+    monkeypatch.setattr(ws, "_search_one", _one)
+    monkeypatch.setenv("NESTLING_WEBSEARCH_ENDPOINT", "https://searx.example/search")
+    _reset()
+    ws.search("q")
+    monkeypatch.delenv("NESTLING_WEBSEARCH_ENDPOINT")
+    _reset()
+    assert seen[0] == ("duckduckgo", "https://searx.example/search")
+    assert seen[1] == ("duckduckgo_html", "")

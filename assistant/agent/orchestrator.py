@@ -684,12 +684,46 @@ class ParentAssistant:
         return len(docs)
 
     def ask_medical(self, query: str) -> dict:
+        from assistant.agent.grounding import memory_context
+        from assistant.llm.qwen_client import llm_enabled
         from assistant.websearch import maybe_augment
 
+        memory = memory_context(query)
+        if memory and self.use_llm and llm_enabled():
+            # Retrieve and gate with the LLM off, then generate once from both
+            # labelled sources. Same number of model calls as before.
+            res = self.medical.answer(query, use_llm=False)
+            res = maybe_augment(query, res, rag=self.medical, use_llm=False)
+            return self._answer_from_sources(query, memory, res)
         res = self.medical.answer(query, use_llm=self.use_llm)
         # Only reaches the network when the fallback is enabled *and* the local
         # corpus came up short; otherwise this returns `res` untouched.
         return maybe_augment(query, res, rag=self.medical, use_llm=self.use_llm)
+
+    def _answer_from_sources(self, query: str, memory: str, res: dict) -> dict:
+        """Generate from the parent's notes and the care notes, clearly labelled."""
+        from assistant.agent.grounding import (
+            GROUNDED_SYSTEM,
+            compose_context,
+            parent_question,
+        )
+        from assistant.llm.qwen_client import get_qwen
+
+        question = parent_question(query) or query
+        context = compose_context(memory, res.get("context") or "")
+        out = dict(res)
+        out["context"] = context
+        try:
+            text = get_qwen().answer_with_context(
+                question, context, system=GROUNDED_SYSTEM
+            )
+        except Exception as exc:
+            log.warning("Grounded answer failed, keeping extractive reply: %s", exc)
+            return out
+        if text.strip():
+            out["answer"] = text
+            out["answer_source"] = "memory+notes"
+        return out
 
     def ask_child(self, child_id: str, query: str) -> dict:
         return self.child_rag.answer(query, child_id=child_id, use_llm=self.use_llm)

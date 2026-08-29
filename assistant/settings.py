@@ -41,7 +41,13 @@ class Settings(BaseSettings):
     nestling_embedding_model: str = "BAAI/bge-m3"
 
     # LLM transport
-    nestling_llm_timeout: float = 180.0
+    # MUST stay below the load balancer's chat timeout
+    # (NESTLING_LB_CHAT_TIMEOUT, 120s by default in docker-compose.yml), with
+    # headroom for retrieval, tools and translation. At 180s the proxy always
+    # gave up first, so a slow generation surfaced as a hung request and a 504
+    # instead of degrading to the extractive answer the app already had ready.
+    # tests/test_timeout_hierarchy.py asserts the relationship still holds.
+    nestling_llm_timeout: float = 60.0
     nestling_llm_probe_timeout: float = 1.5
     nestling_llm_ready_cache_seconds: float = 5.0
     nestling_llm_error_detail_chars: int = 400
