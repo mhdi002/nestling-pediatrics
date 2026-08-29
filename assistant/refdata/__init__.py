@@ -52,6 +52,12 @@ def care_topics() -> dict[str, Any]:
     return _load_yaml("care_topics.yaml")
 
 
+@lru_cache
+def websearch_config() -> dict[str, Any]:
+    """Provider definitions and safety patterns for the web-search fallback."""
+    return _load_yaml("websearch.yaml")
+
+
 def weeks_per_month() -> float:
     b = clinical_bounds()
     if b.get("use_legacy_weeks_per_month", True):

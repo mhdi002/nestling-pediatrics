@@ -405,6 +405,9 @@ def _is_soft_followup(
     )
 
 
+from assistant.settings import get_settings
+
+
 def classify_intent(user_message: str, prior_slots: dict | None = None) -> set[str]:
     """Classify the *current* user turn only (never history)."""
     msg = (user_message or "").strip()
@@ -590,6 +593,41 @@ def classify_intent(user_message: str, prior_slots: dict | None = None) -> set[s
     ):
         intents.add("slot_update")
     if not intents:
-        intents.add("chat")
+        # Nothing matched. The keyword lists can never enumerate every way a
+        # parent describes a concern -- "her urine is yellow" and
+        # "ادرارش زرده" matched nothing, so a real symptom got the generic
+        # "I'm listening" menu instead of an answer, even though the corpus
+        # has content on it. Anything long enough to be a real statement or
+        # question is therefore sent to retrieval, which is equipped to judge
+        # relevance (and, where enabled, to fall back to a web search). Short
+        # utterances stay conversational so greetings and one-word replies do
+        # not trigger a pointless search.
+        # A bare clarification ("is that good", "so?") belongs to whatever
+        # thread is already open -- routing it to retrieval would answer a
+        # question the parent did not ask. Only genuinely new content falls
+        # through to retrieval.
+        # A bare clarification ("is that good", "so?") belongs to whatever
+        # thread is already open; routing it to retrieval would answer a
+        # question the parent did not ask. Detected with the existing
+        # follow-up patterns rather than a care-keyword check: keyword lists
+        # do not know every symptom, so "ادرارش زرده" would be misread as
+        # having no new content and silently swallowed.
+        prior_topic = str((prior_slots or {}).get("last_topic") or "").strip()
+        if prior_topic and (MEDICAL_FOLLOWUP_RE.search(msg) or AFFIRM_RE.search(msg)):
+            intents.add("chat")
+            return intents
+
+        _s = get_settings()
+        # Length is measured in characters as well as words: Persian says in
+        # two words ("ادرارش زرده") what English needs four for, so a
+        # word-count-only threshold silently ignores real concerns in the
+        # more compact language.
+        if (
+            len(msg.split()) >= _s.nestling_retrieval_fallback_min_words
+            or len(msg.strip()) >= _s.nestling_retrieval_fallback_min_chars
+        ):
+            intents.add("medical")
+        else:
+            intents.add("chat")
     return intents
 

@@ -66,6 +66,53 @@ def medical_chat_answer(raw: str, *, fa: bool = False, from_llm: bool = False) -
     )
 
 
+def web_search_chat(
+    body: str,
+    sources: list[dict[str, Any]] | None,
+    *,
+    fa: bool = False,
+) -> str:
+    """Parent reply built from web results, with the links kept verbatim.
+
+    The links are appended after the prose — never translated, never trimmed —
+    so a parent can check every claim against the page it came from.
+    """
+    from assistant.settings import get_settings
+
+    # Collapse runs of spaces per line but keep the line breaks: the snippet
+    # fallback is a list, and squashing it would fuse unrelated sources.
+    lines = [" ".join(line.split()) for line in (body or "").splitlines()]
+    text = "\n".join(line for line in lines if line).strip()
+    cap = get_settings().llm_answer_max_chars
+    if len(text) > cap:
+        text = text[:cap].rstrip() + "…"
+
+    parts = [
+        "این را در راهنمای خودمان نداشتیم، برای همین در وب جست‌وجو کردم:"
+        if fa
+        else "That isn't in our own care library, so I searched the web:"
+    ]
+    if text:
+        parts.append(text)
+
+    links = []
+    for src in sources or []:
+        url = str(src.get("url") or "").strip()
+        if not url:
+            continue
+        title = str(src.get("title") or "").strip()
+        links.append(f"- {title} — {url}" if title else f"- {url}")
+    if links:
+        parts.append(("منابع:" if fa else "Sources:") + "\n" + "\n".join(links))
+
+    parts.append(
+        "این تشخیص نیست؛ برای تصمیم درمانی حتماً با متخصص کودکان مشورت کنید."
+        if fa
+        else "This isn't a diagnosis — please check anything you act on with your pediatrician."
+    )
+    return "\n\n".join(parts)
+
+
 def growth_plot_chat(res: dict[str, Any], *, fa: bool = False) -> str:
     """Narrate a plotted growth point like a chat, not a tool log."""
     measure = res.get("measure") or "measurement"

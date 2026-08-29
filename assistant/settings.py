@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     llm_prompt_query_chars: int = 400
     llm_answer_max_chars: int = 1200
 
+    # When no intent rule matches, a message at least this many words long is
+    # treated as a real question and sent to retrieval rather than answered
+    # with the generic "I'm listening" menu. Keyword lists cannot enumerate
+    # every way a parent describes a symptom.
+    nestling_retrieval_fallback_min_words: int = 3
+    nestling_retrieval_fallback_min_chars: int = 8
+
     # Intent routing
     nestling_router_llm_min_confidence: float = 0.7
 
@@ -133,6 +140,29 @@ class Settings(BaseSettings):
     nestling_rag_extract_keep_ratio: float = 0.75
     nestling_dense_rrf_k: int = 60
     nestling_dense_cache_size: int = 2048
+
+    # Web-search fallback. Off by default: searching costs money and latency,
+    # and the local WHO corpus answers the overwhelming majority of turns.
+    nestling_websearch_enabled: bool = False
+    nestling_websearch_provider: str = "duckduckgo"
+    # Empty means "use the endpoint declared for the provider in
+    # config/websearch.yaml"; set it to point at a self-hosted SearXNG etc.
+    nestling_websearch_endpoint: str = ""
+    nestling_websearch_api_key: str | None = None
+    nestling_websearch_max_results: int = 5
+    nestling_websearch_timeout: float = 6.0
+    nestling_websearch_snippet_chars: int = 400
+    nestling_websearch_context_chars: int = 2000
+    nestling_websearch_query_chars: int = 300
+    nestling_websearch_user_agent: str = "Nestling/1.0 (+pediatric parent assistant)"
+    # Relevance gate: idf-weighted share of the parent's question terms that the
+    # local hits actually cover (0..1). Below this the corpus is judged not to
+    # hold the answer and we may search. Measured on the WHO corpus: on-topic
+    # questions score ~0.6-0.9, out-of-corpus ones ~0.2-0.5.
+    nestling_websearch_min_local_coverage: float = 0.55
+    # A retrieval that returns nothing at all is always weak, whatever the
+    # coverage arithmetic says.
+    nestling_websearch_min_local_score: float = 0.0
 
     # Chart rendering
     chart_dpi: int = 140

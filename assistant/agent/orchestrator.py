@@ -404,13 +404,52 @@ def interpret_track_status(track_status: str | None, centile: float | None, *, f
     return "I have a growth result on file — send the number or chart details if you want a clearer read."
 
 
+# Two ages this close are the same measurement rounded differently; anything
+# beyond it means the session and the stored row disagree about which age a
+# measurement belongs to.
+AGE_MONTHS_TOLERANCE = 0.05
+
+
 def latest_growth_snapshot(db: ChildMemoryDB, child_id: str | None, slots: dict) -> dict | None:
-    """Prefer last computed result in session slots; else child's latest saved growth."""
+    """
+    The measurement the analysis should talk about.
+
+    When a child is known, the stored growth row wins. That row is what
+    `get_child_summary` reports, so sourcing both from it means the summary and
+    the analysis can never describe the same measurement differently -- which
+    is what happened when one read the database (43rd centile) and the other
+    read session slots left over from a plot plotted at the wrong age (100th).
+
+    Session slots are used only when there is no child to read from, and then
+    every field comes from the same plotted result rather than a mix of
+    `last_*` and live values.
+    """
+    stored = None
+    if child_id:
+        hist = db.growth_history(child_id) or []
+        if hist:
+            measure = slots.get("last_measure") or slots.get("measure")
+            # Match the measure under discussion; otherwise the most recent.
+            for row in reversed(hist):
+                if not measure or row.get("measure") == measure:
+                    stored = row
+                    break
+            stored = stored or hist[-1]
+
+    if stored is not None:
+        return {
+            "measure": stored.get("measure"),
+            "value": stored.get("value"),
+            "centile": stored.get("centile"),
+            "z_score": stored.get("z_score"),
+            "track_status": stored.get("track_status"),
+            "age_months": stored.get("age_months"),
+            "weeks": stored.get("weeks"),
+            "chart_standard": slots.get("last_chart_standard") or slots.get("chart_standard"),
+            "sex": slots.get("sex"),
+        }
+
     if slots.get("last_centile") is not None or slots.get("last_track_status"):
-        # Every field comes from the same plotted result. Mixing `last_*` values
-        # with the live `weeks`/`value` slots let the analysis quote a centile
-        # from one measurement next to the age of another, which is how a point
-        # plotted above the 97th centile was described as "43rd, usual range".
         return {
             "measure": slots.get("last_measure"),
             "value": slots.get("last_value"),
@@ -423,22 +462,7 @@ def latest_growth_snapshot(db: ChildMemoryDB, child_id: str | None, slots: dict)
             "chart_standard": slots.get("last_chart_standard"),
             "sex": slots.get("sex"),
         }
-    if not child_id:
-        return None
-    hist = db.growth_history(child_id) or []
-    if not hist:
-        return None
-    g = hist[-1]
-    return {
-        "measure": g.get("measure"),
-        "value": g.get("value"),
-        "centile": g.get("centile"),
-        "z_score": g.get("z_score"),
-        "track_status": g.get("track_status"),
-        "weeks": g.get("weeks"),
-        "sex": slots.get("sex"),
-        "chart_standard": slots.get("chart_standard"),
-    }
+    return None
 
 
 def hydrate_slots_from_child(db: ChildMemoryDB, child_id: str | None, slots: dict) -> dict:
@@ -660,7 +684,12 @@ class ParentAssistant:
         return len(docs)
 
     def ask_medical(self, query: str) -> dict:
-        return self.medical.answer(query, use_llm=self.use_llm)
+        from assistant.websearch import maybe_augment
+
+        res = self.medical.answer(query, use_llm=self.use_llm)
+        # Only reaches the network when the fallback is enabled *and* the local
+        # corpus came up short; otherwise this returns `res` untouched.
+        return maybe_augment(query, res, rag=self.medical, use_llm=self.use_llm)
 
     def ask_child(self, child_id: str, query: str) -> dict:
         return self.child_rag.answer(query, child_id=child_id, use_llm=self.use_llm)
@@ -1419,6 +1448,7 @@ class ParentAssistant:
             growth_plot_chat,
             medical_chat_answer,
             open_chat_turn,
+            web_search_chat,
         )
 
         intents = intents or set(out.get("intents") or [])
@@ -1627,13 +1657,19 @@ class ParentAssistant:
             mode = (out["medical_rag"].get("mode") or "").lower()
             if fa and ans:
                 ans = translate_en_to_fa(ans)
-            parts.append(
-                medical_chat_answer(
-                    ans,
-                    fa=fa,
-                    from_llm="openai" in mode or "llm" in mode,
+            sources = out["medical_rag"].get("web_sources") or []
+            if sources:
+                # Web answers get their own shape: the source links must survive
+                # the parent-voice trimming, and translation must not touch URLs.
+                parts.append(web_search_chat(ans, sources, fa=fa))
+            else:
+                parts.append(
+                    medical_chat_answer(
+                        ans,
+                        fa=fa,
+                        from_llm="openai" in mode or "llm" in mode,
+                    )
                 )
-            )
 
         if "screening" in intents and "medical" in intents:
             parts.append(
