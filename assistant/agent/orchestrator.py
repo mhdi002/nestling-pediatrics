@@ -1588,8 +1588,10 @@ class ParentAssistant:
             if name in {"overlay_growth_on_chart", "growth_percentile"} and res.get("ok"):
                 parts.append(growth_plot_chat(res, fa=fa))
             elif name == "get_child_summary" and res.get("ok"):
-                summary = res.get("summary") or ""
-                parts.append(child_summary_chat(summary, fa=fa))
+                # Pass the structured result, not res["summary"]: that string is
+                # the agent-facing digest and leaks English labels and raw
+                # overlay filenames into parent-facing replies.
+                parts.append(child_summary_chat(res, fa=fa))
             elif res.get("ok") is False and res.get("detail"):
                 # Avoid double-speaking when we already asked for gestational age
                 if out.get("needs_gestational_age") and res.get("needs_gestational_age"):

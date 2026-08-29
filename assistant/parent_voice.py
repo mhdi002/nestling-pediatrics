@@ -131,26 +131,108 @@ def growth_plot_chat(res: dict[str, Any], *, fa: bool = False) -> str:
     return lead + mid + tail
 
 
-def child_summary_chat(summary_text: str, *, fa: bool = False) -> str:
-    """Soften get_child_summary tool text into a short chat intro + bullets."""
-    lines = [ln.strip() for ln in (summary_text or "").splitlines() if ln.strip()]
-    if not lines:
-        if fa:
-            return "هنوز چیز زیادی از پرونده این گفتگو ندارم. می‌توانید وزن یا نگرانی‌تان را بگویید."
-        return "I don’t have much on file for this child yet — share a weight or a worry and we’ll start."
-    head = lines[0]
-    rest = lines[1:6]
-    if fa:
-        opener = f"بفرمایید، خلاصه پرونده این است:\n{head}"
-    else:
-        opener = f"Here’s what I have on file:\n{head}"
-    if rest:
-        opener += "\n" + "\n".join(rest)
-    if fa:
-        opener += "\n\nچی کمکتان می‌کند — نمودار، تحلیل رشد، یا سوال مراقبتی؟"
-    else:
-        opener += "\n\nWhat would help next — the chart, a growth read, or a care question?"
-    return opener
+def _measure_label(measure: str, *, fa: bool) -> str:
+    if not fa:
+        return str(measure)
+    return {
+        "weight": "وزن",
+        "length": "قد",
+        "height": "قد",
+        "head": "دور سر",
+        "head_circumference": "دور سر",
+    }.get(str(measure).lower(), str(measure))
+
+
+def child_summary_chat(result: dict | str, *, fa: bool = False) -> str:
+    """
+    Render get_child_summary for a parent, in their language.
+
+    Built from the tool's structured fields rather than by reformatting its
+    English `summary` string: that string is an internal, agent-facing digest,
+    and passing it through left English labels ("GA at birth", "within_10_90")
+    embedded in Persian replies. It also listed raw overlay filenames, which
+    are UUID artefacts a parent should never be shown.
+
+    A plain string is still accepted so older callers keep working.
+    """
+    if isinstance(result, str) or not isinstance(result, dict):
+        lines = [ln.strip() for ln in (result or "").splitlines() if ln.strip()]
+        if not lines:
+            return (
+                "هنوز چیز زیادی از پرونده این کودک ندارم. می‌توانید وزن یا نگرانی‌تان را بگویید."
+                if fa
+                else "I don’t have much on file for this child yet — share a weight or a worry and we’ll start."
+            )
+        body = "\n".join(lines[:6])
+        head = "بفرمایید، خلاصه پرونده این است:" if fa else "Here’s what I have on file:"
+        tail = (
+            "\n\nچی کمکتان می‌کند — نمودار، تحلیل رشد، یا سوال مراقبتی؟"
+            if fa
+            else "\n\nWhat would help next — the chart, a growth read, or a care question?"
+        )
+        return f"{head}\n{body}{tail}"
+
+    profile = result.get("profile") or {}
+    name = profile.get("name") or ("این کودک" if fa else "this child")
+    ga = profile.get("gestational_age_weeks")
+    maturity = profile.get("maturity")
+    latest = result.get("latest_growth") or {}
+    screenings = result.get("recent_screenings") or []
+
+    bits: list[str] = []
+    if ga is not None:
+        maturity_txt = ""
+        if maturity == "preterm":
+            maturity_txt = " (نارس)" if fa else " (preterm)"
+        elif maturity == "term":
+            maturity_txt = " (طبیعی)" if fa else " (term)"
+        bits.append(
+            f"در {ga} هفتگی بارداری به دنیا آمده{maturity_txt}."
+            if fa
+            else f"Born at {ga} weeks’ gestation{maturity_txt}."
+        )
+
+    for measure, g in latest.items():
+        label = _measure_label(measure, fa=fa)
+        value = g.get("value")
+        centile = g.get("centile")
+        if centile is None:
+            bits.append(
+                f"آخرین {label} ثبت‌شده: {value}."
+                if fa
+                else f"Latest recorded {label}: {value}."
+            )
+        else:
+            bits.append(
+                f"آخرین {label}: {value} — حدود صدک {float(centile):.0f}."
+                if fa
+                else f"Latest {label}: {value} — around the {float(centile):.0f}th centile."
+            )
+
+    if screenings:
+        n = len(screenings)
+        bits.append(
+            f"{n} غربالگری ثبت شده است."
+            if fa
+            else f"{n} screening{'s' if n != 1 else ''} on file."
+        )
+
+    if not bits:
+        return (
+            f"هنوز اندازه‌گیری یا غربالگری‌ای برای {name} ثبت نشده است. "
+            "می‌توانید وزن یا نگرانی‌تان را بگویید."
+            if fa
+            else f"I don’t have any measurements or screenings for {name} yet — "
+            "share a weight or a worry and we’ll start."
+        )
+
+    head = f"خلاصه وضعیت {name}:" if fa else f"Here’s where {name} is:"
+    tail = (
+        "\n\nچی کمکتان می‌کند — نمودار، تحلیل رشد، یا سوال مراقبتی؟"
+        if fa
+        else "\n\nWhat would help next — the chart, a growth read, or a care question?"
+    )
+    return head + "\n" + "\n".join(f"- {b}" for b in bits) + tail
 
 
 def open_chat_turn(*, fa: bool = False, has_growth: bool = False) -> str:

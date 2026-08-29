@@ -1134,8 +1134,10 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
     for s in screens[-SCREENING_SUMMARY_LINES:]:
         lines.append(f"- screening {s.get('instrument')}: {(s.get('result') or {}).get('summary')}")
     if overlays:
-        names = ", ".join(o["filename"] for o in overlays[:SUMMARY_CHART_NAMES])
-        lines.append(f"Saved charts: {names}")
+        # Count only. The filenames are UUID artefacts that carry no meaning for
+        # the model and used to surface verbatim in parent-facing replies; the
+        # structured `overlays` field below still carries them for the UI.
+        lines.append(f"Saved charts: {len(overlays)}")
 
     return {
         "ok": True,

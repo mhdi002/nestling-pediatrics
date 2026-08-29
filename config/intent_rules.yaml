@@ -23,11 +23,23 @@ intents:
       - "on track"
       - "what does .* mean"
       - "is (he|she|my (baby|child)) (ok|okay|fine|normal)"
+      # Open invitations to comment on what was just shown. Without these a
+      # parent asking "any thoughts?" after a chart fell through to the generic
+      # listening menu, which reads as the assistant ignoring the question.
+      - "any (thoughts|opinion|view|idea)"
+      - "what do you (think|reckon|say)"
+      - "your (thoughts|opinion|take)"
+      - "anything (else )?to add"
+      - "^(so|well)? *(what|how) (about|do you see)"
     patterns_fa:
       - "تحلیل"
       - "تفسیر"
       - "مسیر خوب"
       - "رشدش خوبه"
+      - "نظری? *(نداری|داری|نظرت)"
+      - "نظرت *چیه"
+      - "چی *فکر *می *کنی"
+      - "به *نظرت"
 
   growth:
     priority: 80
