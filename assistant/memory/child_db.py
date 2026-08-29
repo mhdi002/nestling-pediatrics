@@ -376,6 +376,36 @@ class ChildMemoryDB:
             return None
         return self.add_event(child_id, kind, text, payload)
 
+    def _known_age_months(self, child_id: str) -> float | None:
+        """
+        Chronological age in months, or None when it cannot be established.
+
+        Prefers a stored growth row's `age_months` because that value was
+        computed with the child's gestational age in scope; falls back to date
+        of birth. Never derives an age from postmenstrual weeks here -- doing
+        that without the gestational age is what produced a 0.16-month reading
+        for a two-month-old.
+        """
+        rows = self.growth_history(child_id) or []
+        for row in reversed(rows):
+            if row.get("age_months") is not None:
+                try:
+                    return float(row["age_months"])
+                except (TypeError, ValueError):
+                    continue
+        child = self.get_child(child_id)
+        dob = (child or {}).get("date_of_birth")
+        if dob:
+            from datetime import date, datetime
+
+            try:
+                born = datetime.fromisoformat(str(dob)).date()
+                days = (date.today() - born).days
+                return max(0.0, days / float(get_settings().nestling_days_per_month))
+            except (ValueError, TypeError):
+                return None
+        return None
+
     @_synchronized
     def child_context_text(self, child_id: str, owner_user_id: str | None = None) -> str:
         """
@@ -390,6 +420,13 @@ class ChildMemoryDB:
         if not child:
             return ""
         lines: list[str] = []
+        # State the child's age in months explicitly. The digest otherwise
+        # carried only gestational and postmenstrual weeks, leaving the model
+        # to infer chronological age -- which it did wrongly, telling a parent
+        # of a 2-month-old what a 13-month-old should eat. Derived from the
+        # stored growth row (computed with gestational age in scope) or from
+        # date of birth, never guessed.
+        age_months = self._known_age_months(child_id)
         profile = ", ".join(
             p
             for p in (
@@ -402,6 +439,10 @@ class ChildMemoryDB:
             )
             if p
         )
+        if age_months is not None:
+            profile = f"{profile}, currently ~{age_months:.1f} months old" if profile else (
+                f"~{age_months:.1f} months old"
+            )
         if profile:
             lines.append(f"Profile: {profile}")
         if (child.get("notes") or "").strip():

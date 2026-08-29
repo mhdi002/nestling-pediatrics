@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     nestling_translate_timeout: float = 6.0
     nestling_translate_workers: int = 4
 
+    # Mean days per month, for deriving an age from a date of birth.
+    nestling_days_per_month: float = 30.4375
+
     # Chat memory
     nestling_history_window: int = 12
     nestling_summary_trigger_turns: int = 16
