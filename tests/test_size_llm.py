@@ -121,3 +121,48 @@ def test_a_small_card_keeps_the_compose_defaults(monkeypatch, snapshot):
     """Emitting nothing leaves docker-compose's own limits in force."""
     p = _plan(monkeypatch, snapshot, 9)
     assert "lb_chat_burst" not in p, "would tighten the proxy on a small GPU"
+
+
+MULTIMODAL = dict(QWEN_4B_TEXT := {
+    "num_hidden_layers": 32, "hidden_size": 2560, "num_attention_heads": 16,
+    "num_key_value_heads": 4, "head_dim": 256, "max_position_embeddings": 262144,
+})
+
+
+def _mm_snapshot(tmp_path, with_vision=True):
+    cfg = {"text_config": dict(MULTIMODAL)}
+    if with_vision:
+        cfg["vision_config"] = {"depth": 24, "hidden_size": 1024}
+    (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (tmp_path / "model.safetensors").write_bytes(b"\0" * 1024)
+    return tmp_path
+
+
+def test_shape_is_read_from_the_nested_text_config(tmp_path):
+    """A multimodal config has no top-level layers, so sizing found nothing.
+
+    On the real Qwen3.5-4B snapshot this made the sizer fall back to the 8 GB
+    defaults on a 24 GB card.
+    """
+    cfg = json.loads((_mm_snapshot(tmp_path) / "config.json").read_text())
+    assert size_llm.kv_bytes_per_token(cfg) == 2 * 32 * 4 * 256 * 2
+
+
+def test_vision_is_enabled_when_the_card_has_room(monkeypatch, tmp_path):
+    """--limit-mm-per-prompt image=0 was pinned on regardless of GPU."""
+    snap = _mm_snapshot(tmp_path)
+    p = _plan(monkeypatch, snap, 24)
+    assert p["max_num_seqs"] > 1
+    assert p["limit_mm_image"] == 1
+
+
+def test_vision_stays_off_on_a_card_with_no_room(monkeypatch, tmp_path):
+    snap = _mm_snapshot(tmp_path)
+    p = _plan(monkeypatch, snap, 9)
+    assert p.get("limit_mm_image", 0) == 0
+
+
+def test_a_text_only_checkpoint_never_enables_images(monkeypatch, tmp_path):
+    snap = _mm_snapshot(tmp_path, with_vision=False)
+    p = _plan(monkeypatch, snap, 24)
+    assert p["limit_mm_image"] == 0

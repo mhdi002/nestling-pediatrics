@@ -79,7 +79,24 @@ def weights_bytes(snapshot: Path) -> int:
     return total
 
 
+def text_config(cfg: dict) -> dict:
+    """The language-model half of the config.
+
+    A multimodal checkpoint keeps the transformer's shape under `text_config`
+    and describes the vision tower separately, so reading the top level found
+    nothing and sizing silently fell back to the 8 GB defaults.
+    """
+    inner = cfg.get("text_config")
+    return inner if isinstance(inner, dict) else cfg
+
+
+def is_multimodal(cfg: dict) -> bool:
+    """Whether this checkpoint can accept images at all."""
+    return isinstance(cfg.get("vision_config"), dict)
+
+
 def kv_bytes_per_token(cfg: dict) -> int | None:
+    cfg = text_config(cfg)
     layers = cfg.get("num_hidden_layers")
     hidden = cfg.get("hidden_size")
     heads = cfg.get("num_attention_heads")
@@ -125,7 +142,7 @@ def plan(
         return result
 
     # Never promise more context than the model was trained to attend over.
-    ceiling = cfg.get("max_position_embeddings") or floor_len
+    ceiling = text_config(cfg).get("max_position_embeddings") or floor_len
     tokens_total = budget // per_token
 
     # Give the context window what this app can actually fill, and spend
@@ -151,6 +168,14 @@ def plan(
         ),
     )
     result.update(lb_limits(seqs))
+    # Vision was pinned off with --limit-mm-per-prompt image=0 on every GPU,
+    # with a comment about saving KV cache on 8 GB cards. On a card with room
+    # to spare that silently threw away a feature the checkpoint supports: a
+    # parent could upload a photo of a rash and be answered from the caption
+    # alone. Enable it when the checkpoint has a vision tower AND the sizing
+    # above found spare capacity, which is the condition that comment was
+    # really about.
+    result["limit_mm_image"] = 1 if (is_multimodal(cfg) and seqs > floor_seqs) else 0
     return result
 
 
@@ -194,6 +219,8 @@ def main(argv: list[str] | None = None) -> int:
     if "lb_chat_burst" in p:
         print(f"NESTLING_LB_CHAT_BURST={p['lb_chat_burst']}")
         print(f"NESTLING_LB_CHAT_RPS={p['lb_chat_rps']}")
+    if "limit_mm_image" in p:
+        print(f"VLLM_LIMIT_MM_IMAGE={p['limit_mm_image']}")
     print(f"# {p['reason']}", file=sys.stderr)
     return 0
 

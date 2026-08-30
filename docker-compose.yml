@@ -178,6 +178,10 @@ services:
       - VLLM_TENSOR_PARALLEL_SIZE=${VLLM_TENSOR_PARALLEL_SIZE:-1}
       - VLLM_ENFORCE_EAGER=${VLLM_ENFORCE_EAGER:-1}
       - VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-1}
+      # Images per prompt. 0 keeps the vision tower unprofiled, which is the
+      # right trade only on a card with no room to spare; deploy.sh raises it
+      # when the GPU and the checkpoint both allow (scripts/size_llm.py).
+      - VLLM_LIMIT_MM_IMAGE=${VLLM_LIMIT_MM_IMAGE:-0}
       - VLLM_QUANTIZATION=${VLLM_QUANTIZATION:-fp8}
       - VLLM_KV_CACHE_DTYPE=${VLLM_KV_CACHE_DTYPE:-fp8}
       - NVIDIA_VISIBLE_DEVICES=all

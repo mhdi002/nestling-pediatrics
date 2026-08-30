@@ -58,8 +58,15 @@ EXTRA_ARGS=(--enforce-eager)
 [ "$ENFORCE_EAGER" = "1" ] || EXTRA_ARGS=()
 [ -n "$QUANTIZATION" ] && [ "$QUANTIZATION" != "none" ] && EXTRA_ARGS+=(--quantization "$QUANTIZATION")
 [ -n "$KV_DTYPE" ] && [ "$KV_DTYPE" != "auto" ] && EXTRA_ARGS+=(--kv-cache-dtype "$KV_DTYPE")
-# Skip vision tower profiling — text chat only (saves VRAM for KV on 8GB GPUs)
-EXTRA_ARGS+=(--limit-mm-per-prompt '{"image":0}')
+# How many images a prompt may carry. Zero skips vision-tower profiling and
+# leaves that VRAM for KV cache, which is the right trade on a small card --
+# but it was pinned to zero on every GPU, so a 24 GB board also refused every
+# image with "At most 0 image(s) may be provided in one prompt", and a parent
+# who uploaded a photo of a rash was answered from their caption alone.
+# deploy.sh derives this from the GPU and the checkpoint (scripts/size_llm.py)
+# and passes it through; it stays 0 when the card has no room to spare.
+LIMIT_MM_IMAGE="${VLLM_LIMIT_MM_IMAGE:-0}"
+EXTRA_ARGS+=(--limit-mm-per-prompt "{\"image\":${LIMIT_MM_IMAGE}}")
 
 echo "[llm] starting vLLM :$PORT python=$PY"
 echo "[llm] model-arg=$MODEL_ARG quant=$QUANTIZATION kv=$KV_DTYPE"
