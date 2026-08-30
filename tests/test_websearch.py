@@ -553,3 +553,53 @@ def test_endpoint_override_applies_only_to_the_primary_provider(monkeypatch):
     _reset()
     assert seen[0] == ("duckduckgo", "https://searx.example/search")
     assert seen[1] == ("duckduckgo_html", "")
+
+
+# --------------------------------------------------------------------------
+# Questions about this child are never web questions
+# --------------------------------------------------------------------------
+
+
+def _child_query(question: str) -> str:
+    return (
+        "[CHILD_MEMORY]\n"
+        "Profile: monika, female, born at 32 weeks gestation\n"
+        "Earlier: she has some ulcer in her stomach, seen at Mehr hospital\n"
+        "[CURRENT_USER]\n"
+        f"{question}"
+    )
+
+
+def test_a_recall_question_does_not_reach_the_web():
+    """Asking where a baby's ulcer was returned adult peptic-ulcer pages."""
+    from assistant.rag.stores import MedicalRAG
+    from assistant.websearch import current_user_query, is_question_about_this_child
+
+    rag = MedicalRAG()
+    if not rag.load():
+        pytest.skip("medical index not built")
+    q = _child_query("where was her ulcer?")
+    res = rag.answer(q, use_llm=False)
+    assert is_question_about_this_child(current_user_query(q), q, res, rag.store)
+
+
+def test_general_guidance_questions_may_still_search():
+    from assistant.rag.stores import MedicalRAG
+    from assistant.websearch import current_user_query, is_question_about_this_child
+
+    rag = MedicalRAG()
+    if not rag.load():
+        pytest.skip("medical index not built")
+    for question in (
+        "what is the nirsevimab dose for infants",
+        "what are the danger signs of pneumonia",
+    ):
+        q = _child_query(question)
+        res = rag.answer(q, use_llm=False)
+        assert not is_question_about_this_child(current_user_query(q), q, res, rag.store), question
+
+
+def test_without_child_memory_the_gate_never_blocks():
+    from assistant.websearch import is_question_about_this_child
+
+    assert not is_question_about_this_child("anything", "anything", {"context": ""}, None)

@@ -365,6 +365,32 @@ def local_coverage(question: str, hits_text: str, store: Any) -> float:
     return covered / total if total else 0.0
 
 
+def is_question_about_this_child(
+    question: str, query: str, rag_result: dict, store: Any
+) -> bool:
+    """True when the answer lives in the parent's own notes, not on the web.
+
+    A recall question ("where was her ulcer?") has poor corpus coverage by
+    definition -- the answer was never in the WHO corpus -- so the weakness
+    gate reads it as a gap and searches. The web cannot know anything about
+    this particular child, and what comes back is adult clinical material on
+    the topic word: asking where a baby's ulcer was returned peptic-ulcer
+    pages and a description of a terminal pressure sore.
+
+    No threshold is needed, only a comparison: when the child's own notes
+    cover the question's distinctive terms at least as well as the retrieved
+    guidance does, the question is about this child.
+    """
+    from assistant.agent.grounding import memory_context
+
+    memory = memory_context(query)
+    if not memory:
+        return False
+    return local_coverage(question, memory, store) >= local_coverage(
+        question, rag_result.get("context") or "", store
+    )
+
+
 def is_local_answer_weak(question: str, rag_result: dict, store: Any) -> bool:
     settings = get_settings()
     citations = rag_result.get("citations") or []
@@ -448,7 +474,10 @@ def maybe_augment(query: str, rag_result: dict, *, rag: Any, use_llm: bool = Tru
         question = current_user_query(query)
         if not question:
             return rag_result
-        if not is_local_answer_weak(question, rag_result, getattr(rag, "store", None)):
+        store = getattr(rag, "store", None)
+        if is_question_about_this_child(question, query, rag_result, store):
+            return rag_result
+        if not is_local_answer_weak(question, rag_result, store):
             return rag_result
         web = answer_from_web(question, use_llm=use_llm)
     except Exception as exc:  # the chat path must survive anything here
