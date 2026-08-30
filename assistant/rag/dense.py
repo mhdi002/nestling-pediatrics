@@ -39,16 +39,45 @@ def _get_model():
             return _model
         if _model_failed:
             return None
-        try:
-            from sentence_transformers import SentenceTransformer
+        name = get_settings().nestling_embedding_model
+        timeout = get_settings().nestling_dense_load_timeout
+        # SentenceTransformer() downloads the weights when they are not already
+        # cached, and this runs inside the first chat request while holding
+        # _model_lock -- so a slow or blocked huggingface.co stalls that request
+        # and every concurrent one behind it. On a host where the Hub is
+        # unreachable that is an unbounded hang, which surfaced as a 504 on the
+        # first message after every restart. Dense retrieval is an optional
+        # improvement over BM25, so give it a deadline and fall back.
+        box: dict = {}
 
-            name = get_settings().nestling_embedding_model
-            _model = SentenceTransformer(name)
-            return _model
-        except Exception as exc:
-            log.warning("Dense embeddings unavailable: %s", exc)
+        def _load() -> None:
+            try:
+                from sentence_transformers import SentenceTransformer
+
+                box["model"] = SentenceTransformer(name)
+            except Exception as exc:  # noqa: BLE001 - reported below
+                box["error"] = exc
+
+        worker = threading.Thread(target=_load, name="dense-model-load", daemon=True)
+        worker.start()
+        worker.join(timeout)
+        if worker.is_alive():
+            log.warning(
+                "Dense embeddings unavailable: loading %s exceeded %ss "
+                "(are the weights cached?) -- continuing with BM25",
+                name,
+                timeout,
+            )
             _model_failed = True
             return None
+        if "error" in box:
+            log.warning("Dense embeddings unavailable: %s", box["error"])
+            _model_failed = True
+            return None
+        _model = box.get("model")
+        if _model is None:
+            _model_failed = True
+        return _model
 
 
 def _cache_get(key: str) -> np.ndarray | None:

@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     nestling_rag_extract_keep_ratio: float = 0.75
     nestling_dense_rrf_k: int = 60
     nestling_dense_cache_size: int = 2048
+    # Deadline for lazily loading the embedding model. It is fetched on the
+    # first chat request, so an unreachable huggingface.co would otherwise hang
+    # that request indefinitely instead of falling back to BM25. Generous
+    # enough to load cached weights from disk, far below the proxy timeout.
+    nestling_dense_load_timeout: float = 20.0
 
     # Web-search fallback. Off by default: searching costs money and latency,
     # and the local WHO corpus answers the overwhelming majority of turns.
