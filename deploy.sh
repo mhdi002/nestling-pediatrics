@@ -289,14 +289,16 @@ vllm_image_ref() {
 
 driver_cuda_max() {
   # nvidia-smi reports the highest CUDA version this driver can run.
-  nvidia-smi 2>/dev/null | grep -o 'CUDA Version: *[0-9][0-9.]*' \
-    | grep -o '[0-9][0-9.]*' | head -1
+  # `|| true` because pipefail would otherwise propagate a failing nvidia-smi
+  # out of the command substitution and abort the script under `set -e`.
+  { nvidia-smi 2>/dev/null || true; } | grep -o 'CUDA Version: *[0-9][0-9.]*' \
+    | grep -o '[0-9][0-9.]*' | head -1 || true
 }
 
 image_cuda_required() {
   # Read the requirement the image itself declares.
-  docker image inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null     \
-    | grep -o -i 'cuda>=[0-9][0-9.]*' | grep -o '[0-9][0-9.]*' | head -1
+  { docker image inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null || true; } \
+    | grep -o -i 'cuda>=[0-9][0-9.]*' | grep -o '[0-9][0-9.]*' | head -1 || true
 }
 
 version_lt() {
@@ -438,7 +440,12 @@ ensure_gpu_ready() {
   # has been installed but not activated. That is repairable, so repair it
   # before deciding anything.
   if have_cmd nvidia-smi && ! nvidia-smi >/dev/null 2>&1; then
-    if nvidia-smi 2>&1 | grep -qi 'version mismatch'; then
+    # Capture first: under `set -o pipefail` a pipeline reports the failing
+    # producer, so `nvidia-smi | grep -q ...` returns nvidia-smi's exit code
+    # (18 here) even when grep matched, and the branch never ran.
+    local smi_out
+    smi_out="$(nvidia-smi 2>&1 || true)"
+    if printf '%s' "$smi_out" | grep -qi 'version mismatch'; then
       warn "NVIDIA driver/library version mismatch -- activating the installed driver"
       reload_nvidia_modules || true
       nvidia-smi >/dev/null 2>&1 || reboot_and_resume
