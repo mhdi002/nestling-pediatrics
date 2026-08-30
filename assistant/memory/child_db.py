@@ -433,7 +433,12 @@ class ChildMemoryDB:
                 child.get("name"),
                 child.get("sex"),
                 f"DOB {child.get('date_of_birth')}" if child.get("date_of_birth") else "",
-                f"GA {child.get('gestational_age_weeks')}w"
+                # Spell this out. "GA 32.0w" was read by the model as the
+                # mother being 32 weeks pregnant, and it answered a question
+                # about the baby's stomach with advice about managing ulcers
+                # in pregnancy. The number describes how early this child was
+                # BORN, so say that rather than abbreviating it.
+                f"born at {float(child['gestational_age_weeks']):g} weeks gestation"
                 if child.get("gestational_age_weeks") is not None
                 else "",
             )
@@ -533,7 +538,8 @@ class ChildMemoryDB:
                 "title": f"Child profile: {child['name']}",
                 "text": (
                     f"Child {child['name']} ({child['sex']}), DOB {child.get('date_of_birth')}, "
-                    f"gestational age {child.get('gestational_age_weeks')} weeks. Notes: {child.get('notes')}"
+                    f"born at {child.get('gestational_age_weeks')} weeks gestation. "
+                    f"Notes: {child.get('notes')}"
                 ),
             }
         ]

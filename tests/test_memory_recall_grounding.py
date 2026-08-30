@@ -181,3 +181,23 @@ def test_a_generated_answer_is_not_truncated_as_if_it_were_extractive(
     assert from_llm, f"generated answer mislabelled as {mode!r}"
     spoken = medical_chat_answer(res["answer"], from_llm=from_llm)
     assert spoken.count("Sentence number") == 6
+
+
+def test_gestational_age_is_stated_as_the_child_s_birth(monkeypatch, tmp_path):
+    """"GA 32.0w" was read as the mother being 32 weeks pregnant.
+
+    The model then answered a question about the baby's stomach with advice on
+    managing ulcers during pregnancy, so the digest must say what the number
+    means rather than abbreviate it.
+    """
+    from assistant.memory.child_db import ChildMemoryDB
+    from assistant.settings import reset_settings
+
+    monkeypatch.setenv("NESTLING_CHILD_DB", str(tmp_path / "child.db"))
+    reset_settings()
+    db = ChildMemoryDB()
+    cid = db.create_child(name="Monika", sex="female", gestational_age_weeks=32.0)
+    digest = db.child_context_text(cid)
+
+    assert "born at 32 weeks gestation" in digest
+    assert "GA 32" not in digest, "the ambiguous abbreviation is back"
