@@ -43,6 +43,10 @@ RUNTIME_OVERHEAD_BYTES = 1024**3
 # beyond this is cache reserved for tokens that never arrive.
 # tests/test_size_llm.py asserts it still covers those caps.
 DEFAULT_CONTEXT_TOKENS = 4096
+# Wall-clock for one generation at this prompt and reply size, measured on
+# the deployed 3090: an unloaded chat turn returns in about twelve seconds.
+# Only used to convert concurrency into a sustained per-IP rate.
+SECONDS_PER_GENERATION = 12
 
 
 def gpu_memory_bytes() -> int | None:
@@ -137,15 +141,36 @@ def plan(
         max_len //= 2
         seqs = int(tokens_total // max_len)
 
+    seqs = max(floor_seqs, seqs)
     result.update(
         max_model_len=int(max_len),
-        max_num_seqs=max(floor_seqs, seqs),
+        max_num_seqs=seqs,
         reason=(
             f"gpu={total // 1024**3}GiB weights={weights // 1024**3}GiB "
             f"kv_per_token={per_token}B budget_tokens={tokens_total}"
         ),
     )
+    result.update(lb_limits(seqs))
     return result
+
+
+def lb_limits(max_num_seqs: int) -> dict:
+    """Per-IP admission at the proxy, sized to what the sidecar can serve.
+
+    The proxy's burst was a fixed 5 whatever the hardware, so a card able to
+    run twenty-two sequences still turned away the sixth caller: a hundred
+    concurrent requests came back as ninety-two rejections. Admitting one full
+    batch matches the queue the sidecar can actually work on.
+
+    Sustained rate is throughput, not a preference: a batch of `max_num_seqs`
+    takes about one generation to clear, so the service drains that many
+    requests per generation and no faster. Both stay per-IP, so this is still
+    abuse protection -- it is just sized to the machine instead of to a guess.
+    """
+    return {
+        "lb_chat_burst": max(1, max_num_seqs),
+        "lb_chat_rps": max(1, round(max_num_seqs / SECONDS_PER_GENERATION)),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -166,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"VLLM_MAX_MODEL_LEN={p['max_model_len']}")
     print(f"VLLM_MAX_NUM_SEQS={p['max_num_seqs']}")
+    if "lb_chat_burst" in p:
+        print(f"NESTLING_LB_CHAT_BURST={p['lb_chat_burst']}")
+        print(f"NESTLING_LB_CHAT_RPS={p['lb_chat_rps']}")
     print(f"# {p['reason']}", file=sys.stderr)
     return 0
 

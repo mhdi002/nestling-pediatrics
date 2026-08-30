@@ -105,3 +105,19 @@ def test_concurrency_beats_context_on_a_big_card(monkeypatch, snapshot):
     p = _plan(monkeypatch, snapshot, 24)
     assert p["max_num_seqs"] >= 10, p
     assert p["max_model_len"] == size_llm.DEFAULT_CONTEXT_TOKENS
+
+
+def test_proxy_admission_follows_sidecar_capacity():
+    """A fixed burst of 5 turned away the sixth caller on a 22-sequence card."""
+    assert size_llm.lb_limits(22)["lb_chat_burst"] == 22
+    assert size_llm.lb_limits(3)["lb_chat_burst"] == 3
+    # Sustained rate is throughput: one batch clears per generation.
+    assert size_llm.lb_limits(120)["lb_chat_rps"] >= size_llm.lb_limits(12)["lb_chat_rps"]
+    # Never zero, or the proxy would admit nothing at all.
+    assert size_llm.lb_limits(1)["lb_chat_rps"] >= 1
+
+
+def test_a_small_card_keeps_the_compose_defaults(monkeypatch, snapshot):
+    """Emitting nothing leaves docker-compose's own limits in force."""
+    p = _plan(monkeypatch, snapshot, 9)
+    assert "lb_chat_burst" not in p, "would tighten the proxy on a small GPU"
