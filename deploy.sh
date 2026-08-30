@@ -410,17 +410,43 @@ ensure_driver_supports_llm_image() {
       fi
     fi
   fi
-  if [ "$ALLOW_REBOOT" = "1" ] && schedule_resume_after_reboot; then
-    warn "the new driver only takes effect after a restart."
-    warn "restarting now; the deploy finishes by itself on boot."
-    warn "progress continues in /root/nestling-resume.log"
-    sync
-    ( sleep 3; systemctl reboot ) >/dev/null 2>&1 &
-    exit 0
-  fi
+  reboot_and_resume
   warn "the GPU cannot run $img yet -- restart this host, then: ./deploy.sh --mode full"
   warn "continuing in app-only mode so the site still comes up."
   return 1
+}
+
+reboot_and_resume() {
+  # Only returns if the restart could not be arranged; otherwise it ends the
+  # run and the systemd unit picks the deploy back up on boot.
+  [ "$ALLOW_REBOOT" = "1" ] || return 1
+  schedule_resume_after_reboot || return 1
+  warn "the new driver only takes effect after a restart."
+  warn "restarting now; the deploy finishes by itself on boot."
+  warn "progress continues in /root/nestling-resume.log"
+  sync
+  ( sleep 3; systemctl reboot ) >/dev/null 2>&1 &
+  exit 0
+}
+
+# Everything the GPU path needs, in the order a broken host actually needs it.
+ensure_gpu_ready() {
+  # Upgrading the driver packages leaves the old kernel modules loaded, and
+  # nvidia-smi then fails outright with a version mismatch. gpu_available
+  # reads that as "no GPU here" and the deploy quietly drops to app-only --
+  # concluding the hardware is missing when the real state is a driver that
+  # has been installed but not activated. That is repairable, so repair it
+  # before deciding anything.
+  if have_cmd nvidia-smi && ! nvidia-smi >/dev/null 2>&1; then
+    if nvidia-smi 2>&1 | grep -qi 'version mismatch'; then
+      warn "NVIDIA driver/library version mismatch -- activating the installed driver"
+      reload_nvidia_modules || true
+      nvidia-smi >/dev/null 2>&1 || reboot_and_resume
+    fi
+  fi
+  gpu_available || return 1
+  ensure_driver_supports_llm_image || return 1
+  return 0
 }
 
 # ---------- .env bootstrap ----------
@@ -844,7 +870,7 @@ case "$ACTION" in
     gpu=0
     if [ "$MODE" = full ]; then
       step "checking for GPU"
-      if gpu_available && ensure_driver_supports_llm_image; then
+      if ensure_gpu_ready; then
         gpu=1
       else
         warn "no usable GPU -- falling back to app-only deploy"
