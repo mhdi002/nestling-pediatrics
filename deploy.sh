@@ -256,6 +256,11 @@ gpu_available() {
     # runtime hook. Install it and retry once before giving up on the GPU.
     if [ "$INSTALL_PREREQS" = "1" ] && is_root && have_apt && ! have_cmd nvidia-ctk; then
       install_nvidia_toolkit_linux || true
+    else
+      # The toolkit is present, so the usual cause is a CDI spec written for a
+      # driver version that is no longer installed. Regenerate and retry before
+      # concluding the GPU is unusable.
+      refresh_nvidia_cdi
     fi
     if ! docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi >/dev/null 2>&1; then
       warn "GPU driver found but 'docker run --gpus all' failed -- install the NVIDIA Container Toolkit: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html"
@@ -333,6 +338,24 @@ upgrade_nvidia_driver() {
 # Returns 0 when the GPU can run the LLM image, 1 when the caller should
 # degrade to app-only rather than build a sidecar that cannot start.
 RESUME_UNIT_NAME="nestling-deploy-resume.service"
+
+refresh_nvidia_cdi() {
+  # The CDI spec pins the exact driver library filenames (…so.570.172.08), so
+  # after an upgrade it points at files that no longer exist and every GPU
+  # container fails to start with a mount error naming the old version. The
+  # spec has to be regenerated whenever the driver changes.
+  have_cmd nvidia-ctk || return 0
+  is_root || return 0
+  step "regenerating the CDI spec for the current driver"
+  if nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml >/tmp/nestling-cdi.log 2>&1; then
+    ok "CDI spec regenerated"
+  else
+    warn "could not regenerate the CDI spec -- see /tmp/nestling-cdi.log"
+  fi
+  ldconfig >/dev/null 2>&1 || true
+  systemctl restart docker >/dev/null 2>&1 || true
+  sleep 8
+}
 
 reload_nvidia_modules() {
   # A newly installed driver is only live once the kernel modules are swapped.
@@ -449,6 +472,9 @@ ensure_gpu_ready() {
       warn "NVIDIA driver/library version mismatch -- activating the installed driver"
       reload_nvidia_modules || true
       nvidia-smi >/dev/null 2>&1 || reboot_and_resume
+      # The driver just changed underneath the toolkit; its spec names the old
+      # library filenames until it is rebuilt.
+      refresh_nvidia_cdi
     fi
   fi
   gpu_available || return 1
