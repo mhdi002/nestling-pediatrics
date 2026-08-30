@@ -204,3 +204,14 @@ def test_gestational_age_is_stated_as_the_child_s_birth(monkeypatch, tmp_path):
 
     assert "born at 32 weeks gestation" in digest
     assert "GA 32" not in digest, "the ambiguous abbreviation is back"
+
+
+def test_a_question_about_the_conversation_is_not_answered_with_a_checklist():
+    """Asked "what is the photo", it recited a clinician photo-prep checklist.
+
+    The corpus matched a page about preparing photographs for a clinician and
+    the model asked when the spots started and whether they blanch -- having
+    just described them itself.
+    """
+    assert "refers to something from earlier in this conversation" in GROUNDED_SYSTEM
+    assert "never ask them for details those notes already contain" in GROUNDED_SYSTEM

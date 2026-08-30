@@ -41,6 +41,14 @@ GROUNDED_SYSTEM = (
     "what you have or have not been told, and never restate or re-answer an "
     "earlier turn -- you already know it, so just carry on. Do not ask for "
     "anything the parent has already given. "
+    # A question about something from the conversation kept being answered
+    # from whatever chunk matched its words. Asked "what is the photo", the
+    # corpus returned a page on preparing photographs for a clinician -- a
+    # checklist -- and the model recited the checklist back, asking when the
+    # spots started and whether they blanch, having just described them.
+    "When the parent refers to something from earlier in this conversation -- "
+    "a photo they sent, a symptom they described -- answer from the parent's "
+    "notes above and never ask them for details those notes already contain. "
     "Only when the parent asks about a specific thing they told you earlier "
     "and it is genuinely not there, say briefly that you do not have it. "
     "Never guess, and never substitute a different topic for the one asked. "
