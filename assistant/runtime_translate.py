@@ -165,10 +165,25 @@ def ensure_pure_lang(text: str, lang: str) -> str:
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         return cleaned or text
     # fa
-    if has_persian(text) and not re.search(r"[A-Za-z]{4,}", text):
+    min_run = get_settings().nestling_translate_min_latin_run
+    latin_run = re.compile(rf"[A-Za-z]{{{min_run},}}")
+    if has_persian(text) and not latin_run.search(text):
         return text
-    # Mixed or English-heavy → full EN→FA
-    return translate_en_to_fa(text)
+    # Mixed or English-heavy. translate_en_to_fa() no-ops on any string that
+    # already holds Persian, so a reply whose body is English but whose appended
+    # disclaimer is Persian used to slip through untranslated. Translate block by
+    # block instead (blank-line separated): a block with no Persian is leaked
+    # English and gets translated; a block that already carries Persian — the
+    # disclaimer, or Persian prose keeping an English medical term — is left as
+    # is. re.split keeps the separators so the reply is rejoined verbatim.
+    blocks = re.split(r"(\n\s*\n)", text)
+    out = [
+        block
+        if (has_persian(block) or not latin_run.search(block))
+        else translate_en_to_fa(block)
+        for block in blocks
+    ]
+    return "".join(out)
 
 
 def translate_for_models(user_message: str, ui_lang: str | None = None) -> tuple[str, str]:

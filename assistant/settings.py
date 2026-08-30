@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # Runtime translation (deep-translator has no built-in timeout)
     nestling_translate_timeout: float = 6.0
     nestling_translate_workers: int = 4
+    # Shortest run of Latin letters that marks a block as leaked English needing
+    # translation when forcing a reply into Persian (ensure_pure_lang).
+    nestling_translate_min_latin_run: int = 4
 
     # Mean days per month, for deriving an age from a date of birth.
     nestling_days_per_month: float = 30.4375
@@ -154,6 +157,38 @@ class Settings(BaseSettings):
     # that request indefinitely instead of falling back to BM25. Generous
     # enough to load cached weights from disk, far below the proxy timeout.
     nestling_dense_load_timeout: float = 20.0
+
+    # Audience scoping (assistant/rag/audience.py, config/knowledge_audience.yaml).
+    # A clinician manual is split in document order at the point where it stops
+    # describing the family in the third person and starts addressing them
+    # directly; the tail is released as parent-facing.
+    # Below this many sections a "document order" argument is meaningless, so a
+    # short clinician source stays clinician-only end to end. Every curated
+    # parent file in the corpus is smaller than this; the two WHO manuals have
+    # 56 and 229 sections.
+    nestling_audience_min_sections: int = 20
+    # The split is only believed when the tail is this much more second-person
+    # than the head, on a scale where +1 is "speaks only to you" and -1 is
+    # "speaks only about them". Measured on the corpus: PCPNC separates by
+    # 0.99 at its counselling-sheet boundary; IYCF, which has no such section,
+    # produces no tail at all.
+    nestling_audience_min_separation: float = 0.5
+    # A section needs at least this many person references before its own
+    # grammatical person is treated as evidence rather than noise. Drug-dose
+    # tables ("IM/IV: 10 IU") name nobody and must fall back to the document's
+    # declared audience.
+    nestling_audience_min_person_refs: int = 3
+
+    # Emergency escalation. When the best answer the corpus can offer a parent
+    # is a clinician-only procedure, the parent is told to seek emergency care
+    # instead of being read the procedure. The trigger is structural: the top
+    # clinician-audience hit has to beat the best parent-audience hit by this
+    # factor. Measured on the probe set, genuine emergency phrasings clear 2x
+    # comfortably while ordinary parent questions stay far below it.
+    nestling_audience_escalation_ratio: float = 2.0
+    # ...and it has to be a real lexical match, not the top of an empty field.
+    # BM25 scores on this corpus run ~5-45 for a matching question.
+    nestling_audience_escalation_min_score: float = 5.0
 
     # Web-search fallback. Off by default: searching costs money and latency,
     # and the local WHO corpus answers the overwhelming majority of turns.

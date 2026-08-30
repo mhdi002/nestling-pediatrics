@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -44,3 +45,58 @@ def test_curated_medical_present():
     text = p.read_text(encoding="utf-8")
     assert "INTERGROWTH" in text
     assert "Iron" in text or "iron" in text
+
+
+# --- ensure_pure_lang: mixed English body + Persian disclaimer (regression) ---
+# The LLM answer generation and the appended disclaimer can leave a reply whose
+# body is English but whose trailing disclaimer is Persian. ensure_pure_lang used
+# to delegate the whole string to translate_en_to_fa(), which no-ops on any text
+# that already contains Persian, so the English body slipped through untranslated.
+
+from assistant import runtime_translate as RT  # noqa: E402
+
+
+def _stub_translator(monkeypatch):
+    """Deterministic offline stand-in for the MT call."""
+    calls: list[str] = []
+
+    def fake(text: str) -> str:
+        calls.append(text)
+        return "«ترجمه‌شده»"
+
+    monkeypatch.setattr(RT, "translate_en_to_fa", fake)
+    return calls
+
+
+def test_ensure_pure_lang_translates_leaked_english_body(monkeypatch):
+    calls = _stub_translator(monkeypatch)
+    disclaimer = "برای تشخیص یا درمان حتماً با متخصص کودکان مشورت کنید."
+    mixed = f"Keep the child hydrated and monitor the temperature closely.\n\n{disclaimer}"
+
+    out = RT.ensure_pure_lang(mixed, "fa")
+
+    # English block was handed to the translator; Persian disclaimer was not.
+    assert calls == ["Keep the child hydrated and monitor the temperature closely."]
+    assert "«ترجمه‌شده»" in out
+    assert disclaimer in out
+    # No English prose survives in the final reply.
+    assert not re.search(r"[A-Za-z]{4,}", out)
+
+
+def test_ensure_pure_lang_keeps_persian_with_english_term(monkeypatch):
+    calls = _stub_translator(monkeypatch)
+    text = "دوز acetaminophen را با پزشک چک کنید."
+
+    out = RT.ensure_pure_lang(text, "fa")
+
+    # A Persian block carrying an English medical term is left intact.
+    assert out == text
+    assert calls == []
+
+
+def test_ensure_pure_lang_pure_persian_untouched(monkeypatch):
+    calls = _stub_translator(monkeypatch)
+    text = "سلام، حال فرزند شما چطور است؟"
+
+    assert RT.ensure_pure_lang(text, "fa") == text
+    assert calls == []
