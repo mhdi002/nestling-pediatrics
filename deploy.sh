@@ -274,12 +274,13 @@ gpu_available() {
 # own NVIDIA_REQUIRE_CUDA, and the ceiling from the running driver.
 
 vllm_image_ref() {
-  # Same default the compose file uses, without duplicating the tag.
+  # Ask Compose what the build arg resolves to rather than parsing the YAML:
+  # it already applies .env, NESTLING_VLLM_IMAGE and the default in one place.
   if [ -n "${NESTLING_VLLM_IMAGE:-}" ]; then
     printf '%s' "$NESTLING_VLLM_IMAGE"
     return
   fi
-  sed -n 's/.*VLLM_IMAGE: *"\${NESTLING_VLLM_IMAGE:-\([^}]*\)}".*//p'     docker-compose.yml | head -1
+  docker compose --profile llm config 2>/dev/null     | awk '/VLLM_IMAGE:/ {print $2; exit}' | tr -d '"'
 }
 
 driver_cuda_max() {
