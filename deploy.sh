@@ -285,12 +285,14 @@ vllm_image_ref() {
 
 driver_cuda_max() {
   # nvidia-smi reports the highest CUDA version this driver can run.
-  nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9][0-9.]*\).*//p' | head -1
+  nvidia-smi 2>/dev/null | grep -o 'CUDA Version: *[0-9][0-9.]*' \
+    | grep -o '[0-9][0-9.]*' | head -1
 }
 
 image_cuda_required() {
   # Read the requirement the image itself declares.
-  docker image inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null     | sed -n 's/.*[Cc]uda>=\([0-9][0-9.]*\).*//p' | head -1
+  docker image inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null     \
+    | grep -o -i 'cuda>=[0-9][0-9.]*' | grep -o '[0-9][0-9.]*' | head -1
 }
 
 version_lt() {
