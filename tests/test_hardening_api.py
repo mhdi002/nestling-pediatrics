@@ -132,6 +132,44 @@ def test_vision_rejects_bytes_that_are_not_a_real_image(client):
     assert r.json()["error"] == "invalid_image"
 
 
+def _decompression_bomb_png(width: int, height: int) -> bytes:
+    """A tiny PNG whose IHDR *declares* huge dimensions (one real row of data).
+
+    This is the decompression-bomb shape: a few bytes on the wire that would
+    allocate a giant bitmap if `load()` ran before the pixel-count check.
+    """
+    import struct
+    import zlib
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = typ + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    idat = zlib.compress(b"\x00" + b"\xff\x00\x00" * width)
+    return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+
+
+def test_vision_rejects_a_pixel_dimension_bomb(client, monkeypatch):
+    """The pixel-count guard must reject an image that exceeds the pixel cap
+    *before* Pillow allocates the full bitmap, even though the file is tiny."""
+    from assistant.settings import Settings, get_settings
+
+    capped = Settings(**{**get_settings().model_dump(), "nestling_max_image_pixels": 1_000_000})
+    monkeypatch.setattr("app.api.routes.get_settings", lambda: capped)
+    # 4000 x 4000 = 16e6 declared pixels, well over the 1e6 cap; file is ~bytes.
+    bomb = _decompression_bomb_png(4000, 4000)
+    assert len(bomb) < 5000, "bomb payload should be tiny on the wire"
+    r = client.post(
+        "/api/chat/vision",
+        files={"image": ("bomb.png", bomb, "image/png")},
+        data={"message": "look"},
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["error"] == "image_too_large"
+
+
 # --- path traversal -----------------------------------------------------------
 
 

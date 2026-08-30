@@ -9,23 +9,14 @@ from pathlib import Path
 
 import intergrowth_preterm_equations as ig
 
-# Reference checkpoints derived from the official equations (same coefficients as
-# ki-tools/growthstandards igprepost_*). These match Villar et al. 2015 charts.
-# Tolerances allow tiny floating-point differences.
-
-CHECKS = [
-    # sex, measure, weeks, percentile, expected, abs_tol
-    # Weight boys — chart-like checkpoints
-    ("male", "weight", 27, 50, None, 0.02),
-    ("male", "weight", 40, 50, None, 0.05),
-    ("male", "weight", 64, 50, None, 0.08),
-    ("female", "weight", 27, 50, None, 0.02),
-    ("female", "weight", 64, 50, None, 0.08),
-    ("male", "length", 40, 50, None, 0.3),
-    ("female", "length", 64, 50, None, 0.3),
-    ("male", "head_circumference", 40, 50, None, 0.3),
-    ("female", "head_circumference", 64, 50, None, 0.3),
-]
+# External validation lives in PUBLISHED_EXAMPLES below (value->centile anchors
+# taken from the ki-tools/growthstandards docs). The self-consistency checks
+# (roundtrip / monotonic / age-increasing / chart-sanity) run in main().
+#
+# NOTE: an earlier CHECKS table listed 50th-centile "checkpoints" with expected
+# values left as None and was never iterated in main() -- it validated nothing
+# while looking like it did, so it has been removed. Add real, sourced expected
+# values here (not None placeholders) if median checkpoints are wanted.
 
 # Self-consistency and published example from growthstandards docs:
 # igprepost_value2centile(27*7, 0.99, wtkg, Male) ≈ 96.89
