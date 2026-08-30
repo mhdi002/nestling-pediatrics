@@ -40,7 +40,17 @@ COPY requirements-core.txt requirements.txt ./
 
 # Default image is slim (no torch). Build with --build-arg INSTALL_ML=1 for optional xLAM.
 ARG INSTALL_ML=0
-RUN if [ "$INSTALL_ML" = "1" ]; then \
+# Python package index. Empty means PyPI; override when pypi.org is unreachable
+# from the build network. deploy.sh probes config/pypi_mirrors.txt and passes a
+# working one through as NESTLING_PIP_INDEX_URL.
+ARG PIP_INDEX_URL=""
+RUN set -eux; \
+    if [ -n "$PIP_INDEX_URL" ]; then \
+      host="$(printf '%s' "$PIP_INDEX_URL" | sed -e 's|^https\?://||' -e 's|/.*$||')"; \
+      pip config set global.index-url "$PIP_INDEX_URL"; \
+      pip config set global.trusted-host "$host"; \
+    fi; \
+    if [ "$INSTALL_ML" = "1" ]; then \
       pip install -r requirements.txt ; \
     else \
       pip install -r requirements-core.txt ; \

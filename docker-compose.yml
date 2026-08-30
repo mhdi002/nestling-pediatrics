@@ -67,6 +67,8 @@ services:
         # Empty means "use the image's default mirror". Set
         # NESTLING_DEBIAN_MIRROR in .env where deb.debian.org is unreachable.
         DEBIAN_MIRROR: "${NESTLING_DEBIAN_MIRROR:-}"
+        # Likewise for pypi.org; deploy.sh fills this in when it is blocked.
+        PIP_INDEX_URL: "${NESTLING_PIP_INDEX_URL:-}"
     # No host port published: traffic comes through nginx. Set
     # NESTLING_APP_HOST_PORT and re-add a ports entry only for direct debugging.
     expose:

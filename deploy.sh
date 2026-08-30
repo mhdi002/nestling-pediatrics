@@ -693,41 +693,53 @@ download_model() {
 # minutes before failing on something that has nothing to do with this project.
 # Probe the candidates in config/debian_mirrors.txt and build with one that
 # answers, instead of asking the operator to diagnose it.
-ensure_debian_mirror() {
-  local list="config/debian_mirrors.txt"
-  # Already pinned (env or a previous run wrote it to .env)? Respect it.
-  if [ -n "${NESTLING_DEBIAN_MIRROR:-}" ]; then
-    ok "using pinned Debian mirror: $NESTLING_DEBIAN_MIRROR"
+#   select_mirror <ENV_VAR> <candidate file> <probe path> <label>
+# Probes each candidate and records the first that answers in .env, so later
+# runs skip the probe. The first entry in each file is the upstream default;
+# selecting it needs no override, so nothing is written.
+select_mirror() {
+  local var="$1" list="$2" probe="$3" label="$4"
+  local pinned; eval "pinned=\${$var:-}"
+  if [ -n "$pinned" ]; then
+    ok "using pinned $label: $pinned"
     return 0
   fi
-  if grep -qs '^NESTLING_DEBIAN_MIRROR=.\+' .env; then
-    ok "using Debian mirror already recorded in .env"
+  if grep -qs "^$var=.\+" .env; then
+    ok "using $label already recorded in .env"
     return 0
   fi
   [ -f "$list" ] || return 0
-  step "selecting a reachable Debian package mirror"
-  local url code
+  step "selecting a reachable $label"
+  local url code first=1
   while read -r url; do
     case "$url" in ''|'#'*) continue ;; esac
-    # /dists/ exists on every Debian mirror regardless of suite, so this stays
-    # correct as the base image moves between releases.
-    code="$(curl -s -o /dev/null -m 12 -w '%{http_code}' "$url/dists/" 2>/dev/null || echo 000)"
+    code="$(curl -s -o /dev/null -m 12 -w '%{http_code}' "$url$probe" 2>/dev/null || echo 000)"
     case "$code" in
       2??|3??)
-        if [ "$url" = "http://deb.debian.org/debian" ]; then
-          ok "deb.debian.org reachable, using the default mirror"
+        if [ "$first" = 1 ]; then
+          ok "default $label reachable ($url)"
         else
-          ok "using Debian mirror $url"
-          printf 'NESTLING_DEBIAN_MIRROR=%s\n' "$url" >> .env
-          export NESTLING_DEBIAN_MIRROR="$url"
+          ok "using $label $url"
+          printf '%s=%s\n' "$var" "$url" >> .env
+          export "$var=$url"
         fi
         return 0
         ;;
     esac
-    warn "mirror unreachable ($code): $url"
+    warn "unreachable ($code): $url"
+    first=0
   done < "$list"
-  warn "no candidate Debian mirror answered -- building with the default"
+  warn "no candidate $label answered -- building with the default"
   return 0
+}
+
+ensure_build_mirrors() {
+  # /dists/ exists on every Debian mirror regardless of suite, so this stays
+  # correct as the base image moves between releases.
+  select_mirror NESTLING_DEBIAN_MIRROR config/debian_mirrors.txt \
+    "/dists/" "Debian package mirror"
+  select_mirror NESTLING_PIP_INDEX_URL config/pypi_mirrors.txt \
+    "/" "Python package index"
 }
 
 # ---------- compose orchestration ----------
@@ -935,7 +947,7 @@ case "$ACTION" in
       warn "skipping model download (--skip-model-download) -- llm service will fail to start if weights are missing"
     fi
 
-    ensure_debian_mirror
+    ensure_build_mirrors
     step "building images"
     compose_build
 

@@ -1,0 +1,18 @@
+# Candidate Python package indexes, tried in order during `deploy.sh`.
+#
+# pypi.org is first and is the right answer almost everywhere. Where it is
+# blocked, pip retries with a long read timeout, so the image build stalls for
+# many minutes before failing. deploy.sh probes this list and builds with the
+# first index that answers.
+#
+# One URL per line (the /simple endpoint), blank lines and #-comments ignored.
+# Set NESTLING_PIP_INDEX_URL in .env to pin one and skip probing. Add an
+# internal or closer index at the top.
+#
+# Only add indexes you trust: whatever is listed here supplies the packages
+# this image is built from.
+
+https://pypi.org/simple
+https://mirror-pypi.runflare.com/simple
+https://mirror.arvancloud.ir/pypi/web/simple
+https://pypi.tuna.tsinghua.edu.cn/simple
