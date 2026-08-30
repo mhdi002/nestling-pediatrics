@@ -391,8 +391,32 @@ def is_question_about_this_child(
     )
 
 
+def asks_beyond_corpus_age(question: str) -> bool:
+    """True when the question is about a child older than this corpus covers.
+
+    Term coverage cannot see this. Asked what a four year old can eat, the
+    corpus returned newborn and 4-5 month feeding notes -- "4 y o" matched
+    "4-5 months" -- and scored 0.76, so the gate judged the question answered
+    and never searched. The vocabulary matched; the age did not.
+
+    The ceiling is declared in config/care_topics.yaml rather than inferred,
+    because it is a fact about which documents were curated, not something
+    retrieval can measure.
+    """
+    from assistant.agent.slots import extract_growth_slots
+    from assistant.refdata import care_topics
+
+    ceiling = (care_topics() or {}).get("age_coverage_max_months")
+    if not ceiling:
+        return False
+    age = extract_growth_slots(question or "").get("age_months")
+    return age is not None and float(age) > float(ceiling)
+
+
 def is_local_answer_weak(question: str, rag_result: dict, store: Any) -> bool:
     settings = get_settings()
+    if asks_beyond_corpus_age(question):
+        return True
     citations = rag_result.get("citations") or []
     if not citations:
         return True

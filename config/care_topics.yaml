@@ -162,6 +162,21 @@ growth_centile_doc_pattern: '(centile|percentile|growth.?chart|intergrowth|صد�
 
 # Curated feeding chunk ids per chronological age band (upper bound exclusive).
 # `max_age_months: null` is the final catch-all band.
+# Oldest age this care library actually covers, in months.
+#
+# The WHO material curated here is infant and toddler guidance: the oldest
+# feeding band is info_feeding_12_24m, and there is nothing about preschool
+# or school-age children. Retrieval cannot know that. Asked what a four year
+# old can eat, it returned newborn and 4-5 MONTH feeding notes -- the "4" in
+# "4 y o" matched "4-5 months" -- and scored 0.76 on term coverage, so the
+# web-search gate concluded the corpus had answered and never looked further.
+# The words matched; the age did not.
+#
+# Declaring the ceiling lets an age-specific question outside it be treated
+# as unanswerable here, whatever the word overlap. Raise this when guidance
+# for older children is actually added to the corpus.
+age_coverage_max_months: 24
+
 feeding_age_bands:
   - max_age_months: 4
     ids: [info_feeding_newborn, info_feeding_0_3m, info_iron_breastfed]

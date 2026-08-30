@@ -189,7 +189,9 @@ class QwenClient:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=self.probe_timeout * 4) as r:
+            with urllib.request.urlopen(
+                req, timeout=get_settings().nestling_vision_probe_timeout
+            ) as r:
                 capable = r.status == 200
         except urllib.error.HTTPError as exc:
             # A 400 here is the model telling us it takes no images.

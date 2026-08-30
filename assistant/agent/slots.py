@@ -60,7 +60,10 @@ def extract_growth_slots(text: str) -> dict:
     # that "2 years" is not left unparsed (which previously made the agent
     # re-ask for an age the parent had already given).
     m = re.search(
-        r"(\d+(?:\.\d+)?)\s*(?:y(?:ea)?rs?\b|yo\b|سال(?:ه|گی)?)",
+        # "y o" and "y.o." are written with a space or dots as often as "yo",
+        # and an unparsed age is worse than usually: it silently became "no age
+        # given" and the reply was built for an infant.
+        r"(\d+(?:\.\d+)?)\s*(?:y(?:ea)?rs?\b|y\s*[.]?\s*o\b|سال(?:ه|گی)?)",
         text,
         re.I,
     )

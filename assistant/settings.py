@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # tests/test_timeout_hierarchy.py asserts the relationship still holds.
     nestling_llm_timeout: float = 60.0
     nestling_llm_probe_timeout: float = 1.5
+    # The vision probe sends a real one-pixel image and waits for a token, so
+    # it is a generation, not a ping. At four times the ping timeout it kept
+    # timing out on a busy GPU and the app reported 'vision model is not
+    # ready' for a sidecar that was serving images fine. It runs once per
+    # process and the verdict is cached, so it can afford to wait.
+    nestling_vision_probe_timeout: float = 45.0
     nestling_llm_ready_cache_seconds: float = 5.0
     nestling_llm_error_detail_chars: int = 400
 

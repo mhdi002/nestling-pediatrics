@@ -57,8 +57,11 @@ def test_context_omits_a_missing_source():
 def test_system_prompt_routes_child_questions_to_the_parents_notes():
     assert PARENT_NOTES_HEADING in GROUNDED_SYSTEM
     assert CARE_NOTES_HEADING in GROUNDED_SYSTEM
-    # It must admit ignorance rather than answer from the wrong source.
-    assert "not mentioned it yet" in GROUNDED_SYSTEM
+    # It must not narrate its own notes: that produced "the care notes you
+    # shared focus on newborns" and a re-request for an age already given.
+    assert "silently" in GROUNDED_SYSTEM
+    assert "never restate or re-answer an" in GROUNDED_SYSTEM
+    assert "already given" in GROUNDED_SYSTEM
 
 
 def test_ask_medical_sends_both_sources_to_the_model(monkeypatch):

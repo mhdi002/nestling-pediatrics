@@ -603,3 +603,46 @@ def test_without_child_memory_the_gate_never_blocks():
     from assistant.websearch import is_question_about_this_child
 
     assert not is_question_about_this_child("anything", "anything", {"context": ""}, None)
+
+
+# --------------------------------------------------------------------------
+# Questions about a child older than the corpus covers
+# --------------------------------------------------------------------------
+
+
+def test_a_preschooler_question_is_not_answerable_from_an_infant_corpus():
+    """Asked what a 4 year old can eat, it cited newborn and 4-5 MONTH notes.
+
+    The "4" in "4 y o" matched "4-5 months" and term coverage scored 0.76, so
+    the gate concluded the corpus had answered and never searched.
+    """
+    from assistant.websearch import asks_beyond_corpus_age
+
+    for q in ("a 4 y o boy can eat what ?", "what can a 4 year old eat",
+              "what foods for a 3 year old"):
+        assert asks_beyond_corpus_age(q), q
+
+
+def test_questions_within_the_corpus_age_range_stay_local():
+    from assistant.websearch import asks_beyond_corpus_age
+
+    for q in ("how often should I feed a two month old",
+              "what can an 18 month old eat",
+              "tell me about iron for breastfed babies"):
+        assert not asks_beyond_corpus_age(q), q
+
+
+def test_a_question_with_no_age_is_not_forced_to_the_web():
+    from assistant.websearch import asks_beyond_corpus_age
+
+    assert not asks_beyond_corpus_age("when do babies start talking")
+
+
+def test_spaced_year_old_abbreviations_parse():
+    """"4 y o" parsed as no age at all, so the reply was built for an infant."""
+    from assistant.agent.slots import extract_growth_slots
+
+    for text in ("a 4 y o boy", "a 4 y.o. boy", "a 4yo boy", "a 4 year old"):
+        assert extract_growth_slots(text).get("age_months") == 48.0, text
+    # ...without swallowing a weight.
+    assert extract_growth_slots("she weighs 4 kg").get("age_months") is None

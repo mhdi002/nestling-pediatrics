@@ -762,12 +762,25 @@ class ParentAssistant:
             try:
                 client = get_qwen()
                 if client.vision_ready:
+                    # Ask for the description first, always. Without that the
+                    # model was told only that the parent "sent a photo without
+                    # text", and it answered by listing what it could not know
+                    # -- "there is no text attached, I cannot see the child's
+                    # age" -- while looking straight at the picture. A parent
+                    # who sends a photo and no words wants to be told what is
+                    # in it, not what is missing.
                     user_q = (
-                        f"Parent note: {caption}. " if caption else "Parent sent a photo without text. "
-                    ) + (
-                        "Describe likely benign possibilities and red flags for urgent care. "
-                        "Educational guidance only."
+                        "Start by describing what you can actually see in this "
+                        "photo in one or two plain sentences: where on the body "
+                        "it is if you can tell, and the colour, size, pattern "
+                        "and texture of anything on the skin. Then give likely "
+                        "benign possibilities and the red flags that mean urgent "
+                        "care. Educational guidance only, never a diagnosis. "
+                        "Do not ask for details the parent has not given yet and "
+                        "do not say what you cannot see -- describe what you can."
                     )
+                    if caption:
+                        user_q = f"The parent asks: {caption}\n\n{user_q}"
                     grounded_prompt = (
                         f"{user_q}\n\nCare notes context:\n{context}\n\n"
                         "Keep response concise and parent-friendly."
