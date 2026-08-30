@@ -1,0 +1,123 @@
+# Audience scoping for the medical knowledge base (assistant/rag/audience.py).
+#
+# Part of the corpus was adapted from manuals written FOR SKILLED HEALTH
+# WORKERS -- WHO's PCPNC guide and the IYCF counselling course. Those books
+# contain procedures a parent must never be talked through: newborn bag-mask
+# ventilation, IV access, IM drug doses, manual removal of the placenta. A
+# frightened parent asking "my baby is not breathing" must be told to get
+# emergency help, not handed a resuscitation chart.
+#
+# Nothing here is a list of "dangerous words". Two structural facts do the
+# work:
+#
+#   1. PROVENANCE. `sources` records, per source document, the audience the
+#      document was written for. That is a bibliographic fact about the
+#      corpus, the same kind of data as the `source` field already stored on
+#      every chunk. Unlisted sources are treated as clinician-facing (see
+#      `default_audience`) so that adding a document is a deliberate act;
+#      tests/test_audience_scope.py fails if a source in chunks.json is not
+#      declared here.
+#
+#   2. GRAMMATICAL PERSON, in document order. A clinician manual describes the
+#      people in the room in the third person ("wash the baby", "explain to
+#      the mother") because the reader is a third party. The parts such a
+#      manual writes for the family address the reader directly ("wash your
+#      baby's face", "go to the health centre immediately"). PCPNC collects
+#      those in one block at the back of the book -- its own front matter says
+#      so: "a section is included at the back of the Guide ... Individual
+#      sheets are provided with simplified versions of the messages". So the
+#      classifier scores each section on grammatical person and looks for the
+#      single point in document order where the book stops speaking about the
+#      family and starts speaking to them. Everything before that point stays
+#      clinician-only; the tail is released as parent-facing.
+#
+# The word lists below are closed grammatical classes -- pronouns and the
+# nouns that name the people in the scene. They decide WHOM a sentence is
+# about, never WHAT it is about, so they carry no clinical judgement and no
+# topic can be smuggled in or out by editing them.
+
+version: 1
+
+# Audience for a source document not matched by any pattern below. Fail
+# closed: an undeclared document is withheld from parent answers rather than
+# quoted to a parent on the strength of a missing config entry.
+default_audience: clinician
+
+# source (fnmatch pattern, matched against the chunk's `source` field, first
+# match wins) -> audience the document was written for.
+sources:
+  # --- Written for skilled birth attendants / health workers -------------
+  # "This Guide is a tool for clinical decision-making ... professionals
+  # using it have the knowledge and skills in providing the care it
+  # describes." (PCPNC front matter, quoted in the adapted markdown.)
+  curated_who_pcpnc_full_en.md: clinician
+  # IYCF is WHO's counselling *course* for health workers: it teaches the
+  # counsellor what to say and do, not the mother.
+  curated_who_iycf_full_en.md: clinician
+
+  # --- Written for parents ----------------------------------------------
+  # Curated in this repo from parent-facing guidance.
+  curated_burns_sun_heat_en.md: parent
+  curated_development_milestones_en.md: parent
+  curated_feeding_by_age_en.md: parent
+  curated_iron_nutrition_en.md: parent
+  curated_medical_en.md: parent
+  curated_pediatric_vision_care_en.md: parent
+  curated_safety_immunization_en.md: parent
+  curated_sleep_by_age_en.md: parent
+  curated_who_common_illness_en.md: parent
+  curated_who_danger_signs_en.md: parent
+  curated_who_feeding_nutrition_en.md: parent
+  # The original parenting handbook the assistant was first built on.
+  info.txt: parent
+  # Growth-standard documentation surfaced when a parent asks what a centile
+  # means.
+  intergrowth_preterm_equations.py: parent
+  # Screening questionnaires (ASQ age booklets, M-CHAT). These are filled in
+  # BY the parent, so their items are parent-facing by construction.
+  "*.pdf": parent
+
+# Closed grammatical classes used to score who a passage addresses.
+person:
+  # Second person: the reader is the person being spoken to.
+  second_person:
+    - you
+    - your
+    - yours
+    - yourself
+    - yourselves
+  # Nouns naming the people a maternity/child-health text is about. A
+  # third-person reference to one of them ("the mother", "her baby") means
+  # the reader is someone other than the family.
+  role_nouns:
+    - mother
+    - woman
+    - women
+    - baby
+    - babies
+    - newborn
+    - infant
+    - infants
+    - child
+    - children
+    - girl
+    - boy
+    - patient
+    - family
+    - partner
+    - client
+    - adolescent
+  # Determiners that mark a definite third-person reference. "your baby" is
+  # deliberately absent: second-person possessives are counted as second
+  # person, which is the whole point of the measure.
+  determiners:
+    - the
+    - a
+    - an
+    - her
+    - his
+    - this
+    - that
+    - each
+    - every
+    - another

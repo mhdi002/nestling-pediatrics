@@ -58,6 +58,12 @@ def websearch_config() -> dict[str, Any]:
     return _load_yaml("websearch.yaml")
 
 
+@lru_cache
+def knowledge_audience() -> dict[str, Any]:
+    """Per-source provenance and the person markers used to scope chunks."""
+    return _load_yaml("knowledge_audience.yaml")
+
+
 def weeks_per_month() -> float:
     b = clinical_bounds()
     if b.get("use_legacy_weeks_per_month", True):
@@ -71,3 +77,4 @@ def clear_refdata_cache() -> None:
     asq_scoring.cache_clear()
     mchat_config.cache_clear()
     care_topics.cache_clear()
+    knowledge_audience.cache_clear()

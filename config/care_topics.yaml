@@ -15,6 +15,14 @@ messages:
   no_match: >-
     I couldn't find a matching care note for that — try asking another way, or
     tell me more detail.
+  # Used when the only thing our notes hold on a question is a procedure meant
+  # for a trained health worker (see assistant/rag/audience.py). Plain, first,
+  # and short: a parent in that moment needs to call for help, not read.
+  emergency_escalation: >-
+    This sounds like an emergency. Call your local emergency number or get to
+    the nearest emergency department right now — do not wait, and do not try a
+    medical procedure yourself. If someone else is with you, ask them to call
+    while you stay with your baby. I can talk it through with you afterwards.
 
 # Metadata lines the orchestrator appends to a query. They carry age/sex facts
 # and must never influence topic detection.

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,12 @@ from assistant.config import (
     CHILD_INDEX_DIR,
     KNOWLEDGE_DIR,
     MEDICAL_INDEX_DIR,
+)
+from assistant.rag.audience import (
+    PARENT,
+    clinician_only_topic,
+    is_parent_facing,
+    label_chunks,
 )
 from assistant.rag.embeddings import BM25Index
 from assistant.refdata import care_topics
@@ -46,10 +53,36 @@ _MESSAGES: dict = _CFG.get("messages") or {}
 SAFETY_TAIL = _MESSAGES["safety_tail"]
 CITATION_TAIL = _MESSAGES["citation_tail"]
 NO_MATCH_REPLY = _MESSAGES["no_match"]
+# Said instead of reading a clinician procedure aloud to a frightened parent.
+EMERGENCY_REPLY = _MESSAGES["emergency_escalation"]
 
 
 def _kw(topic: str) -> tuple[str, ...]:
     return tuple((_TOPICS.get(topic) or {}).get("keywords") or ())
+
+
+# Care-topic cues must begin at a word start. Matching them as bare substrings
+# made "breathing" contain "eat", so every breathing emergency a parent could
+# type -- "my baby is not breathing", "baby choking cannot breathe", "his
+# heart is not beating" -- was classified as a feeding question and answered
+# with feeding guidance. Anchoring only the left edge keeps ordinary English
+# and Persian suffixes working ("sleeping" still matches "sleep", "شیرخشک"
+# still matches "شیر").
+_CUE_START = r"(?<![^\W\d_])"
+
+
+@lru_cache(maxsize=None)
+def _cue_re(keywords: tuple[str, ...]) -> re.Pattern[str] | None:
+    if not keywords:
+        return None
+    body = "|".join(re.escape(k) for k in sorted(keywords, key=len, reverse=True))
+    return re.compile(_CUE_START + "(?:" + body + ")", re.IGNORECASE)
+
+
+def _has_cue(text: str, keywords: tuple[str, ...]) -> bool:
+    """True when any care-topic keyword starts a word in `text`."""
+    pattern = _cue_re(tuple(keywords))
+    return bool(pattern and pattern.search(text or ""))
 
 
 def _expansion(topic: str) -> str:
@@ -114,15 +147,13 @@ def _topic_text_for_detection(text: str) -> str:
 
 def _is_feeding_query(text: str) -> bool:
     raw = _topic_text_for_detection(text)
-    qlow = raw.lower()
-    if any(k in qlow for k in _FEEDING_KEYWORDS):
+    if _has_cue(raw, _FEEDING_KEYWORDS):
         return True
     return bool(_FEEDING_RE.search(raw))
 
 
 def _is_motor_query(text: str) -> bool:
-    qlow = _topic_text_for_detection(text).lower()
-    return any(k in qlow for k in _MOTOR_KEYWORDS)
+    return _has_cue(_topic_text_for_detection(text), _MOTOR_KEYWORDS)
 
 
 def _feeding_ids_for_age(age_m: float | None) -> tuple[str, ...]:
@@ -299,16 +330,86 @@ class MedicalRAG:
     def build_from_chunks(self, chunks_path: Path | None = None):
         path = chunks_path or (KNOWLEDGE_DIR / "chunks.json")
         chunks = json.loads(path.read_text(encoding="utf-8"))
+        tally = label_chunks(chunks)
+        log.info("Medical index audience split: %s", tally)
         self.store.clear()
         self.store.add(chunks)
         self.store.save()
         return len(chunks)
 
     def load(self) -> bool:
-        return self.store.load()
+        """
+        Load the index, then re-derive the audience label on every chunk.
 
-    def retrieve(self, query: str, top_k: int | None = None) -> list[dict]:
-        return self.store.search(query, top_k=top_k)
+        Labelling on load rather than trusting what is on disk means an index
+        built before audience scoping existed -- or restored from an old
+        named volume -- is still scoped, and a change to
+        config/knowledge_audience.yaml takes effect without a rebuild.
+        """
+        loaded = self.store.load()
+        if loaded:
+            label_chunks(self.store.docs)
+        return loaded
+
+    def _ensure_labelled(self) -> None:
+        """Label the corpus if it arrived without going through load().
+
+        An unlabelled chunk fails closed, which is right for one chunk and
+        catastrophic for a whole corpus: a caller that loaded the store
+        directly would silently filter out every document and the assistant
+        would answer "I couldn't find a matching care note" to everything.
+        Labelling is deterministic and idempotent, so re-deriving it here
+        costs nothing and removes that failure mode entirely.
+        """
+        docs = self.store.docs
+        if docs and any("audience" not in d for d in docs):
+            label_chunks(docs)
+
+    def parent_docs(self) -> list[dict]:
+        """Every chunk that may be quoted back to a parent."""
+        return [d for d in self.store.docs if is_parent_facing(d)]
+
+    def retrieve(
+        self, query: str, top_k: int | None = None, *, audience: str | None = PARENT
+    ) -> list[dict]:
+        """
+        Search the medical index.
+
+        Scoped to parent-facing chunks by default: clinician-only procedures
+        stay in the index as corpus, but a caller has to ask for them
+        explicitly (audience=None) rather than get them by omission.
+        """
+        self._ensure_labelled()
+        filters = {"audience": audience} if audience else None
+        return self.store.search(query, top_k=top_k, filters=filters)
+
+    def _emergency_answer(self, query: str, hits: list[dict]) -> dict:
+        """
+        Reply to a question the corpus can only answer with a procedure.
+
+        Deliberately deterministic: no model call, and the escalation sentence
+        comes first so it survives the three-sentence trim the parent-voice
+        layer applies to non-generative answers. Whatever parent-facing notes
+        did match are still cited so the reply stays grounded, but they are
+        not read out as instructions.
+        """
+        text = EMERGENCY_REPLY
+        if hits:
+            text = f"{text} {_extractive(hits, conversational=True)}"
+        return {
+            "collection": "medical",
+            "query": query,
+            "mode": "emergency_escalation",
+            "model": None,
+            "answer": text,
+            "escalated": True,
+            "citations": [
+                {"id": h["id"], "title": h["title"], "score": h["score"]} for h in hits
+            ],
+            "context": "\n\n".join(
+                f"[{h['id']}] {h['title']}: {h['text']}" for h in hits
+            ),
+        }
 
     def answer(
         self,
@@ -333,12 +434,11 @@ class MedicalRAG:
             maxsplit=1,
         )[0]
         detect_src = _topic_text_for_detection(topic_src)
-        qlow = detect_src.lower()
-        iron_q = any(k in qlow for k in _IRON_KEYWORDS)
+        iron_q = _has_cue(detect_src, _IRON_KEYWORDS)
         # Iron wins over generic feeding/breast keywords ("iron for breastfed…")
         feeding_q = _is_feeding_query(detect_src) and not iron_q
-        growth_explain_q = (not feeding_q) and any(
-            k in qlow for k in _GROWTH_EXPLAIN_KEYWORDS
+        growth_explain_q = (not feeding_q) and _has_cue(
+            detect_src, _GROWTH_EXPLAIN_KEYWORDS
         )
         age_m = None
         # Age may live on metadata lines stripped from detect_src — read full topic_src.
@@ -352,9 +452,9 @@ class MedicalRAG:
                 age_m = float(m_age.group(1) or m_age.group(2))
             except (TypeError, ValueError):
                 age_m = None
-        screening_q = any(k in qlow for k in _SCREENING_KEYWORDS)
-        sleep_q = any(k in qlow for k in _SLEEP_KEYWORDS)
-        rash_q = any(k in qlow for k in _RASH_KEYWORDS)
+        screening_q = _has_cue(detect_src, _SCREENING_KEYWORDS)
+        sleep_q = _has_cue(detect_src, _SLEEP_KEYWORDS)
+        rash_q = _has_cue(detect_src, _RASH_KEYWORDS)
         motor_q = (not feeding_q and not iron_q and not sleep_q and not rash_q) and _is_motor_query(
             detect_src
         )
@@ -365,7 +465,7 @@ class MedicalRAG:
             and not sleep_q
             and not rash_q
             and not motor_q
-        ) and any(k in qlow for k in _SPEECH_KEYWORDS)
+        ) and _has_cue(detect_src, _SPEECH_KEYWORDS)
         # Expand short parent concerns so lexical search finds the right guidance chunk
         # Retrieval query = current turn only (memory context pollutes BM25).
         search_q = detect_src.strip() or topic_src.strip() or query
@@ -381,14 +481,29 @@ class MedicalRAG:
                 search_q = f"{search_q} {_expansion(topic)}".strip()
                 break
 
-        hits = self.retrieve(
-            search_q,
-            top_k=max(top_k * settings.nestling_rag_query_multiplier, settings.nestling_rag_query_min),
+        query_k = max(
+            top_k * settings.nestling_rag_query_multiplier, settings.nestling_rag_query_min
         )
+        # Retrieve once over the whole corpus, then split by audience. The
+        # unscoped pool is never shown to anyone — it is only read to notice
+        # that the strongest thing the corpus knows about this question is a
+        # procedure a parent must not be given, which is what an emergency
+        # looks like from the index's point of view.
+        pool = self.retrieve(search_q, top_k=query_k, audience=None)
+        hits = [h for h in pool if is_parent_facing(h)]
+        escalate = clinician_only_topic(pool, hits)
+        if len(hits) < query_k and len(hits) < len(pool):
+            # Clinician chunks crowded the pool, so the parent-facing tail of
+            # the ranking was cut off. Re-run the search scoped to parents to
+            # get a properly ranked list of the depth the topic filters expect.
+            hits = self.retrieve(search_q, top_k=query_k)
+        if escalate:
+            return self._emergency_answer(query, hits[:top_k])
+        parent_docs = self.parent_docs()
         topic_hits = settings.nestling_rag_topic_hits
         if feeding_q:
             hits = _select_feeding_hits(
-                self.store.docs, hits, age_m=age_m, top_k=max(top_k, topic_hits)
+                parent_docs, hits, age_m=age_m, top_k=max(top_k, topic_hits)
             )
         elif not screening_q:
             # Prefer topic-matched care/guidance; drop raw questionnaire dumps.
@@ -475,7 +590,7 @@ class MedicalRAG:
                 if not rash_hits:
                     rash_hits = [
                         d
-                        for d in self.store.docs
+                        for d in parent_docs
                         if any(
                             k in str(d.get("id") or "").lower()
                             or k in (d.get("title") or "").lower()
@@ -490,7 +605,7 @@ class MedicalRAG:
                 if not motor_hits:
                     motor_hits = [
                         d
-                        for d in self.store.docs
+                        for d in parent_docs
                         if any(
                             k in str(d.get("id") or "").lower()
                             for k in _selected("motor_fallback_ids")
@@ -508,7 +623,7 @@ class MedicalRAG:
                 if not speech_hits:
                     speech_hits = [
                         d
-                        for d in self.store.docs
+                        for d in parent_docs
                         if any(
                             k in str(d.get("id") or "").lower()
                             for k in _selected("speech_fallback_ids")

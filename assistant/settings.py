@@ -181,12 +181,14 @@ class Settings(BaseSettings):
 
     # Emergency escalation. When the best answer the corpus can offer a parent
     # is a clinician-only procedure, the parent is told to seek emergency care
-    # instead of being read the procedure. The trigger is structural: the top
-    # clinician-audience hit has to beat the best parent-audience hit by this
-    # factor. Measured on the probe set, genuine emergency phrasings clear 2x
-    # comfortably while ordinary parent questions stay far below it.
-    nestling_audience_escalation_ratio: float = 2.0
-    # ...and it has to be a real lexical match, not the top of an empty field.
+    # instead of being read the procedure. The trigger is a comparison, not a
+    # tunable margin: see clinician_only_topic in assistant/rag/audience.py.
+    # Off: the retrieval-score measure behind it cannot separate an emergency
+    # from an ordinary question on this corpus (see clinician_only_topic in
+    # assistant/rag/audience.py for the measurements). Withholding clinician
+    # procedures from parents does NOT depend on this flag.
+    nestling_audience_escalation_enabled: bool = False
+    # Floor for that measure, if it is ever enabled behind a real classifier.
     # BM25 scores on this corpus run ~5-45 for a matching question.
     nestling_audience_escalation_min_score: float = 5.0
 
