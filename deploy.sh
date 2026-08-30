@@ -347,11 +347,20 @@ refresh_nvidia_cdi() {
   have_cmd nvidia-ctk || return 0
   is_root || return 0
   step "regenerating the CDI spec for the current driver"
-  if nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml >/tmp/nestling-cdi.log 2>&1; then
-    ok "CDI spec regenerated"
-  else
-    warn "could not regenerate the CDI spec -- see /tmp/nestling-cdi.log"
-  fi
+  # CDI defines two spec directories and the runtime merges both, so
+  # regenerating only /etc/cdi leaves a stale spec in /var/run/cdi still
+  # naming the previous driver's libraries -- which is what kept failing the
+  # GPU probe even after /etc/cdi was clean.
+  local dir generated=0
+  for dir in /etc/cdi /var/run/cdi; do
+    [ -d "$dir" ] || continue
+    if nvidia-ctk cdi generate --output="$dir/nvidia.yaml" >>/tmp/nestling-cdi.log 2>&1; then
+      generated=1
+    else
+      warn "could not regenerate $dir/nvidia.yaml -- see /tmp/nestling-cdi.log"
+    fi
+  done
+  [ "$generated" = 1 ] && ok "CDI spec regenerated"
   ldconfig >/dev/null 2>&1 || true
   systemctl restart docker >/dev/null 2>&1 || true
   sleep 8
