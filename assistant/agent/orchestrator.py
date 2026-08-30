@@ -723,6 +723,11 @@ class ParentAssistant:
         if text.strip():
             out["answer"] = text
             out["answer_source"] = "memory+notes"
+            # Retrieval ran with the LLM off, so `mode` still says "extractive".
+            # format_reply() reads it to decide whether to keep a generative
+            # answer intact or trim it to three sentences -- leaving it would
+            # truncate the reply we just generated.
+            out["mode"] = "openai-compatible-llm"
         return out
 
     def ask_child(self, child_id: str, query: str) -> dict:
