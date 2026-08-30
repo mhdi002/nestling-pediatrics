@@ -768,6 +768,30 @@ select_mirror() {
   return 0
 }
 
+# Size the vLLM sidecar for the GPU that is actually present. The compose
+# defaults suit an 8 GB card; on a bigger board they leave most of the GPU
+# idle and serialise every chat behind a batch of one.
+size_llm_for_gpu() {
+  [ "$MODE" = full ] || return 0
+  if grep -qs '^VLLM_MAX_NUM_SEQS=' .env; then
+    ok "vLLM sizing already recorded in .env"
+    return 0
+  fi
+  have_cmd python3 || { warn "no python3 to size the sidecar; using defaults"; return 0; }
+  local snap; snap="$(resolve_snapshot 2>/dev/null || true)"
+  [ -n "$snap" ] && [ -d "$snap" ] || return 0
+  step "sizing the LLM sidecar for this GPU"
+  local out
+  if ! out="$(python3 scripts/size_llm.py --snapshot "$snap" 2>/tmp/nestling-size.log)"; then
+    warn "could not size the sidecar -- using defaults (see /tmp/nestling-size.log)"
+    return 0
+  fi
+  printf '%s\n' "$out" >> .env
+  ok "$(printf '%s' "$out" | tr '\n' ' ')"
+  # The derivation is logged so the numbers can be checked, not just trusted.
+  sed -n 's/^# //p' /tmp/nestling-size.log | while read -r line; do ok "  $line"; done
+}
+
 ensure_build_mirrors() {
   # /dists/ exists on every Debian mirror regardless of suite, so this stays
   # correct as the base image moves between releases.
@@ -982,6 +1006,7 @@ case "$ACTION" in
       warn "skipping model download (--skip-model-download) -- llm service will fail to start if weights are missing"
     fi
 
+    size_llm_for_gpu
     ensure_build_mirrors
     step "building images"
     compose_build
