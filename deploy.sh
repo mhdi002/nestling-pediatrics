@@ -774,7 +774,7 @@ case "$ACTION" in
     gpu=0
     if [ "$MODE" = full ]; then
       step "checking for GPU"
-      if gpu_available; then
+      if gpu_available && ensure_driver_supports_llm_image; then
         gpu=1
       else
         warn "no usable GPU -- falling back to app-only deploy"
