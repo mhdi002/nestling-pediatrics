@@ -29,6 +29,9 @@ LOGS_SERVICE=""
 ASSUME_YES=0
 # auto = try the OCI registry first, fall back to the Hugging Face Hub.
 MODEL_SOURCE=auto
+# A driver upgrade is only live after a restart. Allowed by default so a single
+# run ends with a working stack; --no-reboot is what the resume unit passes.
+ALLOW_REBOOT=1
 INSTALL_PREREQS=1
 
 # ---------- console helpers ----------
@@ -61,6 +64,7 @@ Options (deploy action only):
   --mode app|full         app-only, or full stack with GPU LLM sidecar (default: full)
   --skip-model-download   don't try to download the model even in full mode
   --model-source SRC      where to get weights: auto|hub|hf (default: auto)
+  --no-reboot             never restart, even if a driver upgrade needs one
                             hub = OCI registry (Docker Hub) -- fast, works where
                                   the Hugging Face LFS CDN is blocked/throttled
                             hf  = Hugging Face Hub via the `hf` CLI
@@ -326,6 +330,53 @@ upgrade_nvidia_driver() {
 
 # Returns 0 when the GPU can run the LLM image, 1 when the caller should
 # degrade to app-only rather than build a sidecar that cannot start.
+RESUME_UNIT_NAME="nestling-deploy-resume.service"
+
+reload_nvidia_modules() {
+  # A newly installed driver is only live once the kernel modules are swapped.
+  # On a headless box nothing holds them except our own GPU containers, so
+  # unloading and reloading activates the new driver without a reboot.
+  step "activating the new driver without a reboot"
+  docker compose --profile llm down >/dev/null 2>&1 || true
+  local m
+  for m in nvidia_uvm nvidia_drm nvidia_modeset nvidia; do
+    rmmod "$m" >/dev/null 2>&1 || true
+  done
+  modprobe nvidia >/dev/null 2>&1 || true
+  modprobe nvidia_uvm >/dev/null 2>&1 || true
+  nvidia-smi >/dev/null 2>&1
+}
+
+schedule_resume_after_reboot() {
+  # Last resort: something still holds the old modules. Finish the job on the
+  # far side of a restart so that one ./deploy.sh really does end with a
+  # running stack instead of handing back a manual step.
+  is_root || return 1
+  have_cmd systemctl || return 1
+  local here; here="$(pwd)"
+  cat > "/etc/systemd/system/$RESUME_UNIT_NAME" <<EOF
+[Unit]
+Description=Finish the Nestling deploy after an NVIDIA driver upgrade
+After=docker.service network-online.target
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=$here
+# --no-reboot keeps this from becoming a boot loop if the driver still fails.
+ExecStart=$here/deploy.sh --mode $MODE --model-source $MODEL_SOURCE --yes --no-reboot
+ExecStartPost=-/bin/systemctl disable $RESUME_UNIT_NAME
+StandardOutput=append:/root/nestling-resume.log
+StandardError=append:/root/nestling-resume.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload >/dev/null 2>&1 || return 1
+  systemctl enable "$RESUME_UNIT_NAME" >/dev/null 2>&1 || return 1
+  return 0
+}
+
 ensure_driver_supports_llm_image() {
   local img req have
   img="$(vllm_image_ref)"
@@ -349,10 +400,25 @@ ensure_driver_supports_llm_image() {
       ok "driver now supports CUDA $have"
       return 0
     fi
+    # The package is installed but the running kernel still holds the old
+    # modules; swap them in place before resorting to a restart.
+    if reload_nvidia_modules; then
+      have="$(driver_cuda_max)"
+      if [ -n "$have" ] && ! version_lt "$have" "$req"; then
+        ok "driver now supports CUDA $have (no restart needed)"
+        return 0
+      fi
+    fi
   fi
-  # A freshly installed driver module is not live until the box reboots.
-  warn "the GPU cannot run $img yet."
-  warn "REBOOT this host, then re-run: ./deploy.sh --mode full"
+  if [ "$ALLOW_REBOOT" = "1" ] && schedule_resume_after_reboot; then
+    warn "the new driver only takes effect after a restart."
+    warn "restarting now; the deploy finishes by itself on boot."
+    warn "progress continues in /root/nestling-resume.log"
+    sync
+    ( sleep 3; systemctl reboot ) >/dev/null 2>&1 &
+    exit 0
+  fi
+  warn "the GPU cannot run $img yet -- restart this host, then: ./deploy.sh --mode full"
   warn "continuing in app-only mode so the site still comes up."
   return 1
 }
@@ -731,6 +797,7 @@ while [ $# -gt 0 ]; do
     --status) ACTION=status; shift ;;
     --model-only) ACTION=model-only; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
+    --no-reboot) ALLOW_REBOOT=0; shift ;;
     -h|--help) ACTION=help; shift ;;
     *)
       err "unknown argument: $1"
