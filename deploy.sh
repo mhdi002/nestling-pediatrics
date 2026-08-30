@@ -262,6 +262,98 @@ gpu_available() {
   return 0
 }
 
+# ---------- GPU / driver reconciliation ----------
+# The GPU probe above uses a CUDA 12 base image, so it passes on any modern
+# driver. The vLLM image is a different question: `latest` ships CUDA 13 and
+# needs driver 580+. A CUDA 12 driver only survives that via forward
+# compatibility, which is datacenter-only -- on a GeForce card the container
+# dies at startup with "Error 804: forward compatibility was attempted on non
+# supported HW", long after the deploy said the GPU was fine.
+#
+# Neither number is hardcoded here: the requirement is read from the image's
+# own NVIDIA_REQUIRE_CUDA, and the ceiling from the running driver.
+
+vllm_image_ref() {
+  # Same default the compose file uses, without duplicating the tag.
+  if [ -n "${NESTLING_VLLM_IMAGE:-}" ]; then
+    printf '%s' "$NESTLING_VLLM_IMAGE"
+    return
+  fi
+  sed -n 's/.*VLLM_IMAGE: *"\${NESTLING_VLLM_IMAGE:-\([^}]*\)}".*//p'     docker-compose.yml | head -1
+}
+
+driver_cuda_max() {
+  # nvidia-smi reports the highest CUDA version this driver can run.
+  nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: *\([0-9][0-9.]*\).*//p' | head -1
+}
+
+image_cuda_required() {
+  # Read the requirement the image itself declares.
+  docker image inspect "$1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null     | sed -n 's/.*[Cc]uda>=\([0-9][0-9.]*\).*//p' | head -1
+}
+
+version_lt() {
+  # true when $1 < $2, compared numerically field by field
+  [ "$1" = "$2" ] && return 1
+  [ "$(printf '%s
+%s
+' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
+
+upgrade_nvidia_driver() {
+  # Pick the newest driver branch apt actually offers; never a pinned number.
+  have_apt || { warn "no apt here -- upgrade the NVIDIA driver manually"; return 1; }
+  is_root || { warn "need root to upgrade the NVIDIA driver"; return 1; }
+  step "upgrading the NVIDIA driver so it can run the vLLM image"
+  apt_retry update >/dev/null 2>&1 || true
+  local newest
+  newest=$(apt-cache search --names-only '^nvidia-driver-[0-9]+$' 2>/dev/null     | awk '{print $1}' | sed 's/nvidia-driver-//' | sort -n | tail -1)
+  if [ -z "$newest" ]; then
+    warn "apt lists no nvidia-driver package -- cannot upgrade automatically"
+    return 1
+  fi
+  step "installing nvidia-driver-$newest"
+  apt_retry install -y "nvidia-driver-$newest" || {
+    warn "nvidia-driver-$newest failed to install"
+    return 1
+  }
+  ok "installed nvidia-driver-$newest"
+  return 0
+}
+
+# Returns 0 when the GPU can run the LLM image, 1 when the caller should
+# degrade to app-only rather than build a sidecar that cannot start.
+ensure_driver_supports_llm_image() {
+  local img req have
+  img="$(vllm_image_ref)"
+  [ -n "$img" ] || return 0
+  step "checking the driver can run $img"
+  docker pull -q "$img" >/dev/null 2>&1 || true
+  req="$(image_cuda_required "$img")"
+  have="$(driver_cuda_max)"
+  if [ -z "$req" ] || [ -z "$have" ]; then
+    # Nothing to compare -- let the build proceed rather than block on a probe.
+    return 0
+  fi
+  if ! version_lt "$have" "$req"; then
+    ok "driver supports CUDA $have, image needs $req"
+    return 0
+  fi
+  warn "driver supports CUDA $have but $img needs $req"
+  if upgrade_nvidia_driver; then
+    have="$(driver_cuda_max)"
+    if [ -n "$have" ] && ! version_lt "$have" "$req"; then
+      ok "driver now supports CUDA $have"
+      return 0
+    fi
+  fi
+  # A freshly installed driver module is not live until the box reboots.
+  warn "the GPU cannot run $img yet."
+  warn "REBOOT this host, then re-run: ./deploy.sh --mode full"
+  warn "continuing in app-only mode so the site still comes up."
+  return 1
+}
+
 # ---------- .env bootstrap ----------
 init_env_file() {
   if [ -f .env ]; then
