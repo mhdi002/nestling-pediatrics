@@ -40,6 +40,21 @@ def _err(status: int, error: str, detail: str | None = None) -> HTTPException:
     return HTTPException(status_code=status, detail={"error": error, "detail": detail or error})
 
 
+def _require_owned_child(svc, child_id: str | None, owner_user_id: str | None) -> None:
+    """
+    Guard a child_id passed in a request body/path against the signed-in account.
+
+    A signed-in account may only reach its own children; a child_id it does not
+    own is answered with the same 404 as a missing one, so ids cannot be probed
+    for existence and one family can never read or mutate another's record.
+
+    API-key / unauthenticated callers (owner_user_id is None) keep the historical
+    unscoped access — the same convention the read routes already follow.
+    """
+    if owner_user_id and child_id and svc.db.get_child(child_id, owner_user_id=owner_user_id) is None:
+        raise _err(404, "not_found", f"Unknown child_id: {child_id}")
+
+
 # --- request bodies ---
 
 
@@ -266,10 +281,13 @@ def get_child(child_id: str, request: Request):
 
 
 @router.get("/children/{child_id}/dossier")
-def child_dossier(child_id: str):
+def child_dossier(child_id: str, request: Request):
     """Full child record for UI + agent: profile, growth, screenings, chart overlays."""
     svc = get_services()
-    child = svc.db.get_child(child_id)
+    # Scoped to the signed-in account: the dossier carries the full medical
+    # record (notes, growth, screenings), so it must not be readable across
+    # accounts by knowing a child_id. Same 404 whether missing or someone else's.
+    child = svc.db.get_child(child_id, owner_user_id=current_user(request))
     if not child:
         raise _err(404, "not_found", f"Unknown child_id: {child_id}")
     growth = svc.db.growth_history(child_id)
@@ -426,8 +444,15 @@ def _run_vision_turn(
 ) -> tuple[str, dict[str, Any]]:
     """Blocking half of the vision turn (SQLite + model call), run off the event loop."""
     svc = get_services()
+    # A child_id from the form must belong to the caller (same rule as text chat).
+    _require_owned_child(svc, child_id, owner_user_id)
     sid = session_id
-    if not sid or not svc.chat.get_session(sid):
+    existing = svc.chat.get_session(sid) if sid else None
+    # Never append a photo turn to another account's session (see _run_chat_turn).
+    if existing and owner_user_id and existing.get("owner_user_id") != owner_user_id:
+        existing = None
+        sid = None
+    if not sid or not existing:
         # Must carry the owner: an unowned session is invisible to the account
         # that created it under the per-user scoping.
         sid = svc.chat.create_session(child_id=child_id, owner_user_id=owner_user_id)
@@ -511,8 +536,20 @@ def _normalized_ui_lang(ui_lang: str | None) -> str | None:
 def _run_chat_turn(body: ChatBody, owner_user_id: str | None = None) -> dict[str, Any]:
     """Full chat turn. Sync on purpose — FastAPI runs `def` routes in a worker thread."""
     svc = get_services()
+    # A child_id supplied by the caller must belong to the caller, or the turn
+    # would read another family's child into slots and reflect it in the reply.
+    _require_owned_child(svc, body.child_id, owner_user_id)
     sid = body.session_id
-    if not sid or not svc.chat.get_session(sid):
+    existing = svc.chat.get_session(sid) if sid else None
+    # A session id owned by another account must never be reused: doing so would
+    # append this turn to their history and echo their child's slots back. Treat
+    # a non-owned (or unowned legacy) session as absent and open a fresh one that
+    # belongs to the caller. Unauthenticated / API-key callers (no owner) keep
+    # the historical behaviour of reusing whatever id they pass.
+    if existing and owner_user_id and existing.get("owner_user_id") != owner_user_id:
+        existing = None
+        sid = None
+    if not sid or not existing:
         # Auto-create when UI has no session yet, or stale localStorage id after DB reset.
         sid = svc.chat.create_session(child_id=body.child_id, owner_user_id=owner_user_id)
     out = svc.assistant.chat(
@@ -535,6 +572,10 @@ def _run_chat_turn(body: ChatBody, owner_user_id: str | None = None) -> dict[str
 def chat(body: ChatBody, request: Request):
     try:
         return _run_chat_turn(body, current_user(request))
+    except HTTPException:
+        # Deliberate 4xx (e.g. an ownership 404) must reach the client as-is,
+        # not be masked as a generic 500.
+        raise
     except Exception as exc:
         log.exception("Chat turn failed")
         raise _err(500, "chat_failed", str(exc)) from exc
@@ -548,6 +589,10 @@ def chat_stream(body: ChatBody, request: Request):
     """
     chunk_chars = get_settings().nestling_stream_chunk_chars
     owner_user_id = current_user(request)
+    # Reject a child_id the caller does not own before the stream opens, so it
+    # surfaces as a 404 rather than mid-stream (the reuse of a non-owned session
+    # id is handled inside _run_chat_turn).
+    _require_owned_child(get_services(), body.child_id, owner_user_id)
 
     def gen() -> Iterator[str]:
         try:
@@ -593,8 +638,12 @@ def growth_curves(
 
 
 @router.post("/growth")
-def growth(body: GrowthBody):
+def growth(body: GrowthBody, request: Request):
     svc = get_services()
+    # A child_id here reaches the child's record (reads its GA, writes a growth
+    # row). Reject one that does not belong to the signed-in account before any
+    # of that happens, so growth cannot be written into another family's chart.
+    _require_owned_child(svc, body.child_id, current_user(request))
     ga = body.gestational_age_weeks
     if body.child_id and ga is None:
         child = svc.db.get_child(body.child_id) or {}
@@ -644,8 +693,9 @@ def asq_questions(age: int):
 
 
 @router.post("/asq/score")
-def asq_score(body: AsqScoreBody):
+def asq_score(body: AsqScoreBody, request: Request):
     svc = get_services()
+    _require_owned_child(svc, body.child_id, current_user(request))
     if body.child_id:
         return svc.assistant.run_asq_session(body.child_id, body.age_months, body.domain_answers)
     result = dispatch_tool(
@@ -665,8 +715,9 @@ def mchat_questions():
 
 
 @router.post("/mchat/score")
-def mchat_score(body: MchatScoreBody):
+def mchat_score(body: MchatScoreBody, request: Request):
     svc = get_services()
+    _require_owned_child(svc, body.child_id, current_user(request))
     try:
         answers = {int(k): v for k, v in body.answers.items()}
     except (TypeError, ValueError) as exc:
