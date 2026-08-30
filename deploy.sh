@@ -687,6 +687,49 @@ download_model() {
   fi
 }
 
+# ---------- package mirror selection ----------
+# The image build installs a few Debian packages. deb.debian.org is blocked on
+# some networks, and apt reacts by retrying slowly, so the build burns several
+# minutes before failing on something that has nothing to do with this project.
+# Probe the candidates in config/debian_mirrors.txt and build with one that
+# answers, instead of asking the operator to diagnose it.
+ensure_debian_mirror() {
+  local list="config/debian_mirrors.txt"
+  # Already pinned (env or a previous run wrote it to .env)? Respect it.
+  if [ -n "${NESTLING_DEBIAN_MIRROR:-}" ]; then
+    ok "using pinned Debian mirror: $NESTLING_DEBIAN_MIRROR"
+    return 0
+  fi
+  if grep -qs '^NESTLING_DEBIAN_MIRROR=.\+' .env; then
+    ok "using Debian mirror already recorded in .env"
+    return 0
+  fi
+  [ -f "$list" ] || return 0
+  step "selecting a reachable Debian package mirror"
+  local url code
+  while read -r url; do
+    case "$url" in ''|'#'*) continue ;; esac
+    # /dists/ exists on every Debian mirror regardless of suite, so this stays
+    # correct as the base image moves between releases.
+    code="$(curl -s -o /dev/null -m 12 -w '%{http_code}' "$url/dists/" 2>/dev/null || echo 000)"
+    case "$code" in
+      2??|3??)
+        if [ "$url" = "http://deb.debian.org/debian" ]; then
+          ok "deb.debian.org reachable, using the default mirror"
+        else
+          ok "using Debian mirror $url"
+          printf 'NESTLING_DEBIAN_MIRROR=%s\n' "$url" >> .env
+          export NESTLING_DEBIAN_MIRROR="$url"
+        fi
+        return 0
+        ;;
+    esac
+    warn "mirror unreachable ($code): $url"
+  done < "$list"
+  warn "no candidate Debian mirror answered -- building with the default"
+  return 0
+}
+
 # ---------- compose orchestration ----------
 compose_build() {
   if [ "$MODE" = full ]; then
@@ -892,6 +935,7 @@ case "$ACTION" in
       warn "skipping model download (--skip-model-download) -- llm service will fail to start if weights are missing"
     fi
 
+    ensure_debian_mirror
     step "building images"
     compose_build
 

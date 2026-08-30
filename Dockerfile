@@ -20,8 +20,10 @@ ARG DEBIAN_MIRROR=""
 # Retried because a single transient mirror failure otherwise fails the build.
 RUN set -eux; \
     if [ -n "$DEBIAN_MIRROR" ]; then \
-      printf 'deb %s bookworm main\ndeb %s bookworm-updates main\n' \
-        "$DEBIAN_MIRROR" "$DEBIAN_MIRROR" > /etc/apt/sources.list; \
+      . /etc/os-release; \
+      printf 'deb %s %s main\ndeb %s %s-updates main\n' \
+        "$DEBIAN_MIRROR" "$VERSION_CODENAME" \
+        "$DEBIAN_MIRROR" "$VERSION_CODENAME" > /etc/apt/sources.list; \
       rm -f /etc/apt/sources.list.d/debian.sources; \
     fi; \
     for i in 1 2 3; do \

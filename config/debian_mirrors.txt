@@ -1,0 +1,19 @@
+# Candidate Debian package mirrors, tried in order during `deploy.sh`.
+#
+# deb.debian.org is the right answer almost everywhere, so it is first. It is
+# unreachable from some networks, though, and a build that cannot reach its
+# package mirror fails after several slow minutes of apt retries. Rather than
+# make the operator diagnose that, deploy.sh probes this list and builds with
+# the first mirror that actually answers.
+#
+# One URL per line; blank lines and #-comments ignored. Set
+# NESTLING_DEBIAN_MIRROR in .env to pin a specific mirror and skip probing.
+# Add your own here -- an internal or geographically closer mirror belongs at
+# the top.
+
+http://deb.debian.org/debian
+https://cloudflaremirrors.com/debian
+https://mirrors.kernel.org/debian
+https://ftp.debian.org/debian
+https://mirror.iranserver.com/debian
+https://mirror.arvancloud.ir/repo/debian
