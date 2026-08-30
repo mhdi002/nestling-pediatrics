@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -49,7 +50,15 @@ def _strip_reasoning(text: str) -> str:
     return t.strip()
 
 
+log = logging.getLogger(__name__)
+
 PROBE_PATHS = ("/health", "/v1/models")
+
+# Smallest valid PNG (1x1). Used only to ask an endpoint whether it accepts
+# images at all; never shown to anyone.
+_PIXEL_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 
 def llm_base_url() -> str:
@@ -129,7 +138,70 @@ class QwenClient:
 
     @property
     def vision_ready(self) -> bool:
-        return self._probe(self.vision_url)
+        """Whether the endpoint can actually accept an image, not just answer.
+
+        Reachability is the wrong question here. The vision URL usually points
+        at the same sidecar as the text model, so a plain probe says "ready"
+        whenever the text model is up -- and /api/health reported vision ready
+        while the served model rejected every image with "At most 0 image(s)
+        may be provided in one prompt". A parent could upload a photo and be
+        told it had been looked at when nothing had looked at it.
+
+        So ask the endpoint the real question once, with a 1x1 image, and
+        cache the verdict like any other probe. This tests the capability
+        rather than inferring it from a model name, so it stays correct when
+        the operator swaps in a vision-capable model.
+        """
+        if not self._probe(self.vision_url):
+            return False
+        return self._probe_vision_capability(self.vision_url)
+
+    def _probe_vision_capability(self, base_url: str) -> bool:
+        key = f"{base_url}#vision"
+        now = time.monotonic()
+        with self._probe_lock:
+            cached = self._probe_cache.get(key)
+            # Capability does not flap the way reachability does, so cache it
+            # for the life of the process once we get a definite answer.
+            if cached is not None:
+                return cached[1]
+        payload = {
+            "model": get_settings().nestling_vision_model,
+            "max_tokens": 1,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{_PIXEL_PNG_B64}"},
+                        },
+                    ],
+                }
+            ],
+        }
+        capable = False
+        try:
+            req = urllib.request.Request(
+                f"{base_url}/v1/chat/completions",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.probe_timeout * 4) as r:
+                capable = r.status == 200
+        except urllib.error.HTTPError as exc:
+            # A 400 here is the model telling us it takes no images.
+            capable = False
+            log.info("Vision capability probe rejected by %s: %s", base_url, exc.code)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            # Undecided: do not cache a transport failure as "not capable".
+            log.warning("Vision capability probe failed: %s", exc)
+            return False
+        with self._probe_lock:
+            self._probe_cache[key] = (now, capable)
+        return capable
 
     def chat(
         self,
