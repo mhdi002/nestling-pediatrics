@@ -77,12 +77,43 @@ def parent_question(query: str) -> str:
 
 
 def compose_context(memory: str, care_notes: str) -> str:
-    """Label both sources so the model can tell recall from guidance."""
-    blocks = []
+    """Label both sources so the model can tell recall from guidance.
+
+    Each half is held to its share of the prompt cap. Without that the two
+    were concatenated at whatever length they happened to be -- eight thousand
+    characters in a long conversation -- and answer_with_context chopped the
+    tail at the cap. Since the care notes come second, they were the part
+    thrown away: the model was handed a prompt with no guidance in it at all,
+    and no error to say so. Sharing the cap explicitly means both halves
+    survive, in the proportions configured for memory.
+    """
+    from assistant.memory.assembly import budget
+
+    caps = budget()
+    # Procedural rules ride in the system prompt, not here, so the cap is
+    # split between what is remembered and what was retrieved.
+    remembered_share = max(1, caps.semantic + caps.episodic)
+    notes_share = max(1, caps.working)
+    total = remembered_share + notes_share
+
     mem = _META_LINE.sub(" ", memory or "").strip()
-    if mem:
-        blocks.append(f"[{PARENT_NOTES_HEADING}]\n{mem}")
     notes = (care_notes or "").strip()
+
+    # An absent half hands its room to the other rather than wasting it.
+    if not mem:
+        remembered_share, notes_share = 0, total
+    elif not notes:
+        remembered_share, notes_share = total, 0
+
+    blocks = []
+    if mem:
+        blocks.append(f"[{PARENT_NOTES_HEADING}]\n{_fit(mem, remembered_share)}")
     if notes:
-        blocks.append(f"[{CARE_NOTES_HEADING}]\n{notes}")
+        blocks.append(f"[{CARE_NOTES_HEADING}]\n{_fit(notes, notes_share)}")
     return "\n\n".join(blocks)
+
+
+def _fit(text: str, limit: int) -> str:
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"

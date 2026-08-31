@@ -122,13 +122,22 @@ class NativeMemoryBackend:
         index = BM25Index()
         index.fit(texts)
         scores = index.scores(query)
+        # Nothing matched at all. That is not "there is nothing worth
+        # recalling" -- it is a question with no distinctive terms, which is
+        # what a follow-up like "how often?" looks like. Dropping everything
+        # there emptied the child's memory out of the prompt at exactly the
+        # moment the conversation depended on it, so fall back to the order
+        # the caller already had, which is recency.
+        if not any(float(s) > 0.0 for s in scores):
+            return list(rows)
         ranked = sorted(range(len(rows)), key=lambda i: float(scores[i]), reverse=True)
         out = []
         for i in ranked:
             score = float(scores[i])
-            # A zero score means the query shares no term with the row; keeping
-            # those would pad the context with text about something else, which
-            # is exactly how an ulcer question ended up answered about vaccines.
+            # Some rows did match, so a zero here means this row is about
+            # something else. Keeping it would pad the context with an
+            # unrelated topic, which is how an ulcer question came back about
+            # vaccination sites.
             if score <= 0.0:
                 continue
             row = dict(rows[i])

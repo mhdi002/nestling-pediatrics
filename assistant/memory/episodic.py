@@ -115,15 +115,39 @@ class EpisodicMemory:
         query: str = "",
         budget_chars: int | None = None,
     ) -> str:
-        """Turns as prompt lines, oldest first so the exchange reads forwards."""
-        cap = get_settings().nestling_memory_line_chars
-        episodes = self.recall(
+        """Turns as prompt lines, oldest first so the exchange reads forwards.
+
+        Recent turns are always included and relevance is added on top, rather
+        than replacing them. Filtering purely by relevance broke follow-ups:
+        "and what about at night?" matched "night" somewhere unrelated, the
+        filter engaged, and the turn that said what the conversation was about
+        was dropped for scoring zero. A conversation needs its recent context
+        whether or not it shares words with the question; relevance is for
+        reaching further back than that.
+        """
+        settings = get_settings()
+        cap = settings.nestling_memory_line_chars
+        recent = self.recall(
             session_id=session_id,
             subject=subject,
             owner_user_id=owner_user_id,
-            query=query,
-            limit=50,
+            limit=settings.nestling_history_window,
         )
+        episodes = list(recent)
+        if query.strip():
+            seen = {e.id for e in episodes}
+            for hit in self.recall(
+                session_id=session_id,
+                subject=subject,
+                owner_user_id=owner_user_id,
+                query=query,
+                limit=50,
+            ):
+                if hit.id not in seen:
+                    episodes.append(hit)
+                    seen.add(hit.id)
+            # Chronological, so the exchange still reads forwards.
+            episodes.sort(key=lambda e: e.created_at)
         lines = [e.as_line(cap) for e in episodes]
         if budget_chars is None:
             return "\n".join(lines)
