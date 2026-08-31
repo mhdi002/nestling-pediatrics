@@ -1,0 +1,132 @@
+# Memory system configuration (assistant/memory/).
+#
+# Four kinds of memory, kept apart because they answer different questions:
+#
+#   procedural  how the assistant should behave
+#   semantic    durable facts about a child or parent
+#   episodic    what was actually said
+#   working     the current turn's retrieved care notes
+#
+# Nothing here is logic. Behaviour rules are text, budget shares are numbers,
+# and the backend is a name. All of it is editable without touching code.
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Backends for semantic + episodic memory.
+#
+# `native` needs no network, no graph database and no embedding model. That is
+# why it is the default: this project deploys to hosts that have blocked
+# huggingface.co, pypi.org and deb.debian.org, and a memory layer that stops
+# working when a download fails is worse than a simpler one that always works.
+#
+# `graphiti` is the open-source temporal knowledge graph that Zep is built on.
+# (Zep's own Community Edition is deprecated and its hosted service would mean
+# sending children's medical history to a third party, so it is not used.)
+# Graphiti needs a graph database and an embedding model, and it drives them
+# through any OpenAI-compatible endpoint -- the vLLM sidecar this project
+# already runs. It is opt-in, and falls back to native when unreachable.
+# ---------------------------------------------------------------------------
+backends:
+  native:
+    driver: native
+
+  graphiti:
+    driver: graphiti
+    # Graph store. falkordb is markedly lighter than neo4j, which matters on a
+    # box already giving 24GB of VRAM to the model.
+    graph_driver: falkordb
+    graph_uri: ""            # empty -> NESTLING_MEMORY_GRAPH_URI, then the driver default
+    group_prefix: nestling
+    # Entity extraction and embeddings both go through the local sidecar, so
+    # no request leaves the host.
+    llm_base_url: ""         # empty -> the app's configured LLM URL
+    embedder_base_url: ""    # empty -> the same endpoint
+    # Graphiti warns that small models produce unreliable structured output.
+    # This project serves a 4B model, so extraction failures are expected
+    # rather than exceptional: a failed extraction is logged and the turn is
+    # still stored verbatim, never dropped.
+    tolerate_extraction_failure: true
+
+# ---------------------------------------------------------------------------
+# Procedural memory: how the assistant should act.
+#
+# These are house rules, carried into every turn within their budget. They are
+# here rather than in a prompt string so they can be corrected without a code
+# change -- and because several of them exist only because a parent told us we
+# were getting it wrong.
+#
+# `id` is stable (it is how a rule is superseded or measured), `priority`
+# orders them when the budget cannot hold all, and `applies_to` narrows a rule
+# to turns of a given kind. Empty `applies_to` means always.
+# ---------------------------------------------------------------------------
+procedural:
+  - id: use_memory_silently
+    priority: 100
+    applies_to: []
+    text: >-
+      Use what you remember without talking about it. Never mention notes,
+      records or what you have or have not been told, and never re-answer an
+      earlier turn.
+    # Added after: "the agent is repeating the follow up in the next response".
+
+  - id: never_reask_known
+    priority: 95
+    applies_to: []
+    text: >-
+      Do not ask for anything the parent has already given, in this
+      conversation or an earlier one.
+    # Added after the assistant asked for an age one message after it was told.
+
+  - id: answer_the_question_asked
+    priority: 90
+    applies_to: []
+    text: >-
+      Answer only the topic of the current question. Never substitute a
+      neighbouring topic that happens to share words with it.
+    # Added after "where was her ulcer?" was answered about vaccination sites.
+
+  - id: child_facts_beat_guidance
+    priority: 85
+    applies_to: [medical]
+    text: >-
+      A question about this particular child is answered from what the parent
+      told you. General guidance is for what to do next, not for what is true
+      about this child.
+
+  - id: age_comes_from_the_record
+    priority: 80
+    applies_to: [medical, growth]
+    text: >-
+      Use only the child's recorded age. Never infer an age from the title of
+      a guidance note.
+    # Added after a section heading "Feeding 7-9 months" became the child's age.
+
+  - id: no_diagnosis
+    priority: 75
+    applies_to: []
+    text: >-
+      Never diagnose and never invent a drug dose. Say plainly when something
+      needs a clinician.
+
+  - id: describe_what_you_see
+    priority: 70
+    applies_to: [vision]
+    text: >-
+      When the parent sends a photo, describe what is actually visible before
+      anything else, and do not list what you cannot tell from it.
+    # Added after a photo turn replied only with what it could not know.
+
+# ---------------------------------------------------------------------------
+# Consolidation: which turns are worth distilling into durable facts.
+#
+# Selection is by intent, matching the existing child-memory policy, because
+# small talk and slot corrections would drown the store within a few sessions.
+# ---------------------------------------------------------------------------
+consolidation:
+  from_intents: [medical, screening, growth_analysis, growth, vision]
+  # A distilled fact shorter than this is not a fact, it is a fragment.
+  min_fact_chars: 12
+  # Facts per consolidation pass. The point is a durable record, not a
+  # transcript, so this stays small on purpose.
+  max_facts_per_pass: 6

@@ -142,6 +142,46 @@ class Settings(BaseSettings):
     nestling_retrieval_fallback_min_words: int = 3
     nestling_retrieval_fallback_min_chars: int = 8
 
+    # ---- Memory system (assistant/memory/) --------------------------------
+    # Where the native memory backend keeps facts and episodes. Defaults
+    # beside the chat database so one volume holds all conversational state.
+    nestling_memory_db: str = ""
+    # Which backend serves semantic + episodic memory. Names are resolved
+    # against config/memory.yaml; an unavailable backend falls back to
+    # "native", which needs no network, no graph database and no embeddings.
+    nestling_memory_backend: str = "native"
+    # Consolidation: after this many episodic turns in a session, distil the
+    # durable facts out of them into semantic memory and mark them folded.
+    # Low enough that a long chat does not outrun the context window before
+    # anything is saved, high enough not to pay for extraction every turn.
+    nestling_memory_consolidate_every: int = 8
+    # A consolidated claim is inferred, not stated, so it ranks below anything
+    # the parent said outright when the context budget is tight.
+    nestling_memory_inferred_confidence: float = 0.6
+    # Longest a single remembered line may be when rendered into the prompt.
+    nestling_memory_line_chars: int = 220
+
+    # Graphiti backend. Only read when nestling_memory_backend selects it.
+    # Empty URI means the graph is not configured, which is not an error --
+    # it is how the native backend stays the default.
+    nestling_memory_graph_uri: str = ""
+    nestling_memory_graph_user: str = ""
+    nestling_memory_graph_password: str = ""
+    # Embeddings for the graph go through the same OpenAI-compatible endpoint
+    # as generation, so nothing is fetched from huggingface.co at runtime.
+    nestling_memory_embedding_model: str = "Qwen/Qwen3.5-4B"
+    # vLLM ignores the key, but the OpenAI client requires one to be set.
+    nestling_llm_api_key: str = ""
+
+    # Context budget. The four memory kinds compete for one prompt, and a
+    # prompt stuffed with everything is what made the model answer about
+    # vaccines when asked about an ulcer. Shares are fractions of
+    # llm_prompt_context_chars and are normalised, so they need not sum to 1.
+    nestling_memory_share_procedural: float = 0.15
+    nestling_memory_share_semantic: float = 0.35
+    nestling_memory_share_episodic: float = 0.30
+    nestling_memory_share_working: float = 0.20
+
     # Intent routing
     nestling_router_llm_min_confidence: float = 0.7
 

@@ -78,3 +78,9 @@ def clear_refdata_cache() -> None:
     mchat_config.cache_clear()
     care_topics.cache_clear()
     knowledge_audience.cache_clear()
+
+
+@lru_cache
+def memory_config() -> dict[str, Any]:
+    """Backends, procedural rules and consolidation policy (config/memory.yaml)."""
+    return _load_yaml("memory.yaml")
