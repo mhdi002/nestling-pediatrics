@@ -28,7 +28,7 @@ def mem(tmp_path, monkeypatch):
     reset_settings()
     system = MemorySystem(NativeMemoryBackend(tmp_path / "memory.db"))
     yield system
-    system.backend.close()
+    system.close()
     reset_settings()
 
 

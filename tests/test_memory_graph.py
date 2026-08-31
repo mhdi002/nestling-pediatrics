@@ -34,6 +34,7 @@ def semantic(tmp_path, monkeypatch):
     backend = NativeMemoryBackend(tmp_path / "memory.db")
     mem = SemanticMemory(backend)
     yield mem
+    mem.close()
     backend.close()
     reset_settings()
 

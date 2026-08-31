@@ -31,6 +31,9 @@ GROUNDED_SYSTEM = (
     "follow. If the parent is asking about their own child -- something they "
     f"told you earlier, a name, an age, a symptom -- answer from '{PARENT_NOTES_HEADING}'. "
     f"Use '{CARE_NOTES_HEADING}' for general guidance and for what to do next. "
+    "That section also carries the transcript, including your own earlier "
+    "replies: treat what you said there as something you said, not as an "
+    "established fact about the child. "
     # Both sources are working material, not something to talk about. Told to
     # say when it had not been told a thing, the model narrated its own notes
     # on every turn -- "the care notes you shared focus on newborns", "I don't
@@ -96,7 +99,7 @@ def compose_context(memory: str, care_notes: str) -> str:
     notes_share = max(1, caps.working)
     total = remembered_share + notes_share
 
-    mem = _META_LINE.sub(" ", memory or "").strip()
+    mem = _flatten_markers(_META_LINE.sub(" ", memory or "")).strip()
     notes = (care_notes or "").strip()
 
     # An absent half hands its room to the other rather than wasting it.
@@ -111,6 +114,31 @@ def compose_context(memory: str, care_notes: str) -> str:
     if notes:
         blocks.append(f"[{CARE_NOTES_HEADING}]\n{_fit(notes, notes_share)}")
     return "\n\n".join(blocks)
+
+
+_INNER_MARKER = re.compile(r"^\[([A-Z][A-Z_]*)\]\s*$", re.MULTILINE)
+
+
+def _flatten_markers(text: str) -> str:
+    """Turn the orchestrator's internal markers into plain sub-labels.
+
+    The memory half arrives carrying [CHILD_MEMORY], [RECENT_CHAT] and friends,
+    and is then wrapped in a section heading of its own. That left the prompt
+    with two indistinguishable levels of [BRACKETS], so [RECENT_CHAT] read as a
+    peer of [GENERAL CARE NOTES] rather than as part of what the parent said --
+    undoing the very labelling that stopped a question about a child's ulcer
+    being answered with vaccination guidance.
+
+    The markers stay as they are in the query, because retrieval, slot
+    extraction and the web-search gate all split on them. Only the copy the
+    model reads is flattened, so there is exactly one level of section.
+
+    Converted by rule rather than by a table, so a marker added later is
+    handled without anyone remembering to come back here.
+    """
+    return _INNER_MARKER.sub(
+        lambda m: f"{m.group(1).replace('_', ' ').capitalize()}:", text or ""
+    )
 
 
 def _fit(text: str, limit: int) -> str:

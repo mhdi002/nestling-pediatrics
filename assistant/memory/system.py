@@ -208,3 +208,13 @@ class MemorySystem:
         return self.backend.forget(
             subject=subject, session_id=session_id, owner_user_id=owner_user_id
         )
+
+    def close(self) -> None:
+        """Release every connection this system opened."""
+        for closer in (getattr(self.semantic, "close", None),
+                       getattr(self.backend, "close", None)):
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:  # noqa: BLE001 - closing must not raise
+                    pass

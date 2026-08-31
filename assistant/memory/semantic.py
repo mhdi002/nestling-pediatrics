@@ -78,6 +78,23 @@ class SemanticMemory:
         except Exception as exc:
             log.warning("Could not add fact to the profile graph: %s", exc)
 
+    def close(self) -> None:
+        """Release the profile graph's connection.
+
+        It is opened lazily on first use and was never closed, so every
+        SemanticMemory left a SQLite handle open. Harmless in a long-running
+        server, which builds one, but it made test teardown flaky on Windows:
+        the temporary directory could not be removed while the file was held.
+        """
+        graph = self._graph
+        self._graph = None
+        self._graph_ready = False
+        if graph is not None:
+            try:
+                graph.close()
+            except Exception:  # noqa: BLE001 - closing must not raise
+                pass
+
     def related(
         self,
         *,
