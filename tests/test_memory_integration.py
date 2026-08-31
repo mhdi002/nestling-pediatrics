@@ -188,3 +188,24 @@ def test_memory_is_scoped_to_the_account(agent):
                owner_user_id="owner")
 
     assert not agent._recall_semantic("ulcer", cid, "attacker")
+
+
+def test_the_profile_graph_joins_facts_from_different_turns(agent, monkeypatch):
+    """"which hospital treated her ulcer?" needs two facts joined.
+
+    Neither sentence contains both words, so only a graph walk connects the
+    condition to the clinic.
+    """
+    monkeypatch.setenv("NESTLING_CHILD_MEMORY_ENABLED", "0")
+    reset_settings()
+    cid = _child(agent, "Roya")
+    sid = agent.chat_memory.create_session(child_id=cid)
+
+    # Store as durable facts the way consolidation would, without the model.
+    agent.memory.semantic.remember("she has an ulcer in her stomach",
+                                   subject=cid, use_llm=False)
+    agent.memory.semantic.remember("we saw a doctor at Mehr hospital",
+                                   subject=cid, use_llm=False)
+
+    recalled = agent._recall_semantic("which hospital treated her ulcer?", cid, None)
+    assert "Mehr hospital" in recalled, recalled

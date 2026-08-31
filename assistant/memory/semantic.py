@@ -26,10 +26,84 @@ def _clean(text: str) -> str:
 
 
 class SemanticMemory:
-    """Durable facts, scoped to one child and one account."""
+    """Durable facts, scoped to one child and one account.
 
-    def __init__(self, backend):
+    Facts are kept twice on purpose: as the parent's own sentence, and as
+    entities and relationships in a profile graph. The sentence is what gets
+    read back to them; the graph is what lets a question walk from a condition
+    to the clinic that treated it, which no amount of keyword overlap does.
+    """
+
+    def __init__(self, backend, graph=None):
         self.backend = backend
+        self._graph = graph
+        self._graph_ready = graph is not None
+
+    @property
+    def graph(self):
+        """The profile graph, built beside the fact store on first use."""
+        if self._graph_ready:
+            return self._graph
+        self._graph_ready = True
+        try:
+            from assistant.memory.graph import ProfileGraph
+            from assistant.refdata import memory_config
+
+            if not ((memory_config() or {}).get("graph") or {}).get("enabled", True):
+                self._graph = None
+            else:
+                path = getattr(self.backend, "path", None)
+                self._graph = ProfileGraph(path) if path else None
+        except Exception as exc:
+            log.warning("Profile graph unavailable: %s", exc)
+            self._graph = None
+        return self._graph
+
+    def _ingest_graph(self, record, *, use_llm: bool) -> None:
+        """Add a fact's entities to the graph. Never breaks the write."""
+        graph = self.graph
+        if graph is None or record is None:
+            return
+        try:
+            from assistant.memory.extraction import ingest
+
+            ingest(
+                graph,
+                record.text,
+                subject=record.subject,
+                owner_user_id=record.owner_user_id,
+                fact_id=record.id,
+                use_llm=use_llm,
+            )
+        except Exception as exc:
+            log.warning("Could not add fact to the profile graph: %s", exc)
+
+    def related(
+        self,
+        *,
+        subject: str,
+        question: str,
+        owner_user_id: str | None = None,
+        budget_chars: int | None = None,
+    ) -> str:
+        """What the graph knows around the entities this question mentions."""
+        graph = self.graph
+        if graph is None or not subject:
+            return ""
+        try:
+            from assistant.refdata import memory_config
+
+            hops = int(((memory_config() or {}).get("graph") or {}).get("hops") or 2)
+            return graph.render(
+                subject=subject,
+                text=question,
+                owner_user_id=owner_user_id,
+                budget_chars=budget_chars,
+                hops=hops,
+            )
+        except Exception as exc:
+            log.warning("Profile graph lookup failed: %s", exc)
+            return ""
 
     def remember(
         self,
@@ -41,6 +115,7 @@ class SemanticMemory:
         confidence: float = 1.0,
         attributes: dict | None = None,
         supersedes: str | None = None,
+        use_llm: bool = True,
     ) -> MemoryRecord | None:
         text = _clean(text)
         if not text or not subject:
@@ -58,10 +133,12 @@ class SemanticMemory:
             attributes=dict(attributes or {}),
         )
         try:
-            return self.backend.remember_fact(record)
+            stored = self.backend.remember_fact(record)
         except Exception as exc:  # a memory write must not break a chat turn
             log.warning("Could not store semantic fact: %s", exc)
             return None
+        self._ingest_graph(stored, use_llm=use_llm)
+        return stored
 
     def recall(
         self,

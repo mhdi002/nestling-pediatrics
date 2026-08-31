@@ -733,12 +733,26 @@ class ParentAssistant:
         from assistant.memory.assembly import budget
 
         try:
-            return memory.semantic.render(
+            cap = budget().semantic
+            facts = memory.semantic.render(
                 subject=child_id,
                 owner_user_id=owner_user_id,
                 query=question,
-                budget_chars=budget().semantic,
+                budget_chars=cap,
             )
+            # What the profile graph connects to the entities in the question.
+            # This is what answers "which hospital treated her ulcer?" when the
+            # ulcer and the hospital were mentioned in different sentences --
+            # no keyword search can join those, a two-hop walk can.
+            related = memory.semantic.related(
+                subject=child_id,
+                question=question,
+                owner_user_id=owner_user_id,
+                budget_chars=max(0, cap - len(facts)),
+            )
+            if related and facts:
+                return f"{facts}\n{related}"
+            return related or facts
         except Exception as exc:
             log.warning("Semantic recall failed: %s", exc)
             return ""
