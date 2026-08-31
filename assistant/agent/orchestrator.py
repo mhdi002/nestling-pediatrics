@@ -674,6 +674,155 @@ class ParentAssistant:
         except Exception as exc:
             log.warning("Could not refresh the medical RAG index at startup: %s", exc)
         self.child_rag.load()
+        # Procedural, semantic and episodic memory. Built lazily on first use
+        # so a construction failure cannot stop the app from starting; memory
+        # degrading is survivable, not booting is not.
+        self._memory = None
+
+    @property
+    def memory(self):
+        from assistant.memory.system import MemorySystem
+
+        if self._memory is None:
+            try:
+                self._memory = MemorySystem()
+            except Exception as exc:
+                log.warning("Memory system unavailable: %s", exc)
+                self._memory = False
+        return self._memory or None
+
+    def _grounded_system(
+        self,
+        base: str,
+        *,
+        intents: set[str] | None = None,
+        owner_user_id: str | None = None,
+    ) -> str:
+        """The base prompt plus procedural memory.
+
+        Behaviour rules live in config/memory.yaml rather than in this string
+        so they can be corrected without a release, and so a parent's own
+        correction ("stop repeating yourself") can override a house rule for
+        their account.
+        """
+        memory = self.memory
+        if memory is None:
+            return base
+        try:
+            from assistant.memory.assembly import budget
+
+            rules = memory.procedural.render(
+                intents=intents,
+                owner_user_id=owner_user_id,
+                budget_chars=budget().procedural,
+            )
+        except Exception as exc:
+            log.warning("Procedural memory unavailable: %s", exc)
+            return base
+        if not rules.strip():
+            return base
+        return f"{base}\n\nHow to answer:\n{rules}"
+
+    def _recall_semantic(
+        self, question: str, child_id: str | None, owner_user_id: str | None
+    ) -> str:
+        """Durable facts about this child, most relevant to the question first."""
+        memory = self.memory
+        if memory is None or not child_id:
+            return ""
+        from assistant.memory.assembly import budget
+
+        try:
+            return memory.semantic.render(
+                subject=child_id,
+                owner_user_id=owner_user_id,
+                query=question,
+                budget_chars=budget().semantic,
+            )
+        except Exception as exc:
+            log.warning("Semantic recall failed: %s", exc)
+            return ""
+
+    def _recall_episodic(
+        self,
+        question: str,
+        session_id: str | None,
+        child_id: str | None,
+        owner_user_id: str | None,
+    ) -> str:
+        """Relevant turns, from this session and earlier ones about this child."""
+        memory = self.memory
+        if memory is None:
+            return ""
+        from assistant.memory.assembly import budget
+
+        try:
+            cap = budget().episodic
+            here = memory.episodic.render(
+                session_id=session_id,
+                owner_user_id=owner_user_id,
+                query=question,
+                budget_chars=cap,
+            )
+            if here or not child_id:
+                return here
+            # Nothing in this session matched; the child's earlier sessions
+            # may still hold the answer.
+            return memory.episodic.render(
+                subject=child_id,
+                owner_user_id=owner_user_id,
+                query=question,
+                budget_chars=cap,
+            )
+        except Exception as exc:
+            log.warning("Episodic recall failed: %s", exc)
+            return ""
+
+    def remember_turn(
+        self,
+        *,
+        session_id: str,
+        role: str,
+        content: str,
+        child_id: str | None = None,
+        owner_user_id: str | None = None,
+    ) -> None:
+        """Record a turn in episodic memory. Never raises into the chat path."""
+        memory = self.memory
+        if memory is None:
+            return
+        try:
+            memory.observe(
+                session_id=session_id,
+                role=role,
+                content=content,
+                subject=child_id or "",
+                owner_user_id=owner_user_id,
+            )
+        except Exception as exc:
+            log.warning("Could not record turn: %s", exc)
+
+    def consolidate_if_due(
+        self,
+        *,
+        session_id: str,
+        child_id: str | None,
+        owner_user_id: str | None = None,
+    ) -> list[str]:
+        """Fold the conversation into durable facts once enough has been said."""
+        memory = self.memory
+        if memory is None or not child_id:
+            return []
+        try:
+            return memory.maybe_consolidate(
+                session_id=session_id,
+                subject=child_id,
+                owner_user_id=owner_user_id,
+                use_llm=self.use_llm,
+            )
+        except Exception as exc:
+            log.warning("Consolidation failed: %s", exc)
+            return []
 
     def refresh_medical_index(self):
         return self.medical.build_from_chunks()
@@ -715,7 +864,7 @@ class ParentAssistant:
         out["context"] = context
         try:
             text = get_qwen().answer_with_context(
-                question, context, system=GROUNDED_SYSTEM
+                question, context, system=self._grounded_system(GROUNDED_SYSTEM)
             )
         except Exception as exc:
             log.warning("Grounded answer failed, keeping extractive reply: %s", exc)
@@ -1245,13 +1394,24 @@ class ParentAssistant:
             memory_parts: list[str] = []
             if mem_ctx.get("child_context"):
                 memory_parts.append(f"[CHILD_MEMORY]\n{mem_ctx['child_context']}")
+            # Facts about THIS child, ranked against the question rather than
+            # replayed in date order, and drawn from every past session -- a
+            # new session begins with no history, but the child's thread did
+            # not begin with it.
+            remembered = self._recall_semantic(en_message, child_id, owner_user_id)
+            if remembered:
+                memory_parts.append(f"[REMEMBERED_ABOUT_CHILD]\n{remembered}")
             if mem_ctx.get("summary"):
                 memory_parts.append(f"[SESSION_SUMMARY]\n{mem_ctx['summary']}")
-            if mem_ctx.get("recent_text"):
-                recent = mem_ctx["recent_text"]
+            # Turns chosen by relevance, so the one line mentioning an ulcer
+            # is not buried under a dozen recent turns about sleep.
+            recent = self._recall_episodic(en_message, session_id, child_id, owner_user_id)
+            if not recent:
+                recent = mem_ctx.get("recent_text") or ""
                 recent_cap = _s.nestling_memory_recent_chars
                 if len(recent) > recent_cap:
                     recent = recent[-recent_cap:]
+            if recent:
                 memory_parts.append(f"[RECENT_CHAT]\n{recent}")
 
             followup_hit = bool(_MED_FU.search(en_message) or _MED_FU.search(user_message or ""))
@@ -1448,6 +1608,30 @@ class ParentAssistant:
             slots=slots,
             session_id=session_id,
         )
+        # Episodic memory records both halves of the exchange in English, the
+        # language retrieval matches against, so a Persian turn is still
+        # findable later.
+        self.remember_turn(
+            session_id=session_id,
+            role="user",
+            content=en_message or user_message,
+            child_id=child_id,
+            owner_user_id=owner_user_id,
+        )
+        self.remember_turn(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_text,
+            child_id=child_id,
+            owner_user_id=owner_user_id,
+        )
+        # Consolidation runs after the reply is built, so distillation never
+        # adds latency to the turn the parent is waiting on.
+        consolidated = self.consolidate_if_due(
+            session_id=session_id, child_id=child_id, owner_user_id=owner_user_id
+        )
+        if consolidated:
+            out["consolidated_facts"] = consolidated
         out["history"] = self.chat_memory.get_history(session_id)
         return out
 
