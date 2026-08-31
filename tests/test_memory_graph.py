@@ -241,9 +241,80 @@ def test_a_trailing_time_phrase_is_not_part_of_the_condition():
     assert triples[0]["dst"] == "croup"
 
 
-def test_ordinary_chat_produces_no_entities():
-    """Every filler line from the scenario pool must stay out of the graph."""
+def test_a_question_never_becomes_a_fact():
+    """The invariant that matters: asking is not telling.
+
+    "is it okay if she skips a nap?" must not record that she skips naps.
+    """
     from tests import scenarios
 
-    for line in scenarios.CHATTER:
+    questions = [line for line in scenarios.CHATTER if line.rstrip().endswith("?")]
+    assert questions, "the filler pool has no questions to check"
+    for line in questions:
         assert extract_deterministic(line) == [], line
+
+
+def test_a_plain_statement_is_recorded_even_when_it_is_trivial():
+    """A deliberate trade of precision for recall.
+
+    Once relations come from the sentence's own verb rather than a list of
+    four, "he keeps kicking his blanket off" produces an edge. It is a low
+    value fact, but it IS a fact the parent stated, and the alternative --
+    recording nothing unless it matches a shape someone wrote down -- lost
+    eight of nine ordinary statements. Noise the graph can carry; gaps it
+    cannot.
+    """
+    triples = extract_deterministic("he keeps kicking his blanket off")
+    assert triples and triples[0]["relation"] == "keeps"
+
+
+# ---------------------------------------------------------------------------
+# Relations are learned from the sentence, not listed in advance
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence,relation,entity",
+    [
+        # None of these relations appear anywhere in config or code.
+        ("she started crawling last week", "started", "crawling"),
+        ("he refuses vegetables", "refuses", "vegetables"),
+        ("he loves bananas", "loves", "bananas"),
+        ("she weighs 8 kilos", "weighs", "8 kilos"),
+        ("she is afraid of the bath", "is_afraid_of", "bath"),
+        ("he was born at Milad hospital", "was_born_at", "Milad hospital"),
+        ("he goes to the nursery on Tuesdays", "goes", "to the nursery"),
+    ],
+)
+def test_the_graph_learns_relations_nobody_wrote_down(sentence, relation, entity):
+    """Eight of nine ordinary statements used to produce no node at all.
+
+    Only "has X" had a rule, so a parent describing a milestone, a preference,
+    a fear or a birthplace was recorded as nothing.
+    """
+    triples = extract_deterministic(sentence)
+    assert triples, f"nothing extracted from {sentence!r}"
+    assert triples[0]["relation"] == relation, triples
+    assert entity in triples[0]["dst"], triples
+
+
+def test_a_specific_rule_still_wins_over_the_generic_one():
+    """Otherwise every fact gets both allergic_to and is_allergic_to."""
+    for sentence, expected in (
+        ("he is allergic to peanuts", "allergic_to"),
+        ("she has an ulcer", "has_condition"),
+        ("we saw a doctor at Mehr hospital", "seen_at"),
+        ("she is taking amoxicillin", "takes"),
+    ):
+        triples = extract_deterministic(sentence)
+        assert len(triples) == 1, f"{sentence}: {triples}"
+        assert triples[0]["relation"] == expected, triples
+
+
+def test_a_learned_relation_is_walkable_in_the_graph(graph):
+    """A relation nobody listed must still join facts together."""
+    ingest(graph, "he was born at Milad hospital", subject=CHILD,
+           owner_user_id=OWNER, use_llm=False)
+    rendered = graph.render(subject=CHILD, text="where was he born?",
+                            owner_user_id=OWNER)
+    assert "Milad hospital" in rendered, rendered

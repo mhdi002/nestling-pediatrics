@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -290,6 +291,27 @@ class ProfileGraph:
                 hits.append(node["id"])
         return hits
 
+    def match_edges(
+        self, *, subject: str, text: str, owner_user_id: str | None = None
+    ) -> list[dict]:
+        """Edges whose relation the question names.
+
+        A question often names the relationship rather than the thing: "where
+        was he born?", "what is he allergic to?", "what is he taking?". Seeding
+        only from node labels found nothing for those, because the words that
+        matter are on the edge.
+        """
+        words = {w for w in re.findall(r"[\w؀-ۿ]+", _norm(text).lower())
+                 if len(w) > 2}
+        if not words:
+            return []
+        hits = []
+        for edge in self.edges(subject=subject, owner_user_id=owner_user_id):
+            parts = {p for p in str(edge.get("relation") or "").lower().split("_") if len(p) > 2}
+            if parts & words:
+                hits.append(edge)
+        return hits
+
     def render(
         self,
         *,
@@ -301,12 +323,19 @@ class ProfileGraph:
     ) -> str:
         """The relevant part of the profile graph, as readable lines."""
         seeds = self.match_nodes(subject=subject, text=text, owner_user_id=owner_user_id)
+        # An edge the question named brings its own endpoints in as seeds, so a
+        # question about a relationship walks from there.
+        for edge in self.match_edges(
+            subject=subject, text=text, owner_user_id=owner_user_id
+        ):
+            seeds.extend([edge["src"], edge["dst"]])
         if not seeds:
             return ""
         lines = []
         used = 0
         for rel in self.neighbourhood(
-            subject=subject, seeds=seeds, owner_user_id=owner_user_id, hops=hops
+            subject=subject, seeds=list(dict.fromkeys(seeds)),
+            owner_user_id=owner_user_id, hops=hops,
         ):
             line = f"- {rel['src']} {rel['relation'].replace('_', ' ')} {rel['dst']}"
             if budget_chars is not None and used + len(line) + 1 > budget_chars:

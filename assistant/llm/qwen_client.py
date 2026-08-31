@@ -52,6 +52,76 @@ def _strip_reasoning(text: str) -> str:
 
 log = logging.getLogger(__name__)
 
+
+def _chat_template_kwargs() -> dict:
+    """The chat_template_kwargs to send, or nothing when cleared.
+
+    Returned as a dict to splat into the payload, so setting the value to "{}"
+    or "" omits the field entirely rather than sending an empty object.
+    """
+    raw = (get_settings().nestling_llm_chat_template_kwargs or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        log.warning("Ignoring malformed nestling_llm_chat_template_kwargs: %r", raw)
+        return {}
+    if not isinstance(parsed, dict) or not parsed:
+        return {}
+    return {"chat_template_kwargs": parsed}
+
+
+def _ran_out_thinking(choice: dict) -> bool:
+    """Empty answer because the budget ended mid-reasoning, not by choice."""
+    msg = choice.get("message") or {}
+    if (msg.get("content") or "").strip():
+        return False
+    reasoning = (msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
+    return bool(reasoning) and choice.get("finish_reason") == "length"
+
+
+def _retry_budget(max_tokens: int | None) -> int | None:
+    """A bigger budget for one retry, or None when retrying is pointless."""
+    settings = get_settings()
+    factor = settings.llm_reasoning_retry_multiplier
+    ceiling = settings.llm_reasoning_retry_max_tokens
+    if factor <= 1 or not max_tokens or max_tokens >= ceiling:
+        return None
+    return min(ceiling, int(max_tokens * factor))
+
+
+def _content_or_explain(choice: dict, max_tokens: int | None) -> str:
+    """The reply, with a loud log when a reasoning model spent the budget.
+
+    Qwen3 reasons before answering, and an OpenAI-compatible server may put
+    that thinking in a separate `reasoning` field. Measured against a local
+    qwen3-vl:4b: at 200 tokens it produced 898 characters of reasoning and an
+    EMPTY content with finish_reason "length"; at 600 it reasoned for about as
+    long and then answered "Paris."
+
+    Empty content is therefore not "the model had nothing to say", it is "the
+    budget ran out before it started saying it". The caller degrades to the
+    extractive answer, so no parent sees a blank reply -- but it would happen
+    on every single turn, silently, and the assistant would look permanently
+    dumber for a reason nothing reported. Say so instead.
+    """
+    msg = choice.get("message") or {}
+    text = _strip_reasoning((msg.get("content") or "").strip())
+    if text:
+        return text
+    reasoning = (msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
+    if choice.get("finish_reason") == "length" and reasoning:
+        log.warning(
+            "Model spent its whole %s-token budget reasoning (%d chars) and "
+            "produced no answer. Raise llm_max_tokens_* or serve the model "
+            "with reasoning disabled, or every reply will be the extractive "
+            "fallback.",
+            max_tokens,
+            len(reasoning),
+        )
+    return text
+
 PROBE_PATHS = ("/health", "/v1/models")
 
 # Smallest valid PNG (1x1). Used only to ask an endpoint whether it accepts
@@ -232,8 +302,10 @@ class QwenClient:
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
-            # Qwen3.x: suppress visible chain-of-thought when supported by the server
-            "chat_template_kwargs": {"enable_thinking": False},
+            # Qwen3.x: suppress chain-of-thought where the server supports it.
+            # Configurable, because a server that rejects the field would
+            # otherwise fail every request with no way to turn it off.
+            **_chat_template_kwargs(),
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -252,8 +324,19 @@ class QwenClient:
         choices = body.get("choices") or []
         if not choices:
             raise RuntimeError(f"LLM empty response: {body!r}")
-        msg = choices[0].get("message") or {}
-        return _strip_reasoning((msg.get("content") or "").strip())
+        text = _content_or_explain(choices[0], max_tokens)
+        if text or not _ran_out_thinking(choices[0]):
+            return text
+        # It was still thinking when the budget ended. Ask again with room to
+        # finish rather than serving the extractive fallback for the rest of
+        # the deployment's life.
+        bigger = _retry_budget(max_tokens)
+        if bigger is None:
+            return text
+        log.info("Retrying with %d tokens so the model can finish answering", bigger)
+        return self.chat(
+            messages, temperature=temperature, top_p=top_p, max_tokens=bigger
+        )
 
     def analyze_image(
         self,
@@ -313,8 +396,16 @@ class QwenClient:
         choices = body.get("choices") or []
         if not choices:
             raise RuntimeError(f"Vision empty response: {body!r}")
-        msg = choices[0].get("message") or {}
-        return _strip_reasoning((msg.get("content") or "").strip())
+        text = _content_or_explain(choices[0], max_tokens)
+        if text or not _ran_out_thinking(choices[0]):
+            return text
+        bigger = _retry_budget(max_tokens)
+        if bigger is None:
+            return text
+        log.info("Retrying vision with %d tokens", bigger)
+        return self.analyze_image(
+            image_bytes=image_bytes, prompt=prompt, mime=mime, max_tokens=bigger
+        )
 
     def answer_with_context(self, query: str, context: str, *, system: str | None = None) -> str:
         sys = system or (

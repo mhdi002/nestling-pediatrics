@@ -200,3 +200,18 @@ graph:
     - match: '\b(?:(?:is|are|was|were)\s+(?:taking|on)|taking|given|prescribed|started on)\s+([a-z][a-z ''-]{2,40})'
       relation: takes
       dst_type: medication
+
+    # The general case, and the reason the four above are a convenience rather
+    # than the whole vocabulary. `relation_group` takes the edge label from the
+    # verb the parent actually used, so the graph learns relations nobody wrote
+    # down: "started crawling", "refuses vegetables", "was born at", "is afraid
+    # of". Before this, eight of nine ordinary parent statements produced no
+    # node at all, because only "has X" had a rule.
+    #
+    # Listed last: the specific patterns above give better-typed edges
+    # (allergic_to, seen_at) and should win where they apply.
+    - match: '\b(?:she|he|they|my\s+(?:son|daughter|baby|child|kid)|the\s+(?:baby|child))\s+((?:is|are|was|were)\s+[a-z]+(?:\s+(?:to|of|at|about))?|[a-z]+(?:s|ed|ing)?)\s+(?:(?:an?|the|some|his|her)\s+)?([\w''’-]+(?:\s+[\w''’-]+){0,3}?)(?=\s+(?:on|in|at|since|for|and|but|because|when|which|that|last|this|next|yesterday|today|tonight|again|now|every|from|with)\b|[.,;!?]|$)'
+      relation_group: 1
+      dst_group: 2
+      dst_type: entity
+      fallback: true

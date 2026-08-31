@@ -131,6 +131,29 @@ class Settings(BaseSettings):
     llm_rag_temperature: float = 0.75
     llm_vision_temperature: float = 0.2
     llm_vision_top_p: float = 0.9
+    # Qwen3 reasons before answering. When the budget runs out mid-think the
+    # reply comes back EMPTY and the app serves the extractive fallback -- on
+    # every turn, for as long as the model is served that way.
+    #
+    # OFF by default, because it was measured and did not work. Against a local
+    # qwen3-vl:4b the retry escalated 900 -> 2700 -> 4096 tokens and the model
+    # still produced no answer, reasoning for 17,980 characters: it was not
+    # short of room, it simply does not stop. All the retry bought was three
+    # times the latency on a turn a parent was waiting for.
+    #
+    # The real fix for such a model is to stop it reasoning -- see
+    # nestling_llm_chat_template_kwargs -- or to serve one that does not. Raise
+    # this above 1.0 only for a model that genuinely needs a little more room,
+    # where one retry ends the problem rather than repeating it.
+    llm_reasoning_retry_multiplier: float = 1.0
+    llm_reasoning_retry_max_tokens: int = 4096
+    # Extra arguments for the server's chat template, as a JSON object.
+    # {"enable_thinking": false} is the documented way to stop Qwen3 reasoning,
+    # and it is why the deployed vLLM answers rather than thinking forever --
+    # Ollama's OpenAI shim ignores it, which is how that failure was found.
+    # Configurable rather than hardcoded so a server that rejects the field can
+    # be given "{}" instead of failing every request.
+    nestling_llm_chat_template_kwargs: str = '{"enable_thinking": false}'
     llm_prompt_context_chars: int = 1800
     llm_prompt_query_chars: int = 400
     llm_answer_max_chars: int = 1200

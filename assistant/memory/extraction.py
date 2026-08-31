@@ -32,6 +32,12 @@ log = logging.getLogger(__name__)
 
 CHILD = "child"
 
+_QUESTION = re.compile(
+    r"\?\s*$|^\s*(?:what|when|how|why|where|who|should|can|is it|does|do|"
+    r"are there|could|would)",
+    re.IGNORECASE,
+)
+
 _SYSTEM = (
     "You turn a sentence from a parent into a small knowledge graph about "
     "their child. Reply with a JSON array of triples, each "
@@ -115,13 +121,26 @@ def extract_deterministic(text: str) -> list[dict]:
     text = _clean(text)
     if not text:
         return []
+    if _QUESTION.search(text):
+        # A question is not a fact. "is it okay if she skips a nap?" would
+        # otherwise record that she skips naps.
+        return []
+    specs = [s for s in _vocab()["patterns"] if isinstance(s, dict)]
+    # A pattern marked `fallback` runs only when nothing more specific matched,
+    # so "he is allergic to peanuts" records allergic_to and not also the
+    # generic is_allergic_to alongside it.
+    triples = _apply([s for s in specs if not s.get("fallback")], text)
+    if triples:
+        return triples
+    return _apply([s for s in specs if s.get("fallback")], text)
+
+
+def _apply(specs: list[dict], text: str) -> list[dict]:
     triples: list[dict] = []
-    for spec in _vocab()["patterns"]:
-        if not isinstance(spec, dict):
-            continue
+    for spec in specs:
         pattern = spec.get("match")
-        relation = spec.get("relation")
-        if not pattern or not relation:
+        # A pattern either names its relation or takes it from the sentence.
+        if not pattern or not (spec.get("relation") or spec.get("relation_group")):
             continue
         # Case matters for proper nouns. Compiling everything IGNORECASE made
         # [A-Z] match lowercase, so "we saw a doctor at Mehr hospital" gave the
@@ -134,19 +153,45 @@ def extract_deterministic(text: str) -> list[dict]:
             log.warning("Bad graph pattern %r: %s", pattern, exc)
             continue
         for m in rx.finditer(text):
-            captured = _clean(m.group(m.lastindex or 1) if m.groups() else m.group(0))
+            dst_group = spec.get("dst_group") or (m.lastindex or 1)
+            try:
+                captured = _clean(m.group(dst_group) if m.groups() else m.group(0))
+            except (IndexError, re.error):
+                continue
             if not captured:
                 continue
             triples.append(
                 {
                     "src": str(spec.get("src") or CHILD),
-                    "relation": str(relation),
+                    "relation": _relation_for(spec, m),
                     "dst": captured,
                     "src_type": str(spec.get("src_type") or CHILD),
                     "dst_type": str(spec.get("dst_type") or "entity"),
                 }
             )
     return triples
+
+
+
+def _relation_for(spec: dict, match: "re.Match[str]") -> str:
+    """The edge label: named by the pattern, or taken from the sentence.
+
+    A pattern that names its relation gives a well-typed edge (allergic_to,
+    seen_at). One that sets `relation_group` takes the relation from the verb
+    the parent actually used, which is what lets the graph learn edges nobody
+    listed in advance -- "started crawling", "refuses vegetables", "was born
+    at" -- instead of recording only the handful of shapes someone thought to
+    write down.
+    """
+    group = spec.get("relation_group")
+    if group:
+        try:
+            verb = _clean(match.group(group))
+        except (IndexError, re.error):
+            verb = ""
+        if verb:
+            return re.sub(r"\s+", "_", verb.lower())
+    return str(spec.get("relation") or "relates_to")
 
 
 def extract(text: str, *, use_llm: bool = True) -> list[dict]:
