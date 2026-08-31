@@ -118,24 +118,22 @@ def test_relevance_beats_recency_across_a_long_session(agent, monkeypatch):
     assert "sleep" not in context.split("ulcer")[0][-200:], "buried under sleep turns"
 
 
-def test_a_recall_phrasing_is_misrouted_to_the_record(agent):
-    """Documents a routing bug the memory system cannot reach around.
+def test_a_recall_phrasing_now_reaches_memory(agent):
+    """This test previously documented a bug; the bug is fixed.
 
     HISTORY_RE matches a bare "remind me", so "remind me where her ulcer was"
-    is classified as "show me my child's record" and never reaches the
-    memory-grounded path, even though episodic recall ranks the ulcer turn
-    first for exactly that question. Recorded as a test so the day it is
-    fixed, this fails and gets updated rather than silently drifting.
+    used to be classified as a request for the child's record and never
+    reached the memory-grounded path. Routing now asks what the message names
+    rather than which verb it used.
     """
     from assistant.agent.intents import classify_intent
 
     assert classify_intent("where was her ulcer?") == {"medical"}
-    assert classify_intent("remind me where her ulcer was") == {"history"}
+    assert "history" not in classify_intent("remind me where her ulcer was")
 
     cid = _child(agent, "Nika")
     sid = agent.chat_memory.create_session(child_id=cid)
     agent.chat(sid, "she has an ulcer in her stomach", child_id=cid)
-    # The memory layer itself has no trouble with the question.
     recalled = agent._recall_episodic("remind me where her ulcer was", sid, cid, None)
     assert "ulcer" in recalled.lower()
 

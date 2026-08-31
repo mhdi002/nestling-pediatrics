@@ -408,6 +408,49 @@ def _is_soft_followup(
 from assistant.settings import get_settings
 
 
+# Words that refer to the record itself rather than to anything in it. A
+# message built only from these is asking to see the file; one that names
+# something else is asking a question the memory can answer.
+_RECORD_WORDS = re.compile(
+    r"\b(?:history|profile|record|records|data|info|information|summary|"
+    r"chart|charts|file|dossier|everything|anything|all|"
+    # A stored reading is the record of a measurement, not a fact inside it:
+    # "what was my child's last growth result?" asks for the growth record.
+    r"result|results|reading|readings|measurement|measurements)\b",
+    re.I,
+)
+# The recall framing itself, plus the pronouns and auxiliaries around it.
+# Removed before asking whether anything specific is left.
+_RECALL_FRAME = re.compile(
+    r"\b(?:remind|reminds|reminded|remember|remembers|remembered|recall|"
+    r"tell|told|say|said|show|know|last|previous|time|again|"
+    r"me|my|mine|you|your|we|us|our|i|it|its|the|a|an|of|about|"
+    r"what|whats|which|who|when|where|how|why|was|were|is|are|am|be|been|"
+    r"do|does|did|can|could|would|will|shall|should|have|has|had|"
+    r"child|children|baby|babies|kid|kids|son|daughter|he|she|him|her|his|hers|they|them)\b",
+    re.I,
+)
+
+
+def _asks_about_the_record(msg: str) -> bool:
+    """True when the parent wants the file, not a fact from inside it.
+
+    "show me my child's profile" refers to the record; "remind me where her
+    ulcer was" names a specific thing and wants an answer. The test is what
+    survives stripping the recall framing: if nothing specific is left, or
+    only record vocabulary, they are asking for the record.
+    """
+    text = (msg or "").strip()
+    if not text:
+        return True
+    if _RECORD_WORDS.search(text):
+        return True
+    remainder = _RECALL_FRAME.sub(" ", text)
+    # Punctuation and possessives are framing too, not subject matter.
+    remainder = re.sub(r"[^\w؀-ۿ]+", " ", remainder)
+    return not any(len(token) > 2 for token in remainder.split())
+
+
 def classify_intent(user_message: str, prior_slots: dict | None = None) -> set[str]:
     """Classify the *current* user turn only (never history)."""
     msg = (user_message or "").strip()
@@ -545,7 +588,16 @@ def classify_intent(user_message: str, prior_slots: dict | None = None) -> set[s
         and not show_chart
         and not bare_show
     ):
-        intents.add("history")
+        # "history" means show me the record. A recall verb on its own does
+        # not mean that: "remind me where her ulcer was" names a specific
+        # thing and wants an answer, not a profile dump -- but HISTORY_RE
+        # matches the bare "remind me", so it was routed to the record and
+        # never reached memory, even though episodic recall ranks the right
+        # turn first for exactly that question.
+        if _asks_about_the_record(msg):
+            intents.add("history")
+        else:
+            intents.add("medical")
 
     if GROWTH_COMPUTE_RE.search(msg):
         intents.add("growth")
