@@ -207,3 +207,36 @@ def test_the_profile_graph_joins_facts_from_different_turns(agent, monkeypatch):
 
     recalled = agent._recall_semantic("which hospital treated her ulcer?", cid, None)
     assert "Mehr hospital" in recalled, recalled
+
+
+def test_the_child_s_history_stays_reachable_after_a_session_has_turns(agent, monkeypatch):
+    """Found by real conversation: it forgot mid-chat.
+
+    Cross-session recall used to run only when the current session produced
+    nothing, so a new session could reach the child's history for its FIRST
+    question and never again -- by the second, the session had turns of its
+    own. In conversation that read as the assistant recalling an allergy and
+    then denying it knew the clinic and the diagnosis from minutes earlier.
+    """
+    monkeypatch.setenv("NESTLING_CHILD_MEMORY_ENABLED", "0")
+    reset_settings()
+    cid = _child(agent, "Darya")
+
+    told = agent.chat_memory.create_session(child_id=cid)
+    agent.chat(told, "she has bronchiolitis on her chest", child_id=cid)
+    agent.chat(told, "we took her to Razi clinic for it", child_id=cid)
+    agent.chat(told, "she is allergic to sesame", child_id=cid)
+
+    asked = agent.chat_memory.create_session(child_id=cid)
+    # First question: the session is empty, so this always worked.
+    first = agent._recall_episodic("what is she allergic to?", asked, cid, None)
+    assert "sesame" in first.lower()
+
+    agent.chat(asked, "what is she allergic to?", child_id=cid)
+
+    # Second and third: the session now has turns. These used to come back
+    # with nothing from the child's earlier sessions at all.
+    clinic = agent._recall_episodic("which clinic did we take her to?", asked, cid, None)
+    assert "razi" in clinic.lower(), clinic
+    condition = agent._recall_episodic("what was her chest problem?", asked, cid, None)
+    assert "bronchiolitis" in condition.lower(), condition

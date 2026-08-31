@@ -778,16 +778,33 @@ class ParentAssistant:
                 query=question,
                 budget_chars=cap,
             )
-            if here or not child_id:
+            if not child_id:
                 return here
-            # Nothing in this session matched; the child's earlier sessions
-            # may still hold the answer.
-            return memory.episodic.render(
+            # Earlier sessions about this child, ALWAYS -- not only when this
+            # session came up empty. Falling back only on empty meant the
+            # child's history was reachable for the first question of a new
+            # session and lost from the second onwards, because by then the
+            # session had turns of its own. In a real conversation that read
+            # as the assistant forgetting mid-chat: it recalled an allergy,
+            # then denied knowing the clinic and the diagnosis it had been
+            # told minutes earlier.
+            earlier = memory.episodic.render(
                 subject=child_id,
                 owner_user_id=owner_user_id,
                 query=question,
                 budget_chars=cap,
             )
+            if not earlier:
+                return here
+            if not here:
+                return earlier
+            # Drop lines already shown from this session, keeping the order.
+            seen = set(here.splitlines())
+            extra = [ln for ln in earlier.splitlines() if ln not in seen]
+            if not extra:
+                return here
+            merged = "\n".join(extra + here.splitlines())
+            return merged[-cap:] if len(merged) > cap else merged
         except Exception as exc:
             log.warning("Episodic recall failed: %s", exc)
             return ""

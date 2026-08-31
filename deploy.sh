@@ -778,7 +778,13 @@ size_llm_for_gpu() {
     return 0
   fi
   have_cmd python3 || { warn "no python3 to size the sidecar; using defaults"; return 0; }
-  local snap; snap="$(resolve_snapshot 2>/dev/null || true)"
+  # resolve_snapshot takes the hub directory. Called with no argument it hit
+  # "unbound variable" under `set -u` and killed the deploy right after the
+  # model finished downloading -- the one place a failure wastes the most time.
+  local hub_dir snap
+  hub_dir="$(hf_cache_from_env)/hub/$HUB_SUBDIR"
+  [ -d "$hub_dir" ] || return 0
+  snap="$(resolve_snapshot "$hub_dir" 2>/dev/null || true)"
   [ -n "$snap" ] && [ -d "$snap" ] || return 0
   step "sizing the LLM sidecar for this GPU"
   local out
