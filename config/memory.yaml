@@ -174,7 +174,18 @@ graph:
     - match: '(?:is |are )?allergic to ([a-z][a-z ''-]{2,40})'
       relation: allergic_to
       dst_type: allergen
-    - match: '\b(?:has|had|got) (?:an? |some )?((?:[a-z''-]+ ){0,2}(?:ulcer|rash|eczema|fever|cough|infection|allergy|asthma))\b'
+    # Grammar, not a list of conditions. This used to enumerate
+    # ulcer|rash|eczema|fever|cough|infection|allergy|asthma, so a parent
+    # saying bronchiolitis, colic, reflux, croup or thrush produced no node at
+    # all and the graph had nothing to walk from -- twenty-five generated
+    # scenarios failed on exactly that. Capturing the noun phrase after the
+    # verb and stopping at a preposition or clause boundary needs no
+    # vocabulary and caught all twenty-five with no false positives on
+    # ordinary chat.
+    # The article group requires trailing whitespace: written "(?:an?|some|the )?"
+    # the "an?" branch matched just the "a" of "an ulcer" and the condition was
+    # recorded as "n ulcer".
+    - match: '\b(?:has|had|got|developed)\s+(?:(?:an?|some|the)\s+)?([a-z][a-z''-]*(?:\s+[a-z''-]+){0,3}?)(?=\s+(?:on|in|at|since|for|and|but|which|that|from|after|before|when|because|last|this|next|yesterday|today|tonight|again|now)\b|[.,;!?]|$)'
       relation: has_condition
       dst_type: condition
     # Case-sensitive: the capitals are how the clinic's name is told apart
@@ -184,6 +195,8 @@ graph:
       relation: seen_at
       dst_type: clinic
       ignore_case: false
-    - match: '\b(?:is |are )?(?:taking|on|given) ([a-z][a-z ''-]{2,40})'
+    # "on" only after a form of "be". Left bare it read "a rash ON his back"
+    # as a medication and recorded "his back" as a drug.
+    - match: '\b(?:(?:is|are|was|were)\s+(?:taking|on)|taking|given|prescribed|started on)\s+([a-z][a-z ''-]{2,40})'
       relation: takes
       dst_type: medication

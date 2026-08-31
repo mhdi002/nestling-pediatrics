@@ -178,3 +178,71 @@ def test_the_graph_can_be_switched_off_in_config(semantic, monkeypatch):
     semantic._graph_ready = False
     semantic._graph = None
     assert semantic.graph is None
+
+
+# ---------------------------------------------------------------------------
+# Extraction must be grammatical, not a vocabulary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        # None of these appear in any list in the codebase.
+        ("she has bronchiolitis on her chest", "bronchiolitis"),
+        ("he has colic", "colic"),
+        ("he developed the croup last night", "croup"),
+        ("she got conjunctivitis at nursery", "conjunctivitis"),
+        # ...and the original example still works.
+        ("she has an ulcer in her stomach", "ulcer"),
+    ],
+)
+def test_a_condition_is_captured_without_naming_it_in_advance(sentence, expected):
+    """The pattern used to enumerate conditions, so anything unlisted vanished."""
+    triples = extract_deterministic(sentence)
+    conditions = [t["dst"] for t in triples if t["relation"] == "has_condition"]
+    assert conditions, f"nothing captured from {sentence!r}"
+    assert expected in conditions[0], conditions
+
+
+def test_a_condition_containing_and_is_truncated_by_the_fallback():
+    """A known limit of the pattern fallback, recorded rather than hidden.
+
+    "hand foot and mouth" is one condition; "a rash and a fever" is two. The
+    clause boundary cannot tell them apart without semantics, so it stops at
+    "and" -- keeping the pair separate at the cost of truncating the compound
+    name to "hand foot". A partial node still matches and still links; the LLM
+    extraction path, which is tried first, gets the full name right. Widening
+    the pattern to fix this would merge genuinely separate conditions, which
+    is the worse error for a medical record.
+    """
+    triples = extract_deterministic("he has hand foot and mouth")
+    assert triples[0]["dst"] == "hand foot"
+
+    two = extract_deterministic("she has a rash and a fever")
+    assert two[0]["dst"] == "rash", "two conditions were merged into one"
+
+
+def test_the_article_is_not_left_attached_to_the_condition():
+    """"(?:an?|some|the )?" matched the "a" of "an ulcer", leaving "n ulcer"."""
+    triples = extract_deterministic("she has an ulcer in her stomach")
+    assert triples[0]["dst"] == "ulcer"
+
+
+def test_a_body_part_is_not_mistaken_for_a_medication():
+    """Bare "on" read "a rash ON his back" as a drug called "his back"."""
+    triples = extract_deterministic("he has a rash on his back")
+    assert all(t["relation"] != "takes" for t in triples), triples
+
+
+def test_a_trailing_time_phrase_is_not_part_of_the_condition():
+    triples = extract_deterministic("he developed the croup last night")
+    assert triples[0]["dst"] == "croup"
+
+
+def test_ordinary_chat_produces_no_entities():
+    """Every filler line from the scenario pool must stay out of the graph."""
+    from tests import scenarios
+
+    for line in scenarios.CHATTER:
+        assert extract_deterministic(line) == [], line
