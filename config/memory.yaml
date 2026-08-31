@@ -45,8 +45,13 @@ procedural:
     text: >-
       Use what you remember without talking about it. Never mention notes,
       records or what you have or have not been told, and never re-answer an
-      earlier turn.
+      earlier turn. Once you have answered, stop -- do not add what else you
+      do not know or have no record of.
     # Added after: "the agent is repeating the follow up in the next response".
+    # The last sentence came later: asked which clinic, the deployed model
+    # answered correctly and then volunteered "I don't have details about any
+    # other specific clinic trips in our records", which is the same habit
+    # arriving after the answer instead of instead of it.
 
   - id: never_reask_known
     priority: 95
