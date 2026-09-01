@@ -85,8 +85,13 @@ class MemorySystem:
         subject: str = "",
         owner_user_id: str | None = None,
         attributes: dict | None = None,
+        original: str = "",
     ):
-        """Record one turn."""
+        """Record one turn.
+
+        `original` is the parent's own words when `content` is a translation
+        of them; both are kept. See EpisodicMemory.record.
+        """
         return self.episodic.record(
             session_id=session_id,
             role=role,
@@ -94,6 +99,7 @@ class MemorySystem:
             subject=subject,
             owner_user_id=owner_user_id,
             attributes=attributes,
+            original=original,
         )
 
     def maybe_consolidate(

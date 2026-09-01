@@ -164,18 +164,32 @@ growth_centile_doc_pattern: '(centile|percentile|growth.?chart|intergrowth|صد�
 # `max_age_months: null` is the final catch-all band.
 # Oldest age this care library actually covers, in months.
 #
-# The WHO material curated here is infant and toddler guidance: the oldest
-# feeding band is info_feeding_12_24m, and there is nothing about preschool
-# or school-age children. Retrieval cannot know that. Asked what a four year
-# old can eat, it returned newborn and 4-5 MONTH feeding notes -- the "4" in
-# "4 y o" matched "4-5 months" -- and scored 0.76 on term coverage, so the
-# web-search gate concluded the corpus had answered and never looked further.
-# The words matched; the age did not.
+# Retrieval cannot tell whether a chunk is about the age asked about. Asked
+# what a four year old can eat, it returned newborn and 4-5 MONTH feeding
+# notes -- the "4" in "4 y o" matched "4-5 months" -- and scored 0.76 on term
+# coverage, so the web-search gate concluded the corpus had answered and never
+# looked further. The words matched; the age did not. Declaring the ceiling
+# lets an age-specific question outside it be treated as unanswerable here,
+# whatever the word overlap.
 #
-# Declaring the ceiling lets an age-specific question outside it be treated
-# as unanswerable here, whatever the word overlap. Raise this when guidance
-# for older children is actually added to the corpus.
-age_coverage_max_months: 24
+# It was 24 while the corpus held only infant and toddler guidance. The
+# data/en/curated_preschool_*.md files now carry age-banded, sourced guidance
+# through the preschool years, so the ceiling is raised to 72 months (6 years).
+# What actually reaches 6 years, per topic:
+#
+#   feeding      NHS "What to feed young children" (1-4y) plus the Eatwell
+#                Guide from age 2, and the "from age 5" juice limit  -> 6y
+#   dental       NHS toothpaste bands 0-3, 3-6, 7+                   -> 6y
+#   activity     WHO under-5 (180 min) + NHS 5-18 (60 min/day)       -> 6y
+#   illness      NHS school/nursery exclusion advice, fever advice    -> 6y
+#   safety       WHO drowning / burns / road-traffic fact sheets      -> 6y
+#   sleep        WHO under-5 + NHS night-sleep figures to age 5       -> 5y
+#   screens      WHO under-5 (to 4y) + AAP 2-5y                       -> 5y
+#   milestones   AAP milestone pages end at "4 to 5 year olds"        -> 5y
+#
+# The three that stop at 5 are still answered for a 5-year-old; nothing here
+# is curated for a 7-year-old, which is why the ceiling is 72 and not higher.
+age_coverage_max_months: 72
 
 feeding_age_bands:
   - max_age_months: 4
@@ -188,8 +202,12 @@ feeding_age_bands:
     ids: [info_feeding_7_9m, info_feeding_solids_6m]
   - max_age_months: 12
     ids: [info_feeding_10_12m, info_feeding_7_9m]
-  - max_age_months: null
+  - max_age_months: 24
     ids: [info_feeding_12_24m, info_feeding_10_12m]
+  - max_age_months: 48
+    ids: [info_feeding_2_4y, info_feeding_12_24m]
+  - max_age_months: null
+    ids: [info_feeding_4_6y, info_feeding_2_4y]
 
 # Fallback ordering when the child's age is unknown.
 feeding_ids_unknown_age:

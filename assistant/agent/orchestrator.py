@@ -28,6 +28,7 @@ from assistant.tools.clinical import TOOL_SPECS, _term_age_months_from_weeks, di
 from assistant.tools.who_term_equations import classify_maturity
 from assistant.agent.slots import extract_growth_slots
 from assistant.agent.router import route_message
+from assistant.agent.urgency import INTENT as URGENT_INTENT
 from assistant.agent.intents import (  # noqa: F401
     AFFIRM_RE,
     ANALYZE_GROWTH_RE,
@@ -87,6 +88,8 @@ def _infer_last_topic(intents: set[str], query: str = "") -> str:
     from assistant.agent.intents import topic_slug_from_query
 
     q = query or ""
+    if "urgent" in intents:
+        return "urgent"
     if "medical" in intents or "screening" in intents:
         return topic_slug_from_query(q)
     if "growth_analysis" in intents:
@@ -817,8 +820,14 @@ class ParentAssistant:
         content: str,
         child_id: str | None = None,
         owner_user_id: str | None = None,
+        original: str = "",
     ) -> None:
-        """Record a turn in episodic memory. Never raises into the chat path."""
+        """Record a turn in episodic memory. Never raises into the chat path.
+
+        `original` carries the parent's own sentence when `content` is the
+        English the agent worked from, so the durable record keeps what was
+        actually said while retrieval still matches English.
+        """
         memory = self.memory
         if memory is None:
             return
@@ -829,6 +838,7 @@ class ParentAssistant:
                 content=content,
                 subject=child_id or "",
                 owner_user_id=owner_user_id,
+                original=original,
             )
         except Exception as exc:
             log.warning("Could not record turn: %s", exc)
@@ -873,9 +883,16 @@ class ParentAssistant:
             # Retrieve and gate with the LLM off, then generate once from both
             # labelled sources. Same number of model calls as before.
             res = self.medical.answer(query, use_llm=False)
+            if res.get("escalated"):
+                # The call for help is deterministic on purpose. Rewriting it
+                # through the model, or padding it with web results, is exactly
+                # what must not happen to it.
+                return res
             res = maybe_augment(query, res, rag=self.medical, use_llm=False)
             return self._answer_from_sources(query, memory, res)
         res = self.medical.answer(query, use_llm=self.use_llm)
+        if res.get("escalated"):
+            return res
         # Only reaches the network when the fallback is enabled *and* the local
         # corpus came up short; otherwise this returns `res` untouched.
         return maybe_augment(query, res, rag=self.medical, use_llm=self.use_llm)
@@ -1283,6 +1300,14 @@ class ParentAssistant:
             intents.discard("chat")
             intents.discard("reassure")
 
+        if URGENT_INTENT in intents:
+            # A parent reporting that the child is not breathing has said other
+            # things too — an age, a weight, a question. None of them is what
+            # this turn is about, and none of the collapses above knows that.
+            # Retrieval still runs (as "medical") so the reply can cite the
+            # parent-facing notes, but nothing else does.
+            intents = {URGENT_INTENT, "medical"}
+
         # Re-plot from saved child measurements when parent asks to show the chart
         if "growth" in intents and child_id and (
             show_chart
@@ -1641,13 +1666,17 @@ class ParentAssistant:
         )
         # Episodic memory records both halves of the exchange in English, the
         # language retrieval matches against, so a Persian turn is still
-        # findable later.
+        # findable later. The parent's own sentence rides along beside it:
+        # storing only the translation made the durable record of a child's
+        # history a machine gloss of what was said, which cannot be checked
+        # against anything once the original is gone.
         self.remember_turn(
             session_id=session_id,
             role="user",
             content=en_message or user_message,
             child_id=child_id,
             owner_user_id=owner_user_id,
+            original=user_message,
         )
         self.remember_turn(
             session_id=session_id,
@@ -1922,6 +1951,7 @@ class ParentAssistant:
         if out.get("medical_rag"):
             ans = out["medical_rag"].get("answer", "")
             mode = (out["medical_rag"].get("mode") or "").lower()
+            escalated = bool(out["medical_rag"].get("escalated"))
             if fa and ans:
                 ans = translate_en_to_fa(ans)
             sources = out["medical_rag"].get("web_sources") or []
@@ -1930,13 +1960,31 @@ class ParentAssistant:
                 # the parent-voice trimming, and translation must not touch URLs.
                 parts.append(web_search_chat(ans, sources, fa=fa))
             else:
-                parts.append(
-                    medical_chat_answer(
-                        ans,
-                        fa=fa,
-                        from_llm="openai" in mode or "llm" in mode,
-                    )
+                spoken = medical_chat_answer(
+                    ans,
+                    fa=fa,
+                    # An escalation is kept whole for the same reason a
+                    # generated answer is: the three-sentence trim would cut
+                    # "ask someone else to call while you stay with your baby"
+                    # off the end of the one reply where every sentence is an
+                    # instruction. The call for help is already first in the
+                    # text, so it survives either way — this keeps the rest.
+                    from_llm="openai" in mode or "llm" in mode or escalated,
                 )
+                if escalated:
+                    # And it goes first in the turn, ahead of any chart or
+                    # profile chatter this message also happened to trigger.
+                    parts.insert(0, spoken)
+                else:
+                    parts.append(spoken)
+
+        if URGENT_INTENT in intents and not (out.get("medical_rag") or {}).get("escalated"):
+            # The LLM router can recognise an emergency phrasing the structural
+            # fallback does not, and retrieval may not be loaded at all. Either
+            # way the parent still gets the call for help, first.
+            from assistant.rag.stores import EMERGENCY_REPLY
+
+            parts.insert(0, translate_en_to_fa(EMERGENCY_REPLY) if fa else EMERGENCY_REPLY)
 
         if "screening" in intents and "medical" in intents:
             parts.append(

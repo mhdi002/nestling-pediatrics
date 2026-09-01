@@ -64,6 +64,12 @@ def knowledge_audience() -> dict[str, Any]:
     return _load_yaml("knowledge_audience.yaml")
 
 
+@lru_cache
+def urgency_signs() -> dict[str, Any]:
+    """Red-flag classes and the closed word classes the urgency intent uses."""
+    return _load_yaml("urgency_signs.yaml")
+
+
 def weeks_per_month() -> float:
     b = clinical_bounds()
     if b.get("use_legacy_weeks_per_month", True):
@@ -78,6 +84,7 @@ def clear_refdata_cache() -> None:
     mchat_config.cache_clear()
     care_topics.cache_clear()
     knowledge_audience.cache_clear()
+    urgency_signs.cache_clear()
 
 
 @lru_cache

@@ -88,36 +88,25 @@ def test_ordinary_questions_still_get_an_answer(rag, question):
     assert out.get("mode") != "emergency_escalation", "answered as an emergency"
 
 
-def test_score_based_escalation_is_off_because_it_misfires():
-    """It answered "what foods are good for her?" as an emergency.
+def test_escalation_is_not_decided_by_retrieval_scores():
+    """The score comparison that answered "what foods are good for her?" as an
+    emergency is gone, not merely switched off.
 
-    That question's clinician/parent retrieval scores (11.94 / 8.74) outrank
-    four of six genuine emergencies, so no threshold on this measure
-    separates the classes. Recognising an emergency needs a real classifier.
+    Its clinician/parent scores (11.94 / 8.74) outrank four of six genuine
+    emergencies, so no threshold on that measure separates the classes.
+    Anything reintroducing a score-based trigger here should fail this.
     """
     reset_settings()
-    assert get_settings().nestling_audience_escalation_enabled is False
-    food = [
-        {"id": "c", "audience": audience.CLINICIAN, "score": 11.94},
-        {"id": "p", "audience": audience.PARENT, "score": 8.74},
-    ]
-    assert not audience.clinician_only_topic(food, [food[1]])
+    assert get_settings().nestling_urgent_escalation_enabled is True
+    assert not hasattr(audience, "clinician_only_topic")
 
 
-def test_escalation_when_enabled_still_needs_a_real_match(monkeypatch):
-    monkeypatch.setenv("NESTLING_AUDIENCE_ESCALATION_ENABLED", "1")
-    reset_settings()
-    try:
-        weak = [{"id": "c", "audience": audience.CLINICIAN, "score": 1.0}]
-        assert not audience.clinician_only_topic(weak, [])
-        strong = [
-            {"id": "c", "audience": audience.CLINICIAN, "score": 10.9},
-            {"id": "p", "audience": audience.PARENT, "score": 6.7},
-        ]
-        assert audience.clinician_only_topic(strong, [strong[1]])
-    finally:
-        monkeypatch.delenv("NESTLING_AUDIENCE_ESCALATION_ENABLED", raising=False)
-        reset_settings()
+@pytest.mark.parametrize("question", EMERGENCIES)
+def test_the_scope_filter_holds_even_when_a_turn_escalates(rag, question):
+    """Escalation replaces the answer; it must not relax the audience filter."""
+    out = rag.answer(question, use_llm=False)
+    for doc in _cited_docs(rag, out):
+        assert audience.is_parent_facing(doc), f"{doc['id']} is clinician-only"
 
 
 def test_retrieval_is_scoped_even_without_going_through_load():

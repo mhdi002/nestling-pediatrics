@@ -47,6 +47,7 @@ def route_message(
         classify_intent,
     )
     from assistant.agent.slots import extract_growth_slots
+    from assistant.agent.urgency import INTENT as URGENT_INTENT, is_urgent
 
     msg = user_message or ""
     en = en_message or msg
@@ -84,6 +85,16 @@ def route_message(
     except Exception as exc:
         # The deterministic rules already produced a decision; the LLM is a bonus.
         log.warning("LLM intent routing failed, keeping the rule-based decision: %s", exc)
+
+    # A parent reporting an emergency is recognised by the LLM above when the
+    # sidecar is up, and by the structural test below whether it is or not.
+    # The app runs on one GPU that can be down, and an emergency check that
+    # only works while the model is up is not an emergency check -- so this
+    # runs on every turn, and it reads the parent's own words as well as the
+    # translated English, because the translation is an outside HTTP call that
+    # fails at the same times as everything else.
+    if is_urgent(msg, en_text=en):
+        intents.add(URGENT_INTENT)
 
     # Care / feeding questions must never pick up growth from LLM or rules alone.
     show_chart = bool(SHOW_CHART_RE.search(msg) or SHOW_CHART_RE.search(en))
@@ -123,8 +134,8 @@ def _try_llm_route(message: str, *, prior_slots: dict | None = None) -> IntentDe
     if not client.ready:
         return None
     schema_hint = (
-        'Return ONLY JSON: {"intents":["growth"|"medical"|"history"|"screening"|"help"|'
-        '"growth_analysis"|"reassure"|"slot_update"|"chat"],'
+        'Return ONLY JSON: {"intents":["urgent"|"growth"|"medical"|"history"|"screening"|'
+        '"help"|"growth_analysis"|"reassure"|"slot_update"|"chat"],'
         '"slots":{},"confidence":0.0,"rationale":"..."}'
     )
     prior = ""
@@ -136,6 +147,12 @@ def _try_llm_route(message: str, *, prior_slots: dict | None = None) -> IntentDe
         context="Classify the parent message for a pediatric assistant. Never invent numbers.",
         system=(
             "You are an intent router. Output valid JSON only. "
+            "Use urgent ONLY when the parent is REPORTING that the child is in "
+            "danger right now -- not breathing, choking, convulsing, unconscious "
+            "or unresponsive, gone blue or floppy, or bleeding heavily. A "
+            "question ABOUT such a sign ('what are the danger signs', 'what "
+            "should I do if she has a fit') is medical, never urgent; so is an "
+            "ordinary symptom ('she has a mild fever'). "
             "Use medical for feeding/nutrition/food/eat AND skin/wound/scar/cut/injury/"
             "bruise/burn/rash/redness questions (EN or FA: غذا، تغذیه، بخوره، زخم، جراحت). "
             "Also use medical for walking/motor milestones (can't walk, crawling, cruising) "

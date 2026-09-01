@@ -217,49 +217,31 @@ def is_parent_facing(doc: dict) -> bool:
     return str(label).strip().lower() == PARENT
 
 
-def clinician_only_topic(pool: list[dict], parent_hits: list[dict]) -> bool:
-    """
-    True when the best answer the corpus holds for this question is one a
-    parent must not be given.
-
-    OFF BY DEFAULT, because the measure below is not trustworthy.
-
-    The idea was that a question lands here when the corpus's strongest match
-    is a clinical procedure and nothing written for parents comes close. That
-    is the right idea; BM25 scores are the wrong instrument for it. Measured
-    over emergency and ordinary phrasings on this corpus, the two classes
-    overlap badly:
-
-        my baby is not breathing        clinician 8.19  parent  6.60
-        my baby is having convulsions   clinician 8.12  parent  6.89
-        what foods are good for her?    clinician 11.94 parent  8.74
-        is my baby gaining enough weight clinician 12.59 parent 10.36
-
-    "What foods are good for her?" outranks four of six real emergencies on
-    every ratio tried, and with escalation on it was answered as one. A pair
-    of thresholds can be fitted to any sample of these, but that is a constant
-    chosen to make the examples pass, not a signal -- so the feature stays off
-    rather than shipping a heuristic that tells a parent asking about solid
-    food to call an ambulance.
-
-    Note this is NOT the safety guarantee. Clinician procedures are withheld
-    from parents by the audience filter, which is provenance-based and
-    reliable; this only decides whether to additionally replace the answer
-    with a call-for-help message. Recognising an emergency needs a real
-    classifier -- an intent from the LLM router, which has no urgency intent
-    today -- and that is the way to turn this on.
-    """
-    if not pool or not get_settings().nestling_audience_escalation_enabled:
-        return False
-    settings = get_settings()
-    best_clinician = max(
-        (float(h.get("score") or 0.0) for h in pool if not is_parent_facing(h)),
-        default=0.0,
-    )
-    best_parent = max((float(h.get("score") or 0.0) for h in parent_hits), default=0.0)
-    if best_clinician < settings.nestling_audience_escalation_min_score:
-        return False
-    return best_clinician > best_parent
+# WHY THERE IS NO SCORE-BASED EMERGENCY TEST HERE ANY MORE
+#
+# There used to be a `clinician_only_topic(pool, parent_hits)` in this module:
+# a question was called an emergency when the corpus's strongest match for it
+# was a clinician procedure and nothing written for parents came close. The
+# idea is right; BM25 scores are the wrong instrument for it. Measured over
+# emergency and ordinary phrasings on this corpus, the two classes overlap
+# badly:
+#
+#     my baby is not breathing         clinician  8.19  parent  6.60
+#     my baby is having convulsions    clinician  8.12  parent  6.89
+#     what foods are good for her?     clinician 11.94  parent  8.74
+#     is my baby gaining enough weight clinician 12.59  parent 10.36
+#
+# "What foods are good for her?" outranks four of six real emergencies on
+# every ratio tried, and with escalation on it was answered as one. A pair of
+# thresholds can be fitted to any sample of these, but that is a constant
+# chosen to make the examples pass, not a signal, so the feature shipped
+# switched off. Recognising an emergency needs a classifier that reads the
+# sentence; it is now the `urgent` intent in assistant/agent/urgency.py, and
+# the escalation is driven from there.
+#
+# None of that was ever the safety guarantee. Clinician procedures are
+# withheld from parents by the audience filter above, which is
+# provenance-based, always on, and independent of any of this.
 
 
 def clear_cache() -> None:

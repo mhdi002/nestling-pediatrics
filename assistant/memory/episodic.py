@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from assistant.memory.types import Episode
+from assistant.memory.types import ORIGINAL, ORIGINAL_LANG, Episode
 from assistant.settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -37,17 +37,36 @@ class EpisodicMemory:
         subject: str = "",
         owner_user_id: str | None = None,
         attributes: dict | None = None,
+        original: str = "",
     ) -> Episode | None:
+        """Store one turn.
+
+        `original` is the parent's own sentence when `content` is a
+        translation of it. Both are kept: `content` is what retrieval matches
+        and what the prompt carries, because the index and the care corpus are
+        English; `original` is the record, because a child's history is what
+        the parent said and a translation of it is a copy that can drift. See
+        Episode.spoken.
+        """
         content = (content or "").strip()
         if not content or not session_id:
             return None
+        attrs = dict(attributes or {})
+        original = (original or "").strip()
+        # Only when it says something `content` does not. Storing an identical
+        # copy of every English turn would double the store for nothing.
+        if original and original != content:
+            from assistant.runtime_translate import detect_lang
+
+            attrs[ORIGINAL] = original
+            attrs.setdefault(ORIGINAL_LANG, detect_lang(original))
         episode = Episode(
             role=role,
             content=content,
             session_id=session_id,
             subject=subject,
             owner_user_id=owner_user_id,
-            attributes=dict(attributes or {}),
+            attributes=attrs,
         )
         try:
             return self.backend.add_episode(episode)
@@ -134,6 +153,7 @@ class EpisodicMemory:
             limit=settings.nestling_history_window,
         )
         episodes = list(recent)
+        relevant: set[str] = set()
         if query.strip():
             seen = {e.id for e in episodes}
             for hit in self.recall(
@@ -143,21 +163,43 @@ class EpisodicMemory:
                 query=query,
                 limit=50,
             ):
+                relevant.add(hit.id)
                 if hit.id not in seen:
                     episodes.append(hit)
                     seen.add(hit.id)
             # Chronological, so the exchange still reads forwards.
             episodes.sort(key=lambda e: e.created_at)
-        lines = [e.as_line(cap) for e in episodes]
         if budget_chars is None:
-            return "\n".join(lines)
-        # Trim from the front: when the budget bites, the oldest turn is the
-        # one worth losing.
-        kept: list[str] = []
+            return "\n".join(e.as_line(cap) for e in episodes)
+
+        # Trimming used to work from the front, on the reasoning that the
+        # oldest turn is the one worth losing. That silently destroyed the
+        # feature it was meant to serve: a turn found by relevance is old by
+        # definition -- that is why it was not in the recent window -- so it
+        # sorted to the front and was the first thing dropped. A parent asking
+        # about something said earlier got back only the last few lines of
+        # small talk.
+        #
+        # So spend the budget on the turns the question actually matched
+        # first, and fill what is left with recent context, oldest dropped
+        # first. Order is restored afterwards, so the exchange still reads
+        # forwards whichever turns survived.
+        chosen: set[str] = set()
         used = 0
-        for line in reversed(lines):
+        for episode in episodes:
+            if episode.id not in relevant:
+                continue
+            line = episode.as_line(cap)
             if used + len(line) + 1 > budget_chars:
                 break
-            kept.append(line)
+            chosen.add(episode.id)
             used += len(line) + 1
-        return "\n".join(reversed(kept))
+        for episode in reversed(episodes):
+            if episode.id in chosen:
+                continue
+            line = episode.as_line(cap)
+            if used + len(line) + 1 > budget_chars:
+                break
+            chosen.add(episode.id)
+            used += len(line) + 1
+        return "\n".join(e.as_line(cap) for e in episodes if e.id in chosen)

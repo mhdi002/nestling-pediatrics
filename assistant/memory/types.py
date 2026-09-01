@@ -33,7 +33,16 @@ KINDS = (PROCEDURAL, SEMANTIC, EPISODIC)
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """Timestamp with microsecond precision, because ordering depends on it.
+
+    At second resolution every turn of a conversation shared one timestamp --
+    six consecutive calls returned the same string -- so "ORDER BY created_at"
+    was arbitrary among them. That made recall non-deterministic run to run,
+    could show the exchange out of order, and mattered most to consolidation,
+    which slices episodes[folded:] on the assumption that the order is stable
+    and would otherwise fold the wrong turns.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def new_id() -> str:
@@ -100,6 +109,10 @@ class MemoryRecord:
         return cls(**data)
 
 
+ORIGINAL = "original"
+ORIGINAL_LANG = "original_lang"
+
+
 @dataclass(frozen=True)
 class Episode:
     """One conversational turn, kept verbatim."""
@@ -112,6 +125,24 @@ class Episode:
     id: str = field(default_factory=new_id)
     created_at: str = field(default_factory=utc_now)
     attributes: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def spoken(self) -> str:
+        """What the parent actually typed, which is not always `content`.
+
+        A Persian turn reaches the agent translated, because the corpus and
+        the retrieval index are English and a Persian sentence matches nothing
+        in them. `content` is therefore the English the agent worked from --
+        the right thing to search and the right thing to put in the prompt.
+
+        It is the wrong thing to keep as the record. A child's history is what
+        the parent said, and "دخترم کهیر دارد" is that record, not its gloss:
+        machine translation drifts, and the gloss cannot be checked against
+        anything once the original is gone. So the original rides along in
+        `attributes` and is what this returns when there is one.
+        """
+        original = (self.attributes or {}).get(ORIGINAL)
+        return original if isinstance(original, str) and original.strip() else self.content
 
     def as_line(self, cap: int | None = None) -> str:
         text = " ".join((self.content or "").split())

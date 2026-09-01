@@ -50,6 +50,13 @@ def chunk_id_for(source_stem: str, title: str) -> str:
         "feeding 7–9 months": "info_feeding_7_9m",
         "feeding 10–12 months": "info_feeding_10_12m",
         "feeding 12–24 months": "info_feeding_12_24m",
+        # Toddler/preschool bands. Stable ids because config/care_topics.yaml
+        # names them in `feeding_age_bands`; a generated id would change
+        # whenever the section heading is reworded.
+        "feeding 2–4 years": "info_feeding_2_4y",
+        "feeding 2-4 years": "info_feeding_2_4y",
+        "feeding 4–6 years": "info_feeding_4_6y",
+        "feeding 4-6 years": "info_feeding_4_6y",
         "safe sleep for newborns": "info_sleep_safe_abc",
         "sleep 0–3 months": "info_sleep_0_3m",
         "sleep 4–7 months": "info_sleep_4_7m",

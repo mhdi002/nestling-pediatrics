@@ -187,7 +187,11 @@ class NativeMemoryBackend:
         if not include_superseded:
             sql += " AND (valid_to IS NULL OR valid_to > ?)"
             params.append(utc_now())
-        sql += " ORDER BY created_at DESC"
+        # rowid breaks ties: on Windows the clock only advances every ~15ms,
+        # so a whole conversation can share one timestamp and "ORDER BY
+        # created_at" alone is arbitrary among those rows. rowid is SQLite's
+        # insertion order, which is exactly the order the turns happened.
+        sql += " ORDER BY created_at DESC, rowid DESC"
         rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
         for r in rows:
             try:
@@ -249,7 +253,11 @@ class NativeMemoryBackend:
         clause, extra = self._owner_clause(owner_user_id)
         sql += clause
         params += extra
-        sql += " ORDER BY created_at DESC"
+        # rowid breaks ties: on Windows the clock only advances every ~15ms,
+        # so a whole conversation can share one timestamp and "ORDER BY
+        # created_at" alone is arbitrary among those rows. rowid is SQLite's
+        # insertion order, which is exactly the order the turns happened.
+        sql += " ORDER BY created_at DESC, rowid DESC"
         rows = [dict(r) for r in self.conn.execute(sql, params).fetchall()]
         for r in rows:
             try:

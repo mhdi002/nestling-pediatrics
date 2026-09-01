@@ -248,18 +248,23 @@ class Settings(BaseSettings):
     # declared audience.
     nestling_audience_min_person_refs: int = 3
 
-    # Emergency escalation. When the best answer the corpus can offer a parent
-    # is a clinician-only procedure, the parent is told to seek emergency care
-    # instead of being read the procedure. The trigger is a comparison, not a
-    # tunable margin: see clinician_only_topic in assistant/rag/audience.py.
-    # Off: the retrieval-score measure behind it cannot separate an emergency
-    # from an ordinary question on this corpus (see clinician_only_topic in
-    # assistant/rag/audience.py for the measurements). Withholding clinician
-    # procedures from parents does NOT depend on this flag.
-    nestling_audience_escalation_enabled: bool = False
-    # Floor for that measure, if it is ever enabled behind a real classifier.
-    # BM25 scores on this corpus run ~5-45 for a matching question.
-    nestling_audience_escalation_min_score: float = 5.0
+    # Emergency escalation. When the parent reports an emergency, the reply
+    # leads with a call for help instead of care guidance.
+    #
+    # This was off while the trigger was retrieval arithmetic: BM25 scored
+    # "what foods are good for her?" above four of six genuine emergencies, so
+    # a question about solid food was answered as an emergency. The trigger is
+    # now the `urgent` intent -- the LLM router when the sidecar is up, and the
+    # structural test in assistant/agent/urgency.py either way -- which has no
+    # threshold to tune, so there is no companion margin setting any more.
+    #
+    # There is deliberately no "minimum confidence" knob here: the fallback is
+    # a yes/no structural test, and the LLM's share of the decision is already
+    # gated by nestling_router_llm_min_confidence above.
+    #
+    # Withholding clinician procedures from parents does NOT depend on this
+    # flag -- that is the provenance-based audience filter, which is always on.
+    nestling_urgent_escalation_enabled: bool = True
 
     # Web-search fallback. Off by default: searching costs money and latency,
     # and the local WHO corpus answers the overwhelming majority of turns.

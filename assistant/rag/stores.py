@@ -26,7 +26,6 @@ from assistant.config import (
 )
 from assistant.rag.audience import (
     PARENT,
-    clinician_only_topic,
     is_parent_facing,
     label_chunks,
 )
@@ -55,6 +54,15 @@ CITATION_TAIL = _MESSAGES["citation_tail"]
 NO_MATCH_REPLY = _MESSAGES["no_match"]
 # Said instead of reading a clinician procedure aloud to a frightened parent.
 EMERGENCY_REPLY = _MESSAGES["emergency_escalation"]
+
+
+def _urgent_question(text: str) -> bool:
+    """True when this turn reports an emergency (assistant/agent/urgency.py)."""
+    if not get_settings().nestling_urgent_escalation_enabled:
+        return False
+    from assistant.agent.urgency import is_urgent
+
+    return is_urgent(text)
 
 
 def _kw(topic: str) -> tuple[str, ...]:
@@ -484,14 +492,17 @@ class MedicalRAG:
         query_k = max(
             top_k * settings.nestling_rag_query_multiplier, settings.nestling_rag_query_min
         )
+        # Whether this is an emergency is decided by reading the parent's
+        # sentence, not by comparing retrieval scores — the arithmetic that was
+        # tried first put "what foods are good for her?" above four of six real
+        # emergencies (see assistant/rag/audience.py for the numbers). The
+        # question text used here is the current turn only, with the injected
+        # memory and the metadata lines already stripped.
+        escalate = _urgent_question(detect_src or topic_src)
         # Retrieve once over the whole corpus, then split by audience. The
-        # unscoped pool is never shown to anyone — it is only read to notice
-        # that the strongest thing the corpus knows about this question is a
-        # procedure a parent must not be given, which is what an emergency
-        # looks like from the index's point of view.
+        # unscoped pool is never shown to anyone.
         pool = self.retrieve(search_q, top_k=query_k, audience=None)
         hits = [h for h in pool if is_parent_facing(h)]
-        escalate = clinician_only_topic(pool, hits)
         if len(hits) < query_k and len(hits) < len(pool):
             # Clinician chunks crowded the pool, so the parent-facing tail of
             # the ranking was cut off. Re-run the search scoped to parents to

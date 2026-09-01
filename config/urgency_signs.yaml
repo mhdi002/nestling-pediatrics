@@ -1,0 +1,406 @@
+# Emergency (urgent) intent data — consumed by assistant/agent/urgency.py.
+#
+# WHY THIS FILE EXISTS
+#
+# The assistant must recognise a parent reporting an emergency and answer with
+# a call for help instead of care guidance. The first attempt did that by
+# comparing BM25 scores (see clinician_only_topic in assistant/rag/audience.py):
+# it answered "what foods are good for her?" as an emergency and was switched
+# off. Retrieval arithmetic does not separate the classes.
+#
+# The classifier that replaced it is the LLM intent router. This file is its
+# DETERMINISTIC FALLBACK, for the hours when the GPU sidecar is down — a safety
+# feature that only works while the model is up is not a safety feature.
+#
+# WHAT MAKES THIS DATA RATHER THAN A LIST OF SCARY WORDS
+#
+# 1. The semantic classes below are not invented. Each one is keyed on
+#    `corpus_terms`: words that appear in the danger-sign items WHO's own
+#    material in this corpus enumerates (`danger_sign_sections`). Those items
+#    are extracted from the corpus at test time and
+#    tests/test_urgency_intent.py fails if any `corpus_terms` entry is not
+#    actually in them. A new class cannot be added here for a topic the WHO
+#    danger-sign material does not treat as a danger sign.
+#
+# 2. `forms_en` / `forms_fa` are the surface forms a parent uses for the class
+#    the corpus named. They are needed because the corpus is a clinical text
+#    in English ("Diffuse cyanosis") and a parent types "went blue" or
+#    "کبود شده". Persian is unavoidable here: the WHO danger-sign material in
+#    this corpus is English-only, runtime FA→EN translation is an HTTP call to
+#    an external service, and an emergency must still be recognised when that
+#    call fails. They widen a class, they never create one.
+#
+# 3. Nothing here is a threshold. A message escalates when a class is named in
+#    a clause that REPORTS the child's state rather than asks about it — a
+#    structural test done in code, see assistant/agent/urgency.py. There is no
+#    score to tune.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#
+# WHO lists fever, diarrhoea, rash and poor feeding as danger signs meaning
+# "get the child assessed". They are not classes here, because the message
+# this triggers tells a parent to call an ambulance now, and because those are
+# the everyday subjects parents ask about ("she has a mild fever since
+# yesterday", "she refuses the bottle sometimes"). Escalating those is the
+# false positive that killed the previous attempt. They keep getting the
+# ordinary answer, which is drawn from the same WHO danger-sign notes and
+# already ends with "if anything gets worse or you are unsure, contact your
+# clinician". Only failure of a vital function and acutely life-threatening
+# events escalate.
+
+version: 1
+
+# Provenance: where in the corpus the danger signs for a CHILD are enumerated.
+# Same kind of data as config/knowledge_audience.yaml — a bibliographic fact
+# about the corpus, matched against a chunk's `source` and `title`.
+#
+# The maternal danger-sign sheets in PCPNC ("Know these danger signs",
+# "When to seek care on danger signs", "Advise on danger signs") are left out
+# on purpose: they enumerate signs in the mother (vaginal bleeding, backache,
+# pain on micturition), and folding their vocabulary into a pediatric
+# classifier put words like "urine" and "abdominal" in the red-flag class.
+danger_sign_sections:
+  - source: curated_who_danger_signs_en.md
+  - source: curated_who_pcpnc_full_en.md
+    title: If danger signs
+  - source: curated_who_pcpnc_full_en.md
+    title: When to seek care for danger signs
+
+# Every danger-sign section in the corpus, maternal ones included. Used only
+# to check that the impairment markers below are words the corpus itself
+# attaches to a failing sign, never to build the red-flag classes.
+danger_sign_title_contains: danger sign
+
+# --- the red-flag semantic classes -------------------------------------
+#
+# impairment_kinds: []       -> the class names an event or state that has no
+#   ordinary reading. A parent does not report a convulsion casually.
+# impairment_kinds: [...]    -> the class names something ordinary, and only a
+#   particular kind of failure of it is an emergency. Which kinds matter is a
+#   property of the sign, not a tuning knob: a vital function is dangerous when
+#   it STOPS ("not breathing", "stopped breathing", "difficulty breathing"),
+#   while bleeding is dangerous in EXCESS -- "stopped bleeding" is the good
+#   news, so cessation must not count for it.
+signs:
+  convulsion:
+    corpus_terms: [convulsions, convulsion, fits]
+    impairment_kinds: []
+    forms_en:
+      - convulsion
+      - convulsions
+      - convulsing
+      - convulsed
+      - seizure
+      - seizures
+      - seizing
+      - having a fit
+      - had a fit
+      - fitting
+    forms_fa:
+      - تشنج
+      - تشنجی
+      - حمله تشنجی
+
+  loss_of_consciousness:
+    corpus_terms: [unconscious, lethargic, lethargy, listless]
+    impairment_kinds: []
+    forms_en:
+      - unconscious
+      - unconscious
+      - unresponsive
+      - passed out
+      - blacked out
+      - lost consciousness
+      - lethargic
+      - listless
+      - floppy and unresponsive
+    forms_fa:
+      - بیهوش
+      - بیهوشی
+      - از حال رفت
+      - از حال رفته
+      - هوشیار نیست
+      - غش کرد
+      - غش کرده
+
+  cyanosis:
+    # "blue lips or tongue", "Diffuse cyanosis". Bare "blue" is a colour word,
+    # so the English forms all pair it with the body part or the change of
+    # state the corpus item describes.
+    corpus_terms: [cyanosis, blue, lips, tongue]
+    impairment_kinds: []
+    forms_en:
+      - cyanosis
+      - cyanotic
+      - blue lips
+      - blue tongue
+      - blue around the lips
+      - lips are blue
+      - lips have gone blue
+      - going blue
+      - gone blue
+      - turning blue
+      - turned blue
+      - went blue
+      - dusky
+    forms_fa:
+      - کبود
+      - کبودی لب
+      - لبهایش کبود
+      - رنگش کبود
+
+  floppy:
+    corpus_terms: [floppy]
+    impairment_kinds: []
+    forms_en:
+      - floppy
+      - limp
+      - lifeless
+      - like a rag doll
+    forms_fa:
+      - شل شده
+      - شل و بیجان
+      - بیجان
+      - وارفته
+
+  gasping:
+    corpus_terms: [gasping, grunting, indrawing]
+    impairment_kinds: []
+    forms_en:
+      - gasping
+      - grunting
+      - choking
+      - chest indrawing
+      - chest is pulling in
+      - ribs pulling in
+      - struggling for air
+      - struggling to breathe
+      - fighting for breath
+    forms_fa:
+      - خفه شده
+      - خفگی
+      - نفس نفس میزند
+      - قفسه سینه تو میرود
+
+  breathing:
+    corpus_terms: [breathing, breaths]
+    impairment_kinds: [negation, cessation, severity]
+    forms_en:
+      - breathing
+      - breathe
+      - breaths
+      - breath
+    forms_fa:
+      - نفس
+      - تنفس
+
+  movement:
+    corpus_terms: [movement, spontaneous, stimulated]
+    impairment_kinds: [negation, cessation]
+    forms_en:
+      - moving
+      - move
+      - movement
+      - responding
+      - respond
+      - reacting
+      - react
+      - waking
+      - wake
+      - waking up
+    forms_fa:
+      - تکان
+      - حرکت
+      - بیدار
+      - واکنش
+
+  bleeding:
+    # "Bleeding", "Bleeding from stump or cut", "Heavy bleeding". A grazed knee
+    # bleeds, so bare bleeding is not a red flag; the corpus's own qualifier
+    # (severity) is. Cessation is excluded on purpose -- "the cut stopped
+    # bleeding" is the good news, and reading it as a red flag was the only
+    # false positive this classifier produced on the generated set.
+    corpus_terms: [bleeding]
+    impairment_kinds: [severity]
+    forms_en:
+      - bleeding
+      - blood loss
+      - haemorrhage
+      - hemorrhage
+    forms_fa:
+      - خونریزی
+      - خون ریزی
+
+# --- closed classes used by the structural test -------------------------
+
+# How a sign can be reported as failing. Three kinds, because they do not mean
+# the same thing to every sign — see `impairment_kinds` above.
+#
+# `negation` and `cessation` are closed grammatical classes, the same kind of
+# thing as the pronoun lists in config/knowledge_audience.yaml: they decide
+# whether a function is being reported as WORKING or FAILING, never what the
+# function is.
+#
+# `severity` is not grammar. Those are the qualifiers WHO's own danger-sign
+# items attach to a failing sign — "Difficulty breathing", "Severe chest
+# indrawing", "Slow breathing or gasping", "Heavy bleeding" — and
+# tests/test_urgency_intent.py fails if one of them stops appearing in the
+# corpus's danger-sign items.
+impairment_markers:
+  negation:
+    en:
+      - not
+      - "no"
+      - never
+      - cannot
+      - "can't"
+      - cant
+      - "won't"
+      - wont
+      - "isn't"
+      - isnt
+      - "doesn't"
+      - doesnt
+      - "didn't"
+      - didnt
+      - unable
+      - inability
+      - barely
+      - hardly
+    fa:
+      - نمی
+      - نمي
+      - نميتواند
+      - نمیتواند
+      - نمیتونه
+      - نتوانست
+      - بدون
+      - ندارد
+  cessation:
+    en:
+      - stopped
+      - stops
+      - stop
+      - ceased
+    fa:
+      - قطع
+      - بند
+      - ایستاده
+  severity:
+    en:
+      - difficulty
+      - difficulties
+      - difficult
+      - severe
+      - severely
+      - slow
+      - heavy
+      - heavily
+    fa:
+      - سخت
+      - شدید
+      - مشکل
+
+# The people a parent reports about. Child nouns and the possessives/definite
+# determiners that make a reference specific — closed classes again, and the
+# child nouns are the same ones config/knowledge_audience.yaml already uses to
+# decide who a passage is about.
+child_nouns_en:
+  - baby
+  - babies
+  - newborn
+  - infant
+  - child
+  - kid
+  - son
+  - daughter
+  - girl
+  - boy
+  - toddler
+  - month old
+  - months old
+  - week old
+  - weeks old
+  - year old
+  - years old
+child_nouns_fa:
+  - بچه
+  - بچم
+  - بچهام
+  - نوزاد
+  - نوزادم
+  - کودک
+  - کودکم
+  - فرزند
+  - فرزندم
+  - پسرم
+  - دخترم
+  - نینی
+possessives_en: [my, our, the, his, her, this]
+subject_pronouns_en: [he, she, they, it]
+subject_pronouns_fa: [او, اون, ایشان]
+# "there is heavy bleeding" names no one and is still a report.
+existentials_en: [there is, there are, theres]
+
+# --- the information-seeking frame --------------------------------------
+#
+# A question about a danger sign is not a report of one. "What are the danger
+# signs I should watch for" and "what should I do if my baby has a seizure"
+# name the class and must never escalate. Everything from one of these words
+# to the end of its clause is treated as ASKED ABOUT; a sign has to be named
+# before it to count as reported.
+question_words_en:
+  - what
+  - when
+  - how
+  - why
+  - which
+  - who
+  - where
+  - whether
+  - if
+  - in case
+  - should i
+  - could i
+  - can i
+  - shall i
+  - do i
+  - would you
+  - is it normal
+  - is it ok
+  - is it okay
+question_words_fa:
+  - چه
+  - چی
+  - چیکار
+  - چکار
+  - چرا
+  - چگونه
+  - چطور
+  - چند
+  - کی
+  - آیا
+  - اگر
+  - باید
+  - کدام
+# A clause that OPENS with one of these is a yes/no question ("is he
+# breathing?"). Mid-clause they are ordinary copulas ("he is not breathing"),
+# so they only count in first position.
+clause_initial_auxiliaries_en:
+  - is
+  - are
+  - was
+  - were
+  - does
+  - do
+  - did
+  - has
+  - have
+  - had
+  - can
+  - could
+  - should
+  - would
+  - will
+  - shall
+  - am

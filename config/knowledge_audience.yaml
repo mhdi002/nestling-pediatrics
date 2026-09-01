@@ -63,6 +63,14 @@ sources:
   curated_iron_nutrition_en.md: parent
   curated_medical_en.md: parent
   curated_pediatric_vision_care_en.md: parent
+  # Toddler/preschool (2-6 years) guidance curated from NHS, WHO and AAP
+  # parent-facing pages -- every one of them is written to the parent ("give
+  # your child", "take your child to the dentist"), never to a clinician.
+  curated_preschool_development_en.md: parent
+  curated_preschool_feeding_en.md: parent
+  curated_preschool_illness_safety_en.md: parent
+  curated_preschool_routines_en.md: parent
+  curated_preschool_sleep_en.md: parent
   curated_safety_immunization_en.md: parent
   curated_sleep_by_age_en.md: parent
   curated_who_common_illness_en.md: parent

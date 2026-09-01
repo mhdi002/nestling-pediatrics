@@ -186,6 +186,7 @@ def test_gate_treats_empty_retrieval_as_weak():
 
 def test_gate_separates_real_corpus_questions(assistant):
     """On the real WHO corpus, in-corpus questions must not trigger a search."""
+    from assistant.rag.embeddings import tokenize
     from assistant.websearch import is_local_answer_weak
 
     store = assistant.medical.store
@@ -193,7 +194,17 @@ def test_gate_separates_real_corpus_questions(assistant):
         pytest.skip("medical index not built in this environment")
 
     in_corpus = "my baby is not sleeping through the night"
-    out_of_corpus = "should my toddler take ivermectin for head lice"
+    # The out-of-corpus question is checked against the index, not assumed.
+    # The old fixed example ("ivermectin for head lice") stopped being out of
+    # corpus the moment NHS school-exclusion guidance -- which names head lice
+    # -- was curated for preschoolers, and this test then failed for a reason
+    # that had nothing to do with the gate. So assert the precondition: at
+    # least one word of the question must be absent from this index entirely.
+    out_of_corpus = "should my toddler take ivermectin"
+    df = assistant.medical.store.bm25.df
+    unseen = [t for t in dict.fromkeys(tokenize(out_of_corpus)) if not df.get(t)]
+    assert unseen, f"{out_of_corpus!r} is no longer out of corpus — pick another"
+
     strong = assistant.medical.answer(in_corpus, use_llm=False)
     weak = assistant.medical.answer(out_of_corpus, use_llm=False)
 
@@ -610,25 +621,48 @@ def test_without_child_memory_the_gate_never_blocks():
 # --------------------------------------------------------------------------
 
 
-def test_a_preschooler_question_is_not_answerable_from_an_infant_corpus():
+def _ceiling_months() -> float:
+    from assistant.refdata import care_topics
+
+    return float((care_topics() or {})["age_coverage_max_months"])
+
+
+def test_a_question_past_the_declared_age_ceiling_is_not_answered_locally():
     """Asked what a 4 year old can eat, it cited newborn and 4-5 MONTH notes.
 
     The "4" in "4 y o" matched "4-5 months" and term coverage scored 0.76, so
-    the gate concluded the corpus had answered and never searched.
+    the gate concluded the corpus had answered and never searched. The fix is
+    the ceiling declared in config/care_topics.yaml, so this test reads that
+    ceiling instead of naming an age: whatever the curated library covers
+    today, a child comfortably older than it must still fall through to the
+    web. Hard-coding "4 years" here would have to be edited every time
+    guidance for an older age is curated, which is how a regression test
+    quietly turns into a description of the past.
     """
     from assistant.websearch import asks_beyond_corpus_age
 
-    for q in ("a 4 y o boy can eat what ?", "what can a 4 year old eat",
-              "what foods for a 3 year old"):
+    years = int(_ceiling_months() // 12) + 2
+    for template in ("a {y} y o boy can eat what ?", "what can a {y} year old eat",
+                     "what foods for a {y} year old"):
+        q = template.format(y=years)
         assert asks_beyond_corpus_age(q), q
 
 
 def test_questions_within_the_corpus_age_range_stay_local():
+    """Every age the corpus declares it covers must be answerable locally."""
     from assistant.websearch import asks_beyond_corpus_age
 
+    ceiling = _ceiling_months()
     for q in ("how often should I feed a two month old",
               "what can an 18 month old eat",
               "tell me about iron for breastfed babies"):
+        assert not asks_beyond_corpus_age(q), q
+    # Walk the whole declared range rather than sampling two ages from it.
+    for months in range(1, int(ceiling) + 1):
+        q = f"what should a {months} month old eat"
+        assert not asks_beyond_corpus_age(q), q
+    for years in range(1, int(ceiling // 12) + 1):
+        q = f"what should a {years} year old eat"
         assert not asks_beyond_corpus_age(q), q
 
 
