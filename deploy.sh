@@ -14,8 +14,15 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-MODEL_ID="Qwen/Qwen3.5-4B"
-HUB_SUBDIR="models--Qwen--Qwen3.5-4B"
+# Which weights to serve. Written as literals this script always fetched Qwen
+# however NESTLING_LLM_MODEL was set, so deploying any other model silently
+# downloaded the wrong one -- the compose file, the sidecar entrypoint and the
+# app all honoured the variable; only the download did not.
+MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-4B}"
+# The Hugging Face cache layout is mechanical: Qwen/Qwen3.5-4B lives in
+# models--Qwen--Qwen3.5-4B. Derive it rather than repeat it, which is also
+# what scripts/fetch_model_registry.sh does.
+HUB_SUBDIR="models--$(printf '%s' "$MODEL_ID" | sed 's#/#--#g')"
 LB_PORT="${NESTLING_LB_HOST_PORT:-8080}"
 LLM_PORT="${NESTLING_LLM_HOST_PORT:-8001}"
 HF_CMD=""

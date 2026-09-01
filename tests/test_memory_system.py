@@ -313,3 +313,58 @@ def test_forgetting_a_child_removes_facts_and_episodes(mem):
                 subject=CHILD, owner_user_id=OWNER)
     assert mem.forget(subject=CHILD, owner_user_id=OWNER) >= 2
     assert mem.semantic.recall(subject=CHILD, owner_user_id=OWNER) == []
+
+
+def test_the_best_matching_turn_survives_a_tight_budget(mem):
+    """Rank order decides what is kept, not chronology.
+
+    Selecting matched turns chronologically looked equivalent and was not: the
+    turn that answers a question is usually the most recent thing said about
+    it, so it came last, and earlier weaker matches -- a long assistant reply
+    that merely shares a word -- used the budget before it was reached. Asked
+    "what is she allergic to?" with the answer ranked first by the search, the
+    prompt went out without it, and a real model then said it did not know.
+    """
+    filler = (
+        "I'm sorry to hear about your baby's condition, but I'm not sure how "
+        "to help with the chest infection you described. Please ask a doctor. "
+    ) * 2
+    for said in ("she has bronchiolitis on her chest",
+                 "we took her to Razi clinic for it",
+                 "she is allergic to sesame"):
+        mem.observe(session_id="s1", role="user", content=said,
+                    subject=CHILD, owner_user_id=OWNER)
+        mem.observe(session_id="s1", role="assistant", content=filler,
+                    subject=CHILD, owner_user_id=OWNER)
+
+    from assistant.memory.assembly import budget
+
+    for question, expected in (
+        ("what is she allergic to?", "sesame"),
+        ("which clinic did we take her to?", "Razi"),
+        ("what was her chest problem?", "bronchiolitis"),
+    ):
+        rendered = mem.episodic.render(
+            session_id="s1", owner_user_id=OWNER, query=question,
+            budget_chars=budget().episodic,
+        )
+        assert expected.lower() in rendered.lower(), (
+            f"{question!r} lost its answer:\n{rendered}"
+        )
+
+
+def test_a_long_assistant_reply_cannot_evict_the_parents_own_words(mem):
+    """The assistant's replies are derived; the parent's statement is the record."""
+    from assistant.memory.assembly import budget
+
+    mem.observe(session_id="s1", role="user", content="he is allergic to cashews",
+                subject=CHILD, owner_user_id=OWNER)
+    for _ in range(6):
+        mem.observe(session_id="s1", role="assistant", content="x " * 200,
+                    subject=CHILD, owner_user_id=OWNER)
+
+    rendered = mem.episodic.render(
+        session_id="s1", owner_user_id=OWNER, query="what is he allergic to?",
+        budget_chars=budget().episodic,
+    )
+    assert "cashews" in rendered, rendered

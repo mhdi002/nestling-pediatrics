@@ -153,7 +153,10 @@ class EpisodicMemory:
             limit=settings.nestling_history_window,
         )
         episodes = list(recent)
-        relevant: set[str] = set()
+        # Kept in the order the ranking returned them: best match first. That
+        # order is the whole point of the search and was previously thrown
+        # away, which cost a real recall -- see the selection loop below.
+        ranked: list[Episode] = []
         if query.strip():
             seen = {e.id for e in episodes}
             for hit in self.recall(
@@ -163,7 +166,7 @@ class EpisodicMemory:
                 query=query,
                 limit=50,
             ):
-                relevant.add(hit.id)
+                ranked.append(hit)
                 if hit.id not in seen:
                     episodes.append(hit)
                     seen.add(hit.id)
@@ -184,14 +187,19 @@ class EpisodicMemory:
         # first, and fill what is left with recent context, oldest dropped
         # first. Order is restored afterwards, so the exchange still reads
         # forwards whichever turns survived.
+        # Spend the budget in RANK order, best match first. Walking the matched
+        # turns chronologically instead looked equivalent and was not: the turn
+        # that answers the question is usually the most recent thing said about
+        # it, so it came last, and earlier weaker matches -- often a long
+        # assistant reply that merely shares a word -- used up the budget
+        # before it was reached. Asked "what is she allergic to?" with the
+        # answer ranked first by the search, the prompt went out without it.
         chosen: set[str] = set()
         used = 0
-        for episode in episodes:
-            if episode.id not in relevant:
-                continue
+        for episode in ranked:
             line = episode.as_line(cap)
             if used + len(line) + 1 > budget_chars:
-                break
+                continue
             chosen.add(episode.id)
             used += len(line) + 1
         for episode in reversed(episodes):
