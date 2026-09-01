@@ -18,7 +18,7 @@ cd "$ROOT"
 # however NESTLING_LLM_MODEL was set, so deploying any other model silently
 # downloaded the wrong one -- the compose file, the sidecar entrypoint and the
 # app all honoured the variable; only the download did not.
-MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-4B}"
+MODEL_ID="${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}"
 # The Hugging Face cache layout is mechanical: Qwen/Qwen3.5-4B lives in
 # models--Qwen--Qwen3.5-4B. Derive it rather than repeat it, which is also
 # what scripts/fetch_model_registry.sh does.

@@ -1,0 +1,16 @@
+# Docker Hub OCI images that carry a model's weights, one per line as
+#   <hugging-face-model-id> <docker-hub-image:tag>
+#
+# The registry route exists because the Hugging Face LFS CDN is blocked or
+# throttled on some networks this deploys to, while Docker Hub is not. It is
+# only usable for models somebody has actually published that way.
+#
+# A model with no line here is fetched from Hugging Face instead. That matters:
+# the image used to be a fixed default, so switching the model left the fetch
+# pointing at the previous model's weights and unpacked Qwen into MiniCPM's
+# cache directory -- eight gigabytes, silently wrong, and a sidecar that would
+# not start. Pairing them here makes that mismatch impossible.
+#
+# Override for one deploy with NESTLING_MODEL_IMAGE.
+
+Qwen/Qwen3.5-4B ai/qwen3.5-safetensors:4B

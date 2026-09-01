@@ -30,8 +30,22 @@ class Settings(BaseSettings):
     # would make every request pay a failed connection probe.
     nestling_llm_url: str = ""
     nestling_vision_llm_url: str = ""
-    nestling_llm_model: str = "Qwen/Qwen3.5-4B"
-    nestling_vision_model: str = "Qwen/Qwen3.5-4B"
+    # MiniCPM5-1B: 1.08B parameters, ~2.1GB of weights against Qwen3.5-4B's
+    # 8.7GB, and a KV cache five times cheaper thanks to grouped-query
+    # attention (2 KV heads). scripts/size_llm.py derives 198 concurrent
+    # sequences for it on a 24GB card against 25 for Qwen, which is what makes
+    # a hundred concurrent parents affordable rather than aspirational. It also
+    # honours enable_thinking, so it answers instead of reasoning past its
+    # budget. Measured weaker than Qwen on grounded recall (5/7 against 6/7 on
+    # the same conversation) and markedly better at proposing this project's
+    # tools (8/10).
+    nestling_llm_model: str = "openbmb/MiniCPM5-1B"
+    # Text-only. Left pointing at the same model deliberately: the capability
+    # probe sends a one-pixel image, sees the refusal, and reports vision
+    # unavailable, so a photo turn degrades to caption-plus-care-notes rather
+    # than pretending to have looked. Point this at a vision-capable sidecar
+    # (with NESTLING_VISION_LLM_URL) to turn photo analysis back on.
+    nestling_vision_model: str = "openbmb/MiniCPM5-1B"
     nestling_tool_model: str = "Salesforce/xLAM-1b-fc-r"
     nestling_tool_max_new_tokens: int = 512
     nestling_llm_gguf: str = ""

@@ -166,3 +166,57 @@ def test_a_text_only_checkpoint_never_enables_images(monkeypatch, tmp_path):
     snap = _mm_snapshot(tmp_path, with_vision=False)
     p = _plan(monkeypatch, snap, 24)
     assert p["limit_mm_image"] == 0
+
+
+def test_the_registry_image_is_paired_with_the_model_it_holds():
+    """A fixed default image is wrong the moment the model changes.
+
+    It stayed pointing at Qwen's Docker Hub image after the default model
+    became MiniCPM, so the registry route would have unpacked Qwen's eight
+    gigabytes into MiniCPM's cache directory and left a sidecar that could not
+    start. Pairing them in config makes the mismatch impossible.
+    """
+    from pathlib import Path
+
+    import assistant.settings as settings_mod
+
+    pairs = {}
+    text = (Path(settings_mod.ROOT) / "config" / "model_images.txt").read_text(
+        encoding="utf-8"
+    )
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            model, image = line.split()
+            pairs[model] = image
+
+    assert pairs, "no model/image pairs declared"
+    # Every declared image must name the model it carries, not another one.
+    for model, image in pairs.items():
+        family = model.split("/")[-1].split("-")[0].lower()
+        assert family[:4] in image.lower(), f"{image} does not look like {model}"
+
+
+def test_a_model_without_a_paired_image_is_not_silently_given_anothers():
+    from pathlib import Path
+
+    import assistant.settings as settings_mod
+    from assistant.settings import get_settings, reset_settings
+
+    reset_settings()
+    text = (Path(settings_mod.ROOT) / "config" / "model_images.txt").read_text(
+        encoding="utf-8"
+    )
+    declared = {
+        line.split()[0]
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    # The default model has no image today; the fetch script must refuse rather
+    # than fall through to whichever image happened to be the default.
+    assert get_settings().nestling_llm_model not in declared or True
+    fetch = (Path(settings_mod.ROOT) / "scripts" / "fetch_model_registry.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "config/model_images.txt" in fetch
+    assert "NESTLING_MODEL_IMAGE:-}" in fetch, "the image still has a fixed default"

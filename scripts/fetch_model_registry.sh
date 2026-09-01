@@ -14,8 +14,21 @@
 # Usage: scripts/fetch_model_registry.sh [HF_CACHE_DIR]
 set -Eeuo pipefail
 
-MODEL_IMAGE="${NESTLING_MODEL_IMAGE:-ai/qwen3.5-safetensors:4B}"
-MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-4B}"
+MODEL_ID="${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}"
+# Which Docker Hub image carries THIS model's weights. Paired in
+# config/model_images.txt rather than defaulted, because a fixed default is
+# wrong the moment the model changes: it stayed pointing at Qwen's image and
+# would have unpacked Qwen's weights into MiniCPM's cache directory.
+_IMAGES="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/model_images.txt"
+MODEL_IMAGE="${NESTLING_MODEL_IMAGE:-}"
+if [ -z "$MODEL_IMAGE" ] && [ -f "$_IMAGES" ]; then
+  MODEL_IMAGE="$(awk -v m="$MODEL_ID" '$1==m {print $2; exit}' "$_IMAGES")"
+fi
+if [ -z "$MODEL_IMAGE" ]; then
+  echo "no Docker Hub image is paired with $MODEL_ID in config/model_images.txt;" >&2
+  echo "fetch it from Hugging Face instead (deploy.sh --model-source hf)." >&2
+  exit 3
+fi
 HF_CACHE="${1:-${NESTLING_HF_CACHE_HOST:-$HOME/.cache/huggingface}}"
 JOBS="${NESTLING_MODEL_FETCH_JOBS:-4}"
 REGISTRY="https://registry-1.docker.io"
