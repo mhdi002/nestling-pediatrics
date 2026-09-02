@@ -1,5 +1,5 @@
 # Nestling — dockerized app tier behind an nginx load balancer,
-# plus an optional local Qwen vLLM sidecar (profile: llm).
+# plus an optional local MiniCPM vLLM sidecar (profile: llm).
 #
 #   docker compose up -d --build                 app + nginx
 #   docker compose up -d --scale nestling=3      3 app replicas (see caveat below)
@@ -132,7 +132,7 @@ services:
       # degrades to caption-plus-care-notes instead of pretending to look.
       - NESTLING_VISION_MODEL=${NESTLING_VISION_MODEL:-${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}}
       - NESTLING_LLM_MODEL_PATH=${NESTLING_LLM_MODEL_PATH:-}
-      # Off unless the operator opts in: deploy.sh provisions the Qwen weights
+      # Off unless the operator opts in: deploy.sh provisions the LLM weights
       # only, so on a fresh host the embedding model is not cached and dense
       # retrieval cannot succeed -- it would just fail slowly on the first
       # chat. Set NESTLING_USE_DENSE=1 once the embedding weights are cached.

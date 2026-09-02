@@ -947,7 +947,7 @@ show_summary() {
     echo "  LLM (OpenAI-compatible):   http://localhost:${LLM_PORT}/v1"
   elif [ "$MODE" = app ]; then
     echo
-    echo "  Note: deployed in APP-ONLY mode -- chat uses extractive RAG, not generative Qwen."
+    echo "  Note: deployed in APP-ONLY mode -- chat uses extractive RAG, not the generative model."
     echo "  Re-run with GPU + toolkit available: ./deploy.sh --mode full"
   fi
   echo
