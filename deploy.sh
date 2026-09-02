@@ -222,6 +222,38 @@ install_nvidia_toolkit_linux() {
 }
 
 # ---------- prerequisite checks ----------
+prefer_ipv4_when_there_is_no_ipv6() {
+  # Some hosts publish AAAA records for everything the deploy needs and have
+  # no IPv6 connectivity at all. glibc hands the AAAA out first, every
+  # connection stalls until it gives up, and downloads fail part-way through
+  # with a transport error that looks like the far end is broken.
+  #
+  # Measured on one such box: huggingface.co resolved to eight IPv6 addresses
+  # and no route to any of them, curl over IPv6 was refused instantly, curl
+  # over IPv4 answered in 0.4s, and the model download died at ten of eleven
+  # files with a CAS client error from the LFS CDN.
+  #
+  # The condition is read from the host, not guessed: a global IPv6 address
+  # AND a default route are what having IPv6 means. Where both are present
+  # nothing is touched, so a genuinely dual-stacked host is left alone.
+  if ip -6 addr show scope global 2>/dev/null | grep -q 'inet6'      && ip -6 route show default 2>/dev/null | grep -q .; then
+    return 0
+  fi
+  local conf=/etc/gai.conf line='precedence ::ffff:0:0/96  100'
+  if grep -qs '^precedence ::ffff:0:0/96' "$conf"; then
+    return 0
+  fi
+  is_root || { warn "no IPv6 here, but not root -- cannot set IPv4 precedence"; return 0; }
+  step "no IPv6 on this host -- telling the resolver to prefer IPv4"
+  {
+    echo ""
+    echo "# Added by Nestling deploy.sh: this host has no IPv6 connectivity,"
+    echo "# so resolving AAAA first only costs every connection a timeout."
+    echo "$line"
+  } >> "$conf"
+  ok "IPv4 preferred in $conf"
+}
+
 assert_docker() {
   if ! have_cmd docker; then
     if [ "$INSTALL_PREREQS" = "1" ] && is_root && have_apt; then
@@ -990,12 +1022,16 @@ case "$ACTION" in
     exit 0
     ;;
   model-only)
+    prefer_ipv4_when_there_is_no_ipv6
     init_env_file
     download_model
     exit 0
     ;;
   deploy)
     step "checking prerequisites"
+    # Before anything downloads: apt, the driver packages, the docker pulls
+    # and the model all go over the same resolver.
+    prefer_ipv4_when_there_is_no_ipv6
     assert_docker
 
     step "preparing .env"
