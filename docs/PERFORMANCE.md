@@ -367,6 +367,79 @@ measured numbers above describe.
 
 ---
 
+## 6a. The LLM path, measured on a real deployment (2026-09-02)
+
+The estimates in §6 predate two changes that make them out of date, and a live
+deploy that replaces the arithmetic with numbers.
+
+**What changed since §6.** The served model is now **openbmb/MiniCPM5-1B**, not a
+4B. `VLLM_MAX_NUM_SEQS` and `VLLM_MAX_MODEL_LEN` are no longer pinned to `1` and
+`1536` — `scripts/size_llm.py` derives them from the GPU and the checkpoint at
+deploy time, and `scripts/size_llm.py` now also derives the precision from the
+card's compute capability (fp8 on Ada/Hopper, bf16 below). The §6 failure-mode
+analysis (an unbounded app-side queue in front of a one-at-a-time GPU) still
+stands and is still the next thing to fix; what has changed is the concurrency
+floor.
+
+**The box.** A single **RTX 2080 Ti** (Turing, sm_75, 11 GiB), 16 vCPU, 44 GiB
+RAM, Ubuntu 24.04, driver 580 / CUDA 13, vLLM `v0.28.0`. Deployed end to end by
+`./deploy.sh --yes` with no manual step.
+
+**Sizing, predicted vs. what vLLM then measured.** `size_llm.py` read the card
+and the checkpoint and emitted `VLLM_MAX_MODEL_LEN=4096`, `VLLM_MAX_NUM_SEQS=73`,
+`VLLM_QUANTIZATION=none`, `VLLM_KV_CACHE_DTYPE=auto` (bf16 → fp16 on this card).
+vLLM's own KV-cache probe at startup reported **292,800 tokens / 71.5×
+concurrency** against the predicted 300,903 / 73 — within 3 %. The precision
+derivation is load-bearing, not cosmetic: the previous default pinned fp8, which
+vLLM **refuses to start** on sm_75, so the sidecar would have silently failed and
+the app would have fallen back to extractive RAG while reporting a healthy
+deploy.
+
+**Reasoning control genuinely reaches the model.** MiniCPM is a hybrid-reasoning
+model; with thinking on, a 200-token reply is spent entirely inside `<think>`
+and the parent sees nothing. Measured on this sidecar over `/v1/chat/completions`:
+
+| `chat_template_kwargs` | finish | visible answer |
+|---|---|---|
+| *(none)* | `length` | truncated `<think>…`, no answer |
+| `{"enable_thinking": false}` | `stop` | clean answer, 152 tokens |
+| `{"enable_thinking": true}` | `length` | reasoning, truncated |
+
+The app sends `enable_thinking:false`, and vLLM's chat template honours it — the
+thing Ollama's shim silently ignored during local testing.
+
+**Single-stream generation.** ~16 tok/s decode (eager mode, fp16). A grounded
+RAG turn (≈200-token reply) returns in **8–12 s** unloaded.
+
+**End-to-end conversation quality, on the deployed HTTP API.** Five generated,
+seeded scenarios from `tests/scenarios.py` (no hand-written stories), 14 turns
+each, driven through the real `/api/*` endpoints on the box:
+
+| | |
+|---|---|
+| Scored checks passed | **69 / 70 (99 %)** |
+| Cross-session recall (allergen, clinic, medication, condition) | 19 / 20 |
+| Emergency escalation | 5 / 5 |
+| Never recites its own prompt / never denies data it holds | 5 / 5, 4 / 5 |
+| Turn latency | median **11.4 s**, p90 19.6 s, max 44.3 s |
+
+The p90/max reflect `max_num_seqs`-serialised turns under the harness firing with
+no think time; a real user with think time sees the median. This is a
+single-user quality-and-latency measurement, **not** a concurrency test — the §6
+and §7 scaling analysis is unchanged.
+
+**Security, probed live.** A route-driven probe (enumerated from the server's own
+`/openapi.json`, so it cannot miss an endpoint or test one that does not exist)
+run against the deployed box as one account attacking another: anonymous access
+refused on every route, cross-account access refused on every data route,
+generated SQL/template injections stored as text with the database intact,
+forged/`alg:none` tokens refused. It found **one real IDOR** — `POST
+/api/sessions` bound a session to any `child_id` without the ownership guard
+every sibling route had — which was fixed (`ade6c89`), redeployed, and
+re-probed clean. See `tests/test_tenant_isolation.py`.
+
+---
+
 ## 7. Load balancing and horizontal scaling (implemented here)
 
 ### What changed

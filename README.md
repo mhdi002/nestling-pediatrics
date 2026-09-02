@@ -19,7 +19,7 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
 - **Streaming chat** — `POST /api/chat/stream` (SSE tokens + final result event)
 - **Vision assist** — `POST /api/chat/vision` (photo + caption; falls back to RAG if vision LLM unavailable)
 - **Screening helpers** — ASQ question lists / scoring, M-CHAT-R questions / scoring
-- **Optional local LLM** — Qwen/Qwen3.5-4B via a vLLM OpenAI-compatible sidecar; without it, chat still works with extractive RAG
+- **Optional local LLM** — openbmb/MiniCPM5-1B via a vLLM OpenAI-compatible sidecar; without it, chat still works with extractive RAG
 
 ## Architecture
 
@@ -36,7 +36,7 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
       overlays, ASQ/M-CHAT)    dense bge-m3)           child DB)
                                      │
                                      ▼
-                          Optional Qwen sidecar
+                          Optional MiniCPM sidecar
                           (docker profile `llm`)
                           host :8001 → container :8000
 ```
@@ -58,7 +58,7 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
 
 - **Docker** + Docker Compose (preferred path)
 - **Python 3.12+** if running locally without Docker
-- **GPU (optional)** — NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for the Qwen `llm` profile; without GPU, use app-only / extractive mode
+- **GPU (optional)** — NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for the `llm` profile; without a usable GPU, `deploy.sh` degrades to app-only / extractive mode
 
 ## Quick start
 
@@ -79,20 +79,30 @@ Optional smoke scenarios inside the container:
 docker compose exec nestling python docs/_e2e_docker_scenarios.py
 ```
 
-### Full stack (Nestling + Qwen)
+### Full stack, one command (recommended)
 
-Weights must already be in the host Hugging Face cache (offline mount). Default host path on Windows:
+On a fresh GPU host, `deploy.sh` does the whole thing unattended: installs Docker and the NVIDIA Container Toolkit if missing, reconciles the driver against the vLLM image, downloads the model, sizes the sidecar for the actual card, builds, and brings the stack up.
 
-`C:/Users/mhf/.cache/huggingface`
+```bash
+./deploy.sh --yes
+```
 
-Override with `NESTLING_HF_CACHE_HOST` if needed.
+It prints the generated web sign-in and the URLs when it finishes. Re-running is safe — completed steps are skipped.
+
+The model is fetched from whichever source is reachable, tried in order: the Docker Hub registry, the Hugging Face Hub, then ModelScope (`--model-source auto`, the default). This matters on networks where the Hugging Face CDN is blocked — the deploy still finds the weights rather than failing. Pin one source with `--model-source hub|hf|ms`.
+
+The sidecar is sized from the GPU, not from a fixed profile. The precision follows the card's compute capability — fp8 on Ada/Hopper, bf16 on Turing/Ampere — so the same command works on a 2080 Ti and an H100 without an edit. On a host with no usable GPU it degrades to app-only (extractive RAG) rather than failing.
+
+### Full stack, manually
+
+If the weights are already in the host Hugging Face cache (offline mount):
 
 ```bash
 docker compose --profile llm up --build -d
 docker compose --profile llm logs -f llm
 ```
 
-- Nestling: `http://localhost:8000`
+- Nestling: `http://localhost:8080` (behind nginx) or `http://localhost:8000` (app direct)
 - OpenAI-compatible API: `http://localhost:8001/v1`
 
 Stop:
@@ -112,8 +122,8 @@ Canonical defaults live in [`assistant/settings.py`](assistant/settings.py) (Pyd
 | `NESTLING_USE_LLM` | `1` (compose) | `0` = force extractive RAG (no generation) |
 | `NESTLING_LLM_URL` | `http://llm:8000` | App → text LLM base URL |
 | `NESTLING_VISION_LLM_URL` | `http://llm:8000` | Vision endpoint (same service by default) |
-| `NESTLING_LLM_MODEL` | `Qwen/Qwen3.5-4B` | Served model name |
-| `NESTLING_VISION_MODEL` | `Qwen/Qwen3.5-4B` | Vision model name |
+| `NESTLING_LLM_MODEL` | `openbmb/MiniCPM5-1B` | Served model name |
+| `NESTLING_VISION_MODEL` | `openbmb/MiniCPM5-1B` | Vision model name |
 | `NESTLING_LOAD_MODELS` | `0` | Do not load heavy local HF models in the app image |
 | `NESTLING_USE_DENSE` | `1` (compose) | Hybrid dense retrieval (`BAAI/bge-m3`) |
 | `NESTLING_EMBEDDING_MODEL` | `BAAI/bge-m3` | Dense embedding model id |
@@ -121,13 +131,13 @@ Canonical defaults live in [`assistant/settings.py`](assistant/settings.py) (Pyd
 | `NESTLING_CORS_ORIGINS` | `*` | Comma-separated origins |
 | `NESTLING_HF_CACHE_HOST` | `C:/Users/mhf/.cache/huggingface` | Host HF cache mounted into `llm` (read-only) |
 | `NESTLING_LLM_USE_MODEL_ID` | `0` (`llm` service) | `0` = local snapshot path (offline); `1` = HF model id |
-| `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` | `1` on `llm` | Keep Qwen load offline from cache |
+| `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` | `1` on `llm` | Keep the model load offline from cache |
 
-vLLM knobs (`VLLM_MAX_MODEL_LEN`, `VLLM_GPU_MEMORY_UTILIZATION`, FP8, etc.) are set on the `llm` service in `docker-compose.yml` for typical 8GB GPUs—see compose and [docs/DOCKER.md](docs/DOCKER.md).
+vLLM knobs (`VLLM_MAX_MODEL_LEN`, `VLLM_MAX_NUM_SEQS`, `VLLM_QUANTIZATION`, `VLLM_KV_CACHE_DTYPE`, …) are **derived from the GPU** by `scripts/size_llm.py` during `deploy.sh` and written to `.env`; the compose defaults are the fallback when that has not run. See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for how they are computed.
 
 ## LLM notes
 
-- Single sidecar: **Qwen/Qwen3.5-4B** on vLLM (`docker/llm/`), profile name `llm`.
+- Single sidecar: **openbmb/MiniCPM5-1B** on vLLM (`docker/llm/`), profile name `llm`.
 - App talks to it over the Docker network (`http://llm:8000`); host maps **8001 → 8000**.
 - If the sidecar is down or `NESTLING_USE_LLM=0`, Nestling still answers via **extractive RAG**.
 - Vision shares the same endpoint; if the stack cannot do images, `/api/chat/vision` still returns guidance with a fallback `mode` (see Docker doc).
