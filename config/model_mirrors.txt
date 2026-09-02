@@ -1,0 +1,18 @@
+# ModelScope repositories that carry a model's weights, one per line as
+#   <hugging-face-model-id> <modelscope-model-id>
+#
+# The third download route, after the Docker Hub registry and the Hugging
+# Face Hub. It exists because the Hugging Face CDN is not merely slow on some
+# networks but unreachable: on one deploy target huggingface.co's API
+# answered in 0.4s while every CDN host it redirects to timed out, so the
+# metadata fetch succeeded and the weights never arrived. Docker Hub's ai/
+# namespace covers only a handful of models and MiniCPM is not one of them.
+#
+# Paired rather than derived. The id is usually the same name under a
+# differently-cased organisation -- openbmb becomes OpenBMB -- and "usually"
+# is not something to build a two-gigabyte download on.
+#
+# Override for one deploy with NESTLING_MODELSCOPE_ID.
+
+openbmb/MiniCPM5-1B OpenBMB/MiniCPM5-1B
+Qwen/Qwen3.5-4B Qwen/Qwen3.5-4B

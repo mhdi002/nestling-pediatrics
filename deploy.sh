@@ -70,7 +70,9 @@ Actions (default: deploy):
 Options (deploy action only):
   --mode app|full         app-only, or full stack with GPU LLM sidecar (default: full)
   --skip-model-download   don't try to download the model even in full mode
-  --model-source SRC      where to get weights: auto|hub|hf (default: auto)
+  --model-source SRC      where to get weights: auto|hub|hf|ms (default: auto)
+                          hub=Docker Hub registry, hf=Hugging Face,
+                          ms=ModelScope; auto tries all three in that order
   --no-reboot             never restart, even if a driver upgrade needs one
                             hub = OCI registry (Docker Hub) -- fast, works where
                                   the Hugging Face LFS CDN is blocked/throttled
@@ -719,6 +721,15 @@ download_model_from_hf() {
   HF_HOME="$hf_home" "$HF_CMD" download "$MODEL_ID"
 }
 
+download_model_from_modelscope() {
+  local hf_home="$1"
+  if [ ! -f "$ROOT/scripts/fetch_model_modelscope.sh" ]; then
+    warn "scripts/fetch_model_modelscope.sh missing -- cannot use the ModelScope source"
+    return 1
+  fi
+  bash "$ROOT/scripts/fetch_model_modelscope.sh" "$hf_home"
+}
+
 download_model() {
   local hf_home
   hf_home="$(hf_cache_from_env)"
@@ -735,16 +746,31 @@ download_model() {
     hf)
       download_model_from_hf "$hf_home" || { err "Hugging Face model download failed"; exit 1; }
       ;;
+    ms)
+      download_model_from_modelscope "$hf_home" || { err "ModelScope model fetch failed"; exit 1; }
+      ;;
     auto)
-      # Prefer the registry: it is CDN-backed and resumable, and the HF LFS
-      # endpoint is throttled or unreachable on some networks.
+      # Three routes, tried in order of how well they have held up.
+      #
+      # The registry first: CDN-backed, resumable, and it covers the models
+      # Docker publishes. Then Hugging Face, which is authoritative and
+      # covers everything -- when its CDN is reachable, which on some
+      # networks it simply is not. Then ModelScope, which carries the same
+      # files for the labs that publish there and was the only route that
+      # worked on the deploy this was added for.
+      #
+      # Each is asked in turn rather than probed first: a fetch that works is
+      # the only evidence that matters, and every one of them resumes.
       if ! download_model_from_registry "$hf_home"; then
         warn "registry fetch failed -- falling back to the Hugging Face Hub"
-        download_model_from_hf "$hf_home" || {
-          err "both the registry and Hugging Face downloads failed."
-          err "retry with: ./deploy.sh --model-only"
-          exit 1
-        }
+        if ! download_model_from_hf "$hf_home"; then
+          warn "Hugging Face fetch failed -- falling back to ModelScope"
+          download_model_from_modelscope "$hf_home" || {
+            err "the registry, Hugging Face and ModelScope downloads all failed."
+            err "retry with: ./deploy.sh --model-only"
+            exit 1
+          }
+        fi
       fi
       ;;
     *)
@@ -973,8 +999,8 @@ while [ $# -gt 0 ]; do
     --model-source)
       MODEL_SOURCE="${2:-}"
       case "$MODEL_SOURCE" in
-        auto|hub|hf) ;;
-        *) err "--model-source must be 'auto', 'hub' or 'hf'"; exit 2 ;;
+        auto|hub|hf|ms) ;;
+        *) err "--model-source must be 'auto', 'hub', 'hf' or 'ms'"; exit 2 ;;
       esac
       shift 2
       ;;
