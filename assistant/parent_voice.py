@@ -6,6 +6,43 @@ import re
 from typing import Any
 
 
+def _echoed_labels() -> "re.Pattern[str]":
+    """Anything the model quoted back that we put in the prompt ourselves.
+
+    Built from the heading constants rather than a list of phrases, so a
+    heading can be renamed without leaving a filter matching the old name and
+    missing the new one. A small model treats a bracketed ALL-CAPS heading as
+    content: replies came back opening with the literal
+    "[WHAT THIS PARENT HAS TOLD YOU ABOUT THEIR CHILD]" before the answer.
+    """
+    global _LABEL_RE
+    if _LABEL_RE is None:
+        from assistant.agent import grounding
+
+        names = [
+            getattr(grounding, n)
+            for n in dir(grounding)
+            if n.endswith("_HEADING") and isinstance(getattr(grounding, n), str)
+        ]
+        alts = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+        # Only where it is unmistakably a label: bracketed exactly as the
+        # prompt renders it, or opening a line. The match is case-sensitive
+        # against the constant, which is upper case, so a real sentence is
+        # safe -- "general guidance suggests 11 to 14 hours" is an answer,
+        # not an echo, while a line starting "GENERAL GUIDANCE Family meals"
+        # is the heading being read out. Renaming a heading to lower case
+        # would lose that protection and want a colon required again.
+        _LABEL_RE = (
+            re.compile(rf"\[\s*(?:{alts})\s*\]\s*:?\s*|^\s*(?:{alts})\s*:?\s*", re.MULTILINE)
+            if alts
+            else re.compile(r"(?!x)x")
+        )
+    return _LABEL_RE
+
+
+_LABEL_RE = None
+
+
 def _first_sentences(text: str, max_sentences: int = 3, max_chars: int = 520) -> str:
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
@@ -34,6 +71,7 @@ def medical_chat_answer(raw: str, *, fa: bool = False, from_llm: bool = False) -
     text = re.sub(r"(?i)^based on retrieved sources:\s*", "", text)
     text = re.sub(r"(?i)^بر اساس منابع بازیابی شده:\s*", "", text)
     text = re.sub(r"(?i)^from our care notes[^:]*:\s*", "", text)
+    text = _echoed_labels().sub(" ", text)
     text = re.sub(r"(?m)^-\s*\([^)]+\)\s*", "", text)
     text = re.sub(r"(?m)^-\s*[^:]+:\s*", "", text)
     text = re.sub(r"(?i)\n?for diagnosis or treatment decisions.*?$", "", text)

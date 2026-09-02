@@ -125,6 +125,46 @@ class EpisodicMemory:
             log.warning("Could not count episodes: %s", exc)
             return 0
 
+    @staticmethod
+    def _caps(episodes: list, cap: int) -> dict[str, int]:
+        """How much of the prompt each turn may occupy.
+
+        The parent's turns are evidence about the child; the assistant's are
+        its own prose, and it is much wordier than a parent. Given one cap for
+        both, three one-line facts from the parent shared the budget with a
+        four-sentence reply -- and that reply, being generated, carried the
+        model's own earlier guesses back in as though the parent had said
+        them. A later turn then answered from the guess.
+
+        The latest assistant turn keeps the full cap, because a bare follow-up
+        ("is that good?", "and at night?") refers to what was just said and
+        needs it intact. Older assistant turns are held to the longest thing
+        the parent actually said in the same window: still enough to recall
+        what the exchange was about, never more room than the parent's own
+        voice. Deriving the limit from the turns present means it scales with
+        how this parent writes instead of fixing a number that is wrong for
+        someone who writes longer or shorter.
+        """
+        parent_cap = 0
+        latest_assistant = None
+        for episode in episodes:
+            role = (episode.role or "").lower()
+            if role == "assistant":
+                if latest_assistant is None or episode.created_at >= latest_assistant.created_at:
+                    latest_assistant = episode
+            else:
+                parent_cap = max(parent_cap, len(" ".join((episode.content or "").split())))
+        older_cap = min(cap, parent_cap) if parent_cap else cap
+        caps: dict[str, int] = {}
+        for episode in episodes:
+            if (episode.role or "").lower() != "assistant":
+                caps[episode.id] = cap
+            elif latest_assistant is not None and episode.id == latest_assistant.id:
+                caps[episode.id] = cap
+            else:
+                caps[episode.id] = older_cap
+        return caps
+
     def render(
         self,
         *,
@@ -172,8 +212,9 @@ class EpisodicMemory:
                     seen.add(hit.id)
             # Chronological, so the exchange still reads forwards.
             episodes.sort(key=lambda e: e.created_at)
+        caps = self._caps(episodes, cap)
         if budget_chars is None:
-            return "\n".join(e.as_line(cap) for e in episodes)
+            return "\n".join(e.as_line(caps[e.id]) for e in episodes)
 
         # Trimming used to work from the front, on the reasoning that the
         # oldest turn is the one worth losing. That silently destroyed the
@@ -197,7 +238,7 @@ class EpisodicMemory:
         chosen: set[str] = set()
         used = 0
         for episode in ranked:
-            line = episode.as_line(cap)
+            line = episode.as_line(caps.get(episode.id, cap))
             if used + len(line) + 1 > budget_chars:
                 continue
             chosen.add(episode.id)
@@ -205,9 +246,9 @@ class EpisodicMemory:
         for episode in reversed(episodes):
             if episode.id in chosen:
                 continue
-            line = episode.as_line(cap)
+            line = episode.as_line(caps.get(episode.id, cap))
             if used + len(line) + 1 > budget_chars:
                 break
             chosen.add(episode.id)
             used += len(line) + 1
-        return "\n".join(e.as_line(cap) for e in episodes if e.id in chosen)
+        return "\n".join(e.as_line(caps[e.id]) for e in episodes if e.id in chosen)

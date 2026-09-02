@@ -410,14 +410,14 @@ class QwenClient:
     def answer_with_context(self, query: str, context: str, *, system: str | None = None) -> str:
         sys = system or (
             "You are Nestling, a warm pediatric parent assistant. "
-            "Answer ONLY using the provided care notes. Be concise, conversational, and clear. "
+            "Answer ONLY from what is given below. Be concise, conversational, and clear. "
             "Answer ONLY the current parent question's topic — do not rehash earlier topics "
             "(e.g. feeding/meals/milk) unless the parent asks about them now. "
-            "Paraphrase in your own words — never paste the care notes verbatim. "
+            "Paraphrase in your own words — never paste it back verbatim, and never say where it came from. "
             "Vary wording naturally for each question. "
             "If the parent question states a Known chronological age in months, use ONLY that age "
-            "(e.g. say ~13 months / toddler). Never invent a different age from care-note section "
-            "titles like 'Feeding 7–9 months'. "
+            "(e.g. say ~13 months / toddler). Never invent a different age from a section "
+            "title like 'Feeding 7–9 months'. "
             "Do NOT include chain-of-thought, analysis steps, or 'Thinking Process' — reply to the parent only. "
             "Never invent drug doses. Always remind parents this is not a diagnosis and to see a clinician when worried."
         )
@@ -433,10 +433,16 @@ class QwenClient:
             q = q[:q_cap] + "…"
         user = (
             f"Parent question:\n{q}\n\n"
-            f"Care notes (ground your reply in these; do not invent beyond them):\n{ctx}\n\n"
+            # Deliberately not headed "Care notes". Whatever this block is
+            # called, the model reaches for that name in its reply -- it
+            # opened answers with "General Care Notes:" and, when the label
+            # sounded like a filing system, with "I cannot access your care
+            # notes or health records". A neutral label gives it nothing
+            # quotable to hide behind.
+            f"What you know (ground your reply in this; do not invent beyond it):\n{ctx}\n\n"
             "Reply in plain parent language (2–4 short paragraphs). "
             "Stay on the current question only; do not add unrelated prior topics. "
-            "Do not copy headings or dump the notes; speak like a helpful chat."
+            "Do not copy headings or repeat this back; speak like a helpful chat."
         )
         return self.chat(
             [

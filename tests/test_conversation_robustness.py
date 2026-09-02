@@ -61,9 +61,16 @@ def agent(monkeypatch, tmp_path):
 
 
 def _grounded(calls):
-    """The call that built the answer, not the intent router."""
+    """The call that built the answer, not the intent router.
+
+    Recognised by the heading constant rather than a copy of its text, so
+    renaming the heading cannot leave this matching nothing and reporting an
+    empty context for every scenario.
+    """
+    from assistant.agent.grounding import PARENT_NOTES_HEADING
+
     for call in reversed(calls):
-        if "WHAT THIS PARENT HAS TOLD YOU" in (call.get("context") or ""):
+        if PARENT_NOTES_HEADING in (call.get("context") or ""):
             return call
     return {}
 

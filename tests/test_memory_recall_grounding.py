@@ -57,11 +57,45 @@ def test_context_omits_a_missing_source():
 def test_system_prompt_routes_child_questions_to_the_parents_notes():
     assert PARENT_NOTES_HEADING in GROUNDED_SYSTEM
     assert CARE_NOTES_HEADING in GROUNDED_SYSTEM
-    # It must not narrate its own notes: that produced "the care notes you
-    # shared focus on newborns" and a re-request for an age already given.
-    assert "silently" in GROUNDED_SYSTEM
+    # It must not narrate where anything came from: that produced "the care
+    # notes you shared focus on newborns" and a re-request for an age already
+    # given. Asserted as a property of the prompt rather than one phrasing of
+    # it, because the phrasing has had to change -- naming the words it must
+    # not say is exactly how a small model learned to say them.
+    assert "Do not describe where" in GROUNDED_SYSTEM
     assert "never restate or re-answer an" in GROUNDED_SYSTEM
     assert "already given" in GROUNDED_SYSTEM
+
+
+def test_the_prompt_never_supplies_the_vocabulary_it_forbids():
+    """A prompt that says "never mention care notes" teaches "care notes".
+
+    Measured: a 1B model opened replies with "General Care Notes:" and "I
+    cannot access your care notes or health records", both phrasings lifted
+    from the instruction telling it not to. The words are gone from the
+    prompt and from the section labels, so there is nothing to lift.
+    """
+    from assistant.llm.qwen_client import QwenClient
+
+    seen = {}
+
+    def capture(self, messages, **kw):
+        seen["system"] = messages[0]["content"]
+        seen["user"] = messages[1]["content"]
+        return "ok"
+
+    original = QwenClient.chat
+    QwenClient.chat = capture
+    try:
+        QwenClient().answer_with_context("how much sleep?", "Sleep guidance.")
+    finally:
+        QwenClient.chat = original
+
+    forbidden = ("care note", "my records", "your records", "health record")
+    for prompt in (GROUNDED_SYSTEM, seen["system"], seen["user"]):
+        low = prompt.lower()
+        for word in forbidden:
+            assert word not in low, f"{word!r} is in the prompt: {prompt}"
 
 
 def test_ask_medical_sends_both_sources_to_the_model(monkeypatch):
@@ -214,4 +248,4 @@ def test_a_question_about_the_conversation_is_not_answered_with_a_checklist():
     just described them itself.
     """
     assert "refers to something from earlier in this conversation" in GROUNDED_SYSTEM
-    assert "never ask them for details those notes already contain" in GROUNDED_SYSTEM
+    assert "never ask them for details it already contains" in GROUNDED_SYSTEM

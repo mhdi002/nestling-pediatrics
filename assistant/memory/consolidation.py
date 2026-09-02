@@ -89,13 +89,24 @@ def extract_deterministic(episodes: list[Episode]) -> list[str]:
 
 
 def extract_with_llm(episodes: list[Episode]) -> list[str] | None:
-    """Ask the model for durable facts. None when it could not be asked."""
+    """Ask the model for durable facts. None when it could not be asked.
+
+    Only the parent's turns are shown to the extractor, which is the same
+    rule extract_deterministic has always applied and this path did not.
+    Handing it the whole transcript let the assistant's own prose become a
+    permanent fact about a child: told "she has cradle cap on her tummy", a
+    small model replied about a tummy ache, and by the next session the
+    file said the child had one. Nothing real is lost -- a claim invented
+    and then filed is far worse than a nuance not captured, and the
+    parent's sentences are where the facts actually are.
+    """
     from assistant.llm.qwen_client import get_qwen, llm_enabled
 
     if not llm_enabled():
         return None
+    stated = [e for e in episodes if (e.role or "").lower() == "user"]
     transcript = "\n".join(
-        e.as_line(get_settings().nestling_memory_line_chars) for e in episodes
+        e.as_line(get_settings().nestling_memory_line_chars) for e in stated
     )
     if not transcript.strip():
         return []
