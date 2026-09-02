@@ -440,6 +440,50 @@ re-probed clean. See `tests/test_tenant_isolation.py`.
 
 ---
 
+## 6b. Adaptive concurrency, measured on the deployment (2026-09-02)
+
+§6 identified the app as capping concurrency below the GPU (AnyIO's 40-thread
+default in front of a sidecar that batches many) and piling load into timeouts
+with no admission control. `app/concurrency.py` (commit `af36730`) fixes both:
+the app resolves one number — the chat concurrency — from `VLLM_MAX_NUM_SEQS`,
+the value `scripts/size_llm.py` already derives from the card, raises the
+worker pool to hold it, and gates admission with a bounded queue that sheds to
+503 past capacity.
+
+On the RTX 2080 Ti box the sidecar was sized to 73 sequences, so the app came
+up with **`max_inflight=73`, `max_waiting=36`** — reported in `/api/health` —
+with no manual setting. The same `loadtest.py` (on the box, so the client link
+is not the variable) firing identical chat turns at rising concurrency:
+
+| Concurrency | Completed 200/s | Median 200 latency | Shed 503 | Timeouts |
+|---:|---:|---:|---:|---:|
+| 1 (serial) | 0.09 | 11.1 s | 0 | 0 |
+| 8 | 0.54 (6×) | 13.4 s | 0 | 0 |
+| 24 | 1.56 (17×) | 11.8 s | 0 | 0 |
+| 150 (overload) | 3.44 (38×) | 14.1 s | 76 | **0** |
+
+Two things this shows, neither of them arithmetic:
+
+- **Throughput scales with concurrency while latency stays flat** — 0.09 →
+  3.44 turns/s, median holding around 12 s. The app is now using the GPU's
+  continuous batching instead of serialising behind a 40-thread wall. On a
+  bigger card `VLLM_MAX_NUM_SEQS` is larger and the app widens to it with no
+  code change — the "adapt to the GPU" property, measured.
+- **Overload sheds instead of collapsing.** At 150 concurrent against a
+  109-deep gate, 74 turns completed, 76 were rejected with **503 in ~0.01 s**,
+  and **nothing timed out or 500'd**. Peak in-flight reached exactly 73 — the
+  app drove the GPU to its full sized batch and no further. This is the §6
+  failure mode (timeout from the back of an invisible queue) replaced by a
+  fast, honest Retry-After.
+
+The §7 SQLite/state ceiling on the *app tier* is unchanged, and a single GPU
+is still a single GPU: this widens the app to the card in front of it and
+fails gracefully past it — it does not turn one 2080 Ti into a 1000-user
+cluster. What it removes is the app being the bottleneck below the GPU, and
+the pileup that turned a burst into a wall of timeouts.
+
+---
+
 ## 7. Load balancing and horizontal scaling (implemented here)
 
 ### What changed
