@@ -220,3 +220,89 @@ def test_a_model_without_a_paired_image_is_not_silently_given_anothers():
     )
     assert "config/model_images.txt" in fetch
     assert "NESTLING_MODEL_IMAGE:-}" in fetch, "the image still has a fixed default"
+
+
+# ---------------------------------------------------------------------------
+# Precision has to match the card, not the card it was first deployed on
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cap,weights,kv",
+    [
+        ((7, 0), "none", "auto"),   # Volta
+        ((7, 5), "none", "auto"),   # Turing -- RTX 2080 Ti
+        ((8, 0), "none", "fp8"),    # Ampere A100
+        ((8, 6), "none", "fp8"),    # Ampere RTX 3090
+        ((8, 9), "fp8", "fp8"),     # Ada RTX 4090
+        ((9, 0), "fp8", "fp8"),     # Hopper H100
+        ((10, 0), "fp8", "fp8"),    # anything newer
+    ],
+    ids=lambda v: str(v),
+)
+def test_precision_follows_the_hardware(cap, weights, kv):
+    """fp8 was pinned on, and a Turing card then refused to start at all.
+
+    The sidecar not coming up looks like a successful deploy: the app falls
+    back to extractive RAG and answers, just without any of the model. So the
+    flags are derived from what the card can compute rather than from what
+    the first card this ran on could.
+    """
+    p = size_llm.precision_for(cap)
+    assert p["quantization"] == weights, p
+    assert p["kv_cache_dtype"] == kv, p
+
+
+def test_an_unreadable_card_gets_the_conservative_answer():
+    """bf16 runs on every card; being slower beats not starting."""
+    p = size_llm.precision_for(None)
+    assert p["quantization"] == "none"
+    assert p["kv_cache_dtype"] == "auto"
+
+
+def test_newer_cards_are_never_downgraded_by_the_comparison():
+    """A string compare would put "10.0" below "9.0"; a tuple does not."""
+    assert size_llm.precision_for((10, 0))["quantization"] == "fp8"
+    assert size_llm.precision_for((9, 0))["quantization"] == "fp8"
+
+
+def test_the_precision_is_emitted_even_when_sizing_falls_back(tmp_path, monkeypatch):
+    """The one setting that must be right regardless of the rest."""
+    monkeypatch.setattr(size_llm, "gpu_memory_bytes", lambda: None)
+    monkeypatch.setattr(size_llm, "compute_capability", lambda: (7, 5))
+    p = size_llm.plan(tmp_path, 0.9, 1536, 1)
+    assert p["quantization"] == "none"
+    assert p["kv_cache_dtype"] == "auto"
+    assert "sm_75" in p["reason"]
+
+
+def test_the_emitted_env_carries_the_precision(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(size_llm, "gpu_memory_bytes", lambda: None)
+    monkeypatch.setattr(size_llm, "compute_capability", lambda: (8, 9))
+    size_llm.main(["--snapshot", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "VLLM_QUANTIZATION=fp8" in out
+    assert "VLLM_KV_CACHE_DTYPE=fp8" in out
+
+
+def test_compute_capability_parses_what_nvidia_smi_prints(monkeypatch):
+    """nvidia-smi answers "7.5", not "sm_75" or "(7, 5)"."""
+    import subprocess as sp
+
+    class Result:
+        stdout = "7.5\n"
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(size_llm, "subprocess", sp)
+    assert size_llm.compute_capability() == (7, 5)
+
+
+def test_a_missing_nvidia_smi_is_not_an_error(monkeypatch):
+    import subprocess as sp
+
+    def boom(*a, **k):
+        raise FileNotFoundError("nvidia-smi")
+
+    monkeypatch.setattr(sp, "run", boom)
+    monkeypatch.setattr(size_llm, "subprocess", sp)
+    assert size_llm.compute_capability() is None

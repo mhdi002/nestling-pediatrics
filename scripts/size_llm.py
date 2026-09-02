@@ -67,6 +67,67 @@ def gpu_memory_bytes() -> int | None:
         return None
 
 
+# What each generation of card can actually compute in, expressed as the
+# compute capability where support begins rather than as a list of card
+# names -- a list would be wrong for the next card, and this is checked
+# against the hardware in front of us.
+#
+# fp8 arithmetic for weights arrived with Ada (8.9) and Hopper (9.0). vLLM
+# will also keep the KV cache in fp8 from Ampere (8.0) onwards, where the
+# conversion is done in software around bf16 math and still halves the cache.
+# Below that -- Turing, 7.5 -- neither exists.
+FP8_WEIGHTS_MIN_CAP = (8, 9)
+FP8_KV_MIN_CAP = (8, 0)
+
+
+def compute_capability() -> tuple[int, int] | None:
+    """The CUDA compute capability of the card, e.g. (7, 5) for a 2080 Ti."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first = next((line.strip() for line in out.splitlines() if line.strip()), "")
+    try:
+        major, _, minor = first.partition(".")
+        return int(major), int(minor or 0)
+    except ValueError:
+        return None
+
+
+def precision_for(cap: tuple[int, int] | None) -> dict:
+    """Which quantisations this card can run.
+
+    The compose file pinned fp8 for both weights and KV cache, sized for the
+    Ada card it was first deployed on. On a Turing card vLLM refuses to start
+    at all -- the sidecar never comes up, the app falls back to extractive
+    RAG, and the deploy looks like it succeeded. Asking the driver what the
+    card supports costs one subprocess and makes the same deploy correct on
+    hardware nobody has tested it on yet.
+
+    Unknown capability is treated as the oldest case: bf16 runs everywhere,
+    and being slower is recoverable in a way that not starting is not.
+    """
+    if cap is None:
+        return {
+            "quantization": "none",
+            "kv_cache_dtype": "auto",
+            "note": "compute capability unknown -- bf16 weights and cache",
+        }
+    weights = "fp8" if cap >= FP8_WEIGHTS_MIN_CAP else "none"
+    kv = "fp8" if cap >= FP8_KV_MIN_CAP else "auto"
+    return {
+        "quantization": weights,
+        "kv_cache_dtype": kv,
+        "note": f"sm_{cap[0]}{cap[1]}: weights={weights} kv={kv}",
+    }
+
+
 def weights_bytes(snapshot: Path) -> int:
     """Actual size of the weight shards on disk, not an estimate from params."""
     total = 0
@@ -114,15 +175,23 @@ def plan(
     floor_seqs: int,
     want_context_tokens: int = DEFAULT_CONTEXT_TOKENS,
 ) -> dict:
+    precision = precision_for(compute_capability())
     result = {
         "max_model_len": floor_len,
         "max_num_seqs": floor_seqs,
+        "quantization": precision["quantization"],
+        "kv_cache_dtype": precision["kv_cache_dtype"],
+        # Emitted even when every other number falls back to the compose
+        # default, because this one is not a tuning choice -- it decides
+        # whether the sidecar starts.
         "reason": "defaults kept",
     }
     total = gpu_memory_bytes()
     cfg_path = snapshot / "config.json"
     if total is None or not cfg_path.is_file():
-        result["reason"] = "no GPU reading or no model config; keeping defaults"
+        result["reason"] = (
+            "no GPU reading or no model config; keeping defaults; " + precision["note"]
+        )
         return result
     try:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -164,7 +233,8 @@ def plan(
         max_num_seqs=seqs,
         reason=(
             f"gpu={total // 1024**3}GiB weights={weights // 1024**3}GiB "
-            f"kv_per_token={per_token}B budget_tokens={tokens_total}"
+            f"kv_per_token={per_token}B budget_tokens={tokens_total}; "
+            + precision["note"]
         ),
     )
     result.update(lb_limits(seqs))
@@ -216,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"VLLM_MAX_MODEL_LEN={p['max_model_len']}")
     print(f"VLLM_MAX_NUM_SEQS={p['max_num_seqs']}")
+    print(f"VLLM_QUANTIZATION={p['quantization']}")
+    print(f"VLLM_KV_CACHE_DTYPE={p['kv_cache_dtype']}")
     if "lb_chat_burst" in p:
         print(f"NESTLING_LB_CHAT_BURST={p['lb_chat_burst']}")
         print(f"NESTLING_LB_CHAT_RPS={p['lb_chat_rps']}")
