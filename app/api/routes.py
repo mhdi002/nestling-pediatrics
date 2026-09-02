@@ -328,8 +328,18 @@ def child_dossier(child_id: str, request: Request):
 @router.post("/sessions")
 def create_session(body: SessionCreate, request: Request):
     svc = get_services()
+    owner_user_id = current_user(request)
+    # Every other route that accepts a child_id guards it; this one did not,
+    # so an account could open a session bound to another family's child. The
+    # chat and dossier paths re-check ownership, so no medical text leaked
+    # through it -- but the session then carried the victim's child_id and
+    # title into the attacker's own session list, and a later path that
+    # trusted session.child_id would have leaked outright. Found by a
+    # route-driven probe against the live server; it is the same IDOR class
+    # as the four closed earlier, on a route that slipped the net.
+    _require_owned_child(svc, body.child_id, owner_user_id)
     sid = svc.chat.create_session(
-        child_id=body.child_id, title=body.title, owner_user_id=current_user(request)
+        child_id=body.child_id, title=body.title, owner_user_id=owner_user_id
     )
     return {"session_id": sid, "child_id": body.child_id}
 

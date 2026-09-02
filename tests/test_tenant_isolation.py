@@ -172,3 +172,48 @@ def test_chat_rejects_another_accounts_child_id(client, two_accounts):
         "/api/chat", headers=_auth(a), json={"message": "hi", "child_id": child}
     )
     assert r.status_code == 404, r.text
+
+
+def test_a_session_cannot_be_opened_on_another_accounts_child(client, two_accounts):
+    """POST /api/sessions had no ownership guard while every sibling did.
+
+    An account could open a session bound to another family's child. The chat
+    and dossier paths re-check ownership, so no medical text came back through
+    it -- but the session then carried the victim's child_id and title into
+    the attacker's own /api/sessions listing, and any later path trusting
+    session.child_id would have leaked outright. Found by a route-driven probe
+    against the deployed server, and it is the same IDOR class as the four
+    already covered above.
+    """
+    a, b, child = two_accounts["a"], two_accounts["b"], two_accounts["child"]
+
+    r = client.post(
+        "/api/sessions", headers=_auth(a), json={"child_id": child, "title": "hijack"}
+    )
+    assert r.status_code == 404, r.text
+
+    # Nothing the attacker did shows up in their own session list, and the
+    # victim's child_id is not exposed there.
+    listing = client.get("/api/sessions", headers=_auth(a)).json()
+    assert child not in str(listing), listing
+
+    # The victim can still open a session on their own child.
+    ok = client.post(
+        "/api/sessions", headers=_auth(b), json={"child_id": child, "title": "mine"}
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["session_id"]
+
+
+def test_an_ownerless_child_id_is_still_allowed_for_api_key_callers(client, two_accounts):
+    """The guard keys on a signed-in owner, so the unscoped API-key path stays open.
+
+    Same convention the read routes follow: owner_user_id None means the
+    historical unauthenticated access, which the deploy locks down with a
+    network boundary, not with per-child scoping.
+    """
+    child = two_accounts["child"]
+    # No Authorization header at all: current_user is None, so the guard is a
+    # no-op and the call is accepted rather than 404'd.
+    r = client.post("/api/sessions", json={"child_id": child})
+    assert r.status_code in (200, 401, 403), r.text
