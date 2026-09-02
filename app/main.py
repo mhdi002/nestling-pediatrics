@@ -26,6 +26,16 @@ async def lifespan(app: FastAPI):
     # Tests may inject Services before startup; don't overwrite them.
     if peek_services() is None:
         set_services(create_services())
+    # Size the worker pool and the chat admission gate to what the sidecar was
+    # sized to for this GPU. Done here, inside the running loop, because the
+    # AnyIO thread limiter lives in a loop-scoped variable. See app/concurrency.
+    from app.concurrency import apply_thread_limit, build_gate, resolve_chat_concurrency
+    from app.api.routes import set_chat_gate
+
+    settings = get_settings()
+    concurrency = resolve_chat_concurrency(settings)
+    apply_thread_limit(settings, concurrency)
+    set_chat_gate(build_gate(settings))
     yield
     svc = peek_services()
     set_services(None)
@@ -58,11 +68,15 @@ app.add_middleware(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    # Preserve any headers the raiser set (e.g. Retry-After on a 503 from the
+    # chat admission gate); the default handler would drop them.
+    headers = getattr(exc, "headers", None)
     if isinstance(exc.detail, dict):
-        return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": "http_error", "detail": str(exc.detail)},
+        headers=headers,
     )
 
 

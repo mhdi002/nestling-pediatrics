@@ -111,6 +111,17 @@ services:
       - NESTLING_LLM_URL=${NESTLING_LLM_URL:-http://llm:8000}
       - NESTLING_VISION_LLM_URL=${NESTLING_VISION_LLM_URL:-http://llm:8000}
       - NESTLING_USE_LLM=${NESTLING_USE_LLM:-1}
+      # Adaptive chat concurrency. The app widens its request concurrency and
+      # worker-thread pool to match what the sidecar batches, so a bigger GPU
+      # serves more parents at once with no code change. It reads
+      # VLLM_MAX_NUM_SEQS directly as the adaptive default, so passing the same
+      # value deploy.sh sized for the sidecar is all that is needed; the
+      # explicit knobs below only pin or cap it. See app/concurrency.py.
+      - VLLM_MAX_NUM_SEQS=${VLLM_MAX_NUM_SEQS:-1}
+      - NESTLING_LLM_MAX_CONCURRENCY=${NESTLING_LLM_MAX_CONCURRENCY:-0}
+      - NESTLING_CHAT_QUEUE_SLACK=${NESTLING_CHAT_QUEUE_SLACK:-0}
+      - NESTLING_CHAT_ACQUIRE_TIMEOUT_S=${NESTLING_CHAT_ACQUIRE_TIMEOUT_S:-20}
+      - NESTLING_WORKER_THREADS=${NESTLING_WORKER_THREADS:-0}
       - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}
       # Follows the text model unless set. That is right when one checkpoint
       # serves both, and wrong when it does not: MiniCPM5-1B is text-only, so

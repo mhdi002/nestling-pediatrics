@@ -306,3 +306,33 @@ def test_a_missing_nvidia_smi_is_not_an_error(monkeypatch):
     monkeypatch.setattr(sp, "run", boom)
     monkeypatch.setattr(size_llm, "subprocess", sp)
     assert size_llm.compute_capability() is None
+
+
+def test_the_plan_emits_app_concurrency_matching_the_batch(tmp_path, monkeypatch):
+    """The app widens to what the sidecar batches; the two are one number."""
+    (tmp_path / "config.json").write_text(json.dumps({
+        "num_hidden_layers": 24, "hidden_size": 1536,
+        "num_attention_heads": 16, "num_key_value_heads": 2,
+        "head_dim": 128, "max_position_embeddings": 131072,
+    }))
+    (tmp_path / "model.safetensors").write_bytes(b"\0" * 1024)
+    monkeypatch.setattr(size_llm, "gpu_memory_bytes", lambda: 11 * 1024**3)
+    monkeypatch.setattr(size_llm, "weights_bytes", lambda s: 2 * 1024**3)
+    monkeypatch.setattr(size_llm, "compute_capability", lambda: (7, 5))
+    p = size_llm.plan(tmp_path, 0.9, 1536, 1)
+    assert p["app_concurrency"] == p["max_num_seqs"]
+
+
+def test_the_emitted_env_carries_the_app_concurrency(tmp_path, monkeypatch, capsys):
+    (tmp_path / "config.json").write_text(json.dumps({
+        "num_hidden_layers": 24, "hidden_size": 1536,
+        "num_attention_heads": 16, "num_key_value_heads": 2,
+        "head_dim": 128, "max_position_embeddings": 131072,
+    }))
+    (tmp_path / "model.safetensors").write_bytes(b"\0" * 1024)
+    monkeypatch.setattr(size_llm, "gpu_memory_bytes", lambda: 24 * 1024**3)
+    monkeypatch.setattr(size_llm, "weights_bytes", lambda s: 2 * 1024**3)
+    monkeypatch.setattr(size_llm, "compute_capability", lambda: (8, 9))
+    size_llm.main(["--snapshot", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert "NESTLING_LLM_MAX_CONCURRENCY=" in out

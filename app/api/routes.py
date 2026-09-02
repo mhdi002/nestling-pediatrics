@@ -40,6 +40,42 @@ def _err(status: int, error: str, detail: str | None = None) -> HTTPException:
     return HTTPException(status_code=status, detail={"error": error, "detail": detail or error})
 
 
+# The chat admission gate is built at startup (app.main lifespan) once settings
+# and the sidecar sizing are known, and injected here. Until then it is a
+# disabled no-op, so tests and the app-only path behave exactly as before.
+from app.concurrency import ChatGate, GateBusy  # noqa: E402
+
+_CHAT_GATE = ChatGate(0, 0, 0.0)
+
+
+def set_chat_gate(gate: ChatGate) -> None:
+    global _CHAT_GATE
+    _CHAT_GATE = gate
+
+
+def get_chat_gate() -> ChatGate:
+    return _CHAT_GATE
+
+
+def _busy_error(exc: GateBusy) -> HTTPException:
+    """503 with a Retry-After hint, not a 500 or a silent timeout.
+
+    Shedding load honestly is the whole point: a parent who is told to retry in
+    a few seconds is better served than one whose request sits in a queue until
+    it 504s, and the difference is what keeps the GPU working on turns someone
+    is still waiting for.
+    """
+    return HTTPException(
+        status_code=503,
+        detail={
+            "error": "busy",
+            "detail": "The assistant is at capacity right now. Please retry shortly.",
+            "retry_after": round(exc.retry_after, 1),
+        },
+        headers={"Retry-After": str(max(1, int(exc.retry_after)))},
+    )
+
+
 def _require_owned_child(svc, child_id: str | None, owner_user_id: str | None) -> None:
     """
     Guard a child_id passed in a request body/path against the signed-in account.
@@ -243,7 +279,18 @@ def health():
     except Exception as exc:
         llm["error"] = str(exc)
         vision["error"] = str(exc)
-    return {"status": "ok", "service": "nestling", "llm": llm, "vision": vision}
+    # Admission-gate occupancy, so an operator can see whether the app is
+    # shedding load and size the fleet from real numbers rather than guesses.
+    gate = get_chat_gate().stats()
+    capacity = {
+        "chat_gate_enabled": gate.enabled,
+        "max_inflight": gate.max_inflight,
+        "max_waiting": gate.max_waiting,
+        "inflight": gate.inflight,
+        "waiting": gate.waiting,
+    }
+    return {"status": "ok", "service": "nestling", "llm": llm, "vision": vision,
+            "capacity": capacity}
 
 
 @router.post("/children")
@@ -473,6 +520,17 @@ def _run_vision_turn(
     return sid, out
 
 
+def _gated_vision_turn(**kwargs):
+    """The vision turn under the admission gate.
+
+    Wrapped so both the wait for a slot and the turn itself run in the worker
+    thread `run_in_threadpool` gives it -- entering the gate from the async
+    caller would block the event loop on the semaphore.
+    """
+    with _CHAT_GATE.admit():
+        return _run_vision_turn(**kwargs)
+
+
 @router.post("/chat/vision")
 async def chat_vision(
     request: Request,
@@ -510,17 +568,20 @@ async def chat_vision(
     await run_in_threadpool((UPLOAD_DIR / fname).write_bytes, clean)
 
     caption = (message or "").strip()
-    sid, out = await run_in_threadpool(
-        _run_vision_turn,
-        clean=clean,
-        mime=mime,
-        fname=fname,
-        caption=caption,
-        session_id=session_id,
-        child_id=child_id,
-        ui_lang=ui_lang,
-        owner_user_id=current_user(request),
-    )
+    try:
+        sid, out = await run_in_threadpool(
+            _gated_vision_turn,
+            clean=clean,
+            mime=mime,
+            fname=fname,
+            caption=caption,
+            session_id=session_id,
+            child_id=child_id,
+            ui_lang=ui_lang,
+            owner_user_id=current_user(request),
+        )
+    except GateBusy as exc:
+        raise _busy_error(exc) from None
     return {
         "session_id": sid,
         "child_id": child_id,
@@ -581,7 +642,12 @@ def _run_chat_turn(body: ChatBody, owner_user_id: str | None = None) -> dict[str
 @router.post("/chat")
 def chat(body: ChatBody, request: Request):
     try:
-        return _run_chat_turn(body, current_user(request))
+        with _CHAT_GATE.admit():
+            return _run_chat_turn(body, current_user(request))
+    except GateBusy as exc:
+        # At capacity: shed this turn fast with a Retry-After rather than let
+        # it queue behind the GPU until it times out.
+        raise _busy_error(exc) from None
     except HTTPException:
         # Deliberate 4xx (e.g. an ownership 404) must reach the client as-is,
         # not be masked as a generic 500.
@@ -604,9 +670,18 @@ def chat_stream(body: ChatBody, request: Request):
     # id is handled inside _run_chat_turn).
     _require_owned_child(get_services(), body.child_id, owner_user_id)
 
+    # Admission and the turn's compute happen before the stream opens, so a
+    # capacity rejection is a clean 503 rather than an error event mid-stream,
+    # and the slot is held only for the work -- not for however long the client
+    # takes to read the already-computed reply.
+    try:
+        with _CHAT_GATE.admit():
+            out = _run_chat_turn(body, owner_user_id)
+    except GateBusy as exc:
+        raise _busy_error(exc) from None
+
     def gen() -> Iterator[str]:
         try:
-            out = _run_chat_turn(body, owner_user_id)
             reply = out.get("reply") or ""
             # Stream reply in word-ish chunks for UX (tools already finished)
             buf = ""

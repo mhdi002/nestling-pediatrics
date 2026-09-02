@@ -54,6 +54,33 @@ class Settings(BaseSettings):
     nestling_use_dense: bool = False
     nestling_embedding_model: str = "BAAI/bge-m3"
 
+    # Adaptive chat concurrency. The sidecar batches several turns at once
+    # (VLLM_MAX_NUM_SEQS, derived from the GPU by scripts/size_llm.py); these
+    # let the app widen to match it instead of capping at the AnyIO default of
+    # 40 threads, and shed load fast when even that is exceeded. See
+    # app/concurrency.py for how they resolve.
+    #
+    # 0 means "adapt": the effective limit is taken from VLLM_MAX_NUM_SEQS in
+    # the environment, or the floor below when that is absent. Set > 0 to pin
+    # it regardless of the sidecar.
+    nestling_llm_max_concurrency: int = 0
+    # Used only when nothing sized the sidecar (a hand-started stack, or
+    # app-only generation): a few parents at once, not a number that melts an
+    # un-sized host.
+    nestling_chat_concurrency_floor: int = 8
+    # How many turns may wait for a slot before load is shed with 503. 0 =
+    # derive (half the concurrency, bounded). More just moves the timeout
+    # pileup behind the gate instead of removing it.
+    nestling_chat_queue_slack: int = 0
+    # How long a queued turn waits for a slot before it is shed. Kept below the
+    # proxy's chat timeout so the client gets a fast, honest 503 rather than a
+    # 504 from the back of the queue. Doubles as the Retry-After hint.
+    nestling_chat_acquire_timeout_s: float = 20.0
+    # AnyIO worker-thread pool size. 0 = derive from the concurrency above
+    # (enough to hold every admitted and queued turn plus a reserve for the
+    # rest of the API). Set > 0 to pin it.
+    nestling_worker_threads: int = 0
+
     # LLM transport
     # MUST stay below the load balancer's chat timeout
     # (NESTLING_LB_CHAT_TIMEOUT, 120s by default in docker-compose.yml), with

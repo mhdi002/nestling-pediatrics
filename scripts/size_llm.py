@@ -246,6 +246,11 @@ def plan(
     # above found spare capacity, which is the condition that comment was
     # really about.
     result["limit_mm_image"] = 1 if (is_multimodal(cfg) and seqs > floor_seqs) else 0
+    # The app widens its own request concurrency to match what the sidecar can
+    # batch. The app reads VLLM_MAX_NUM_SEQS on its own (app/concurrency.py),
+    # so this is emitted mainly to make the derived value explicit in .env and
+    # overridable there; the two are the same number by construction.
+    result["app_concurrency"] = seqs
     return result
 
 
@@ -293,6 +298,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"NESTLING_LB_CHAT_RPS={p['lb_chat_rps']}")
     if "limit_mm_image" in p:
         print(f"VLLM_LIMIT_MM_IMAGE={p['limit_mm_image']}")
+    if "app_concurrency" in p:
+        print(f"NESTLING_LLM_MAX_CONCURRENCY={p['app_concurrency']}")
     print(f"# {p['reason']}", file=sys.stderr)
     return 0
 
