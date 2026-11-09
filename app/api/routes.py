@@ -682,17 +682,26 @@ def chat_stream(body: ChatBody, request: Request):
 
     def gen() -> Iterator[str]:
         try:
-            reply = out.get("reply") or ""
-            # Stream reply in word-ish chunks for UX (tools already finished)
-            buf = ""
-            for ch in reply:
-                buf += ch
-                if ch in STREAM_BREAK_CHARS or len(buf) >= chunk_chars:
+            # Prefer real RLM text_delta chunks captured during the turn; fall
+            # back to slicing the finished reply for legacy/non-RLM paths.
+            deltas = out.pop("stream_tokens", None) or []
+            if deltas:
+                for text in deltas:
+                    if text:
+                        yield f"event: token\ndata: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+            else:
+                reply = out.get("reply") or ""
+                buf = ""
+                for ch in reply:
+                    buf += ch
+                    if ch in STREAM_BREAK_CHARS or len(buf) >= chunk_chars:
+                        yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
+                        buf = ""
+                if buf:
                     yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
-                    buf = ""
-            if buf:
-                yield f"event: token\ndata: {json.dumps({'text': buf}, ensure_ascii=False)}\n\n"
-            yield f"event: result\ndata: {json.dumps(out, ensure_ascii=False, default=str)}\n\n"
+            # Do not leak internal stream buffers to the client JSON.
+            public = {k: v for k, v in out.items() if k not in {"stream_tokens"}}
+            yield f"event: result\ndata: {json.dumps(public, ensure_ascii=False, default=str)}\n\n"
             yield "event: done\ndata: {}\n\n"
         except Exception as exc:
             log.exception("Streaming chat turn failed")

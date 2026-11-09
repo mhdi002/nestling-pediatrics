@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@rlm/core": ["../core/src/index.ts"],
+      "@rlm/contracts": ["../contracts/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

@@ -662,25 +662,29 @@ class ParentAssistant:
         self.tool_caller = XLAMToolCaller(enabled=False)
         if use_xlam if use_xlam is not None else load:
             self.tool_caller.load()
-        self.medical.load()
-        # Rebuild if volume index is missing curated feeding guidance (stale named volume).
-        try:
-            feed_docs = sum(
-                1 for d in self.medical.store.docs if "feeding" in str(d.get("id", "")).lower()
-            )
-            if feed_docs == 0:
-                chunks = KNOWLEDGE_DIR / "chunks.json"
-                if chunks.is_file():
-                    n = self.refresh_medical_index()
-                    if n:
-                        self.medical.load()
-        except Exception as exc:
-            log.warning("Could not refresh the medical RAG index at startup: %s", exc)
-        self.child_rag.load()
+        # RLM mode: knowledge is files under knowledge/, not MedicalRAG chunks.
+        # Keep optional load for vision fallback / legacy tests only.
+        self.use_rlm = bool(get_settings().nestling_use_rlm)
+        if not self.use_rlm:
+            self.medical.load()
+            try:
+                feed_docs = sum(
+                    1 for d in self.medical.store.docs if "feeding" in str(d.get("id", "")).lower()
+                )
+                if feed_docs == 0:
+                    chunks = KNOWLEDGE_DIR / "chunks.json"
+                    if chunks.is_file():
+                        n = self.refresh_medical_index()
+                        if n:
+                            self.medical.load()
+            except Exception as exc:
+                log.warning("Could not refresh the medical RAG index at startup: %s", exc)
+            self.child_rag.load()
         # Procedural, semantic and episodic memory. Built lazily on first use
         # so a construction failure cannot stop the app from starting; memory
         # degrading is survivable, not booting is not.
         self._memory = None
+        self._rlm_host = None
 
     @property
     def memory(self):
@@ -866,12 +870,28 @@ class ParentAssistant:
             return []
 
     def refresh_medical_index(self):
+        if self.use_rlm:
+            from assistant.rlm.knowledge import write_index
+
+            write_index()
+            return 0
         return self.medical.build_from_chunks()
 
     def refresh_child_index(self, child_id: str):
+        if self.use_rlm:
+            # Child facts stay in ChildMemoryDB; no vector child RAG in RLM mode.
+            return 0
         docs = self.db.timeline_documents(child_id)
         self.child_rag.reindex_child(docs)
         return len(docs)
+
+    @property
+    def rlm(self):
+        if self._rlm_host is None:
+            from assistant.rlm.host import get_rlm_host
+
+            self._rlm_host = get_rlm_host()
+        return self._rlm_host
 
     def ask_medical(self, query: str) -> dict:
         from assistant.agent.grounding import memory_context
@@ -1140,6 +1160,187 @@ class ParentAssistant:
     def start_session(self, child_id: str | None = None) -> str:
         return self.chat_memory.create_session(child_id=child_id)
 
+    def _chat_rlm(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        en_message: str,
+        reply_lang: str,
+        ui_lang: str | None,
+        child_id: str | None,
+        owner_user_id: str | None,
+        ambiguous_children: list[dict],
+    ) -> dict:
+        """RLM chat path: knowledge via REPL, clinical tools via host, LTM embeddings only."""
+        from assistant.runtime_translate import ensure_pure_lang, translate_en_to_fa
+
+        new_slots = extract_growth_slots(en_message)
+        for k, v in extract_growth_slots(user_message).items():
+            new_slots.setdefault(k, v)
+        if child_id:
+            new_slots["child_id"] = child_id
+            child = self.db.get_child(child_id) or {}
+            if child.get("gestational_age_weeks") is not None:
+                new_slots["gestational_age_weeks"] = child["gestational_age_weeks"]
+                maturity = classify_maturity(child["gestational_age_weeks"])
+                if maturity == "term":
+                    new_slots.setdefault("chart_standard", "who_term")
+                elif maturity == "preterm":
+                    new_slots.setdefault("chart_standard", "intergrowth_preterm")
+            if child.get("sex") and "sex" not in new_slots:
+                new_slots["sex"] = child["sex"]
+        slots = self.chat_memory.merge_slots(session_id, new_slots)
+
+        child_context = ""
+        if child_id:
+            try:
+                child_context = self.db.child_context_text(child_id) or ""
+            except Exception as exc:
+                log.warning("child_context_text failed: %s", exc)
+
+        if ambiguous_children:
+            names = ", ".join(
+                str(c.get("name") or c.get("child_id")) for c in ambiguous_children
+            )
+            reply = (
+                f"Which child did you mean? I found more than one match: {names}."
+                if reply_lang != "fa"
+                else f"کدام کودک را می‌گویید؟ چند نام مشابه پیدا کردم: {names}."
+            )
+            self.chat_memory.add_message(session_id, "assistant", reply)
+            return {
+                "session_id": session_id,
+                "child_id": child_id,
+                "slots": slots,
+                "intents": ["chat"],
+                "reply": reply,
+                "reply_lang": reply_lang,
+                "ui_lang": ui_lang,
+                "ambiguous_children": ambiguous_children,
+                "tools": {"tool_calls": []},
+                "tool_results": [],
+                "medical_rag": None,
+                "models": {
+                    "rag": get_settings().nestling_llm_model,
+                    "tool_calling": "rlm_repl",
+                    "rlm": True,
+                },
+            }
+
+        stream_buf: list[str] = []
+        turn_events: list[dict] = []
+
+        def _emit(ev: dict) -> None:
+            turn_events.append(ev)
+            if ev.get("type") == "text_delta" and ev.get("text"):
+                stream_buf.append(str(ev["text"]))
+
+        rlm_out = self.rlm.run_chat_turn(
+            session_id=session_id,
+            user_message=user_message,
+            en_message=en_message,
+            child_id=child_id,
+            owner_user_id=owner_user_id,
+            child_context=child_context,
+            reply_lang=reply_lang or "en",
+            db=self.db,
+            emit=_emit,
+        )
+        reply = (rlm_out.get("reply") or "").strip()
+        if not reply:
+            reply = (
+                "I could not produce a reply just now. Please try again."
+                if reply_lang != "fa"
+                else "الان نتوانستم پاسخ بدهم. لطفاً دوباره تلاش کنید."
+            )
+        if reply_lang == "fa":
+            # Model may answer in English when the agent prompt used the EN translation.
+            if re.search(r"[A-Za-z]{4,}", reply) and not re.search(r"[\u0600-\u06FF]", reply):
+                try:
+                    reply = translate_en_to_fa(reply)
+                except Exception:
+                    pass
+            reply = ensure_pure_lang(reply, "fa")
+        else:
+            reply = ensure_pure_lang(reply, "en")
+
+        # Persist growth overlays that clinical tools produced.
+        for tr in rlm_out.get("tool_results") or []:
+            res = tr if isinstance(tr, dict) else {}
+            if res.get("name") == "overlay_growth_on_chart" and res.get("ok") and child_id:
+                try:
+                    self.db.add_growth(
+                        child_id,
+                        weeks=res.get("weeks") or 0,
+                        measure=res.get("measure") or "weight",
+                        value=float(res.get("value") or 0),
+                        z_score=res.get("z_score"),
+                        centile=res.get("centile") or res.get("percentile"),
+                        track_status=res.get("track"),
+                    )
+                except Exception as exc:
+                    log.warning("Could not persist growth from RLM tool: %s", exc)
+
+        public_tools = []
+        for tr in rlm_out.get("tool_results") or []:
+            if not isinstance(tr, dict):
+                continue
+            public_tools.append(
+                {
+                    "name": tr.get("name"),
+                    "summary": tr.get("summary") or tr.get("detail"),
+                    "overlay_filename": tr.get("overlay_filename") or tr.get("overlay"),
+                    "centile": tr.get("centile") or tr.get("percentile"),
+                    "z_score": tr.get("z_score"),
+                    "track_status": tr.get("track"),
+                    "chart_standard": tr.get("chart_standard"),
+                    "ok": tr.get("ok"),
+                }
+            )
+
+        self.chat_memory.add_message(
+            session_id,
+            "assistant",
+            reply,
+            tool_calls=public_tools,
+            meta={"slots": slots, "rlm": True, "steps": rlm_out.get("steps")},
+        )
+        self._remember_for_child(
+            child_id,
+            owner_user_id=owner_user_id,
+            user_message=en_message or user_message,
+            intents={"medical", "growth"} if public_tools else {"medical"},
+            slots=slots,
+            session_id=session_id,
+        )
+
+        out = {
+            "session_id": session_id,
+            "child_id": child_id,
+            "slots": slots,
+            "intents": ["rlm"],
+            "reply": reply,
+            "reply_lang": reply_lang,
+            "ui_lang": ui_lang,
+            "tools": rlm_out.get("tools") or {"tool_calls": []},
+            "tool_results": public_tools,
+            "missing_slots": [],
+            "ambiguous_children": ambiguous_children,
+            "medical_rag": None,
+            "memory": rlm_out.get("memory") or {},
+            "history": self.chat_memory.get_history(session_id),
+            "rlm": rlm_out.get("rlm") or {},
+            "stream_tokens": stream_buf,
+            "models": {
+                "rag": get_settings().nestling_llm_model,
+                "tool_calling": "rlm_repl",
+                "rlm": True,
+                "loaded_xlam": self.tool_caller.enabled,
+            },
+        }
+        return out
+
     def _children_named_in(
         self, owner_user_id: str | None, *messages: str
     ) -> list[dict]:
@@ -1202,6 +1403,18 @@ class ParentAssistant:
             elif len(named) > 1:
                 # Never guess between siblings — the reply asks which one.
                 ambiguous_children = named
+
+        if self.use_rlm:
+            return self._chat_rlm(
+                session_id=session_id,
+                user_message=user_message,
+                en_message=en_message,
+                reply_lang=reply_lang,
+                ui_lang=ui_lang,
+                child_id=child_id,
+                owner_user_id=owner_user_id,
+                ambiguous_children=ambiguous_children,
+            )
 
         new_slots = extract_growth_slots(en_message)
         for k, v in extract_growth_slots(user_message).items():

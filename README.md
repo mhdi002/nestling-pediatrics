@@ -6,8 +6,6 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
 
 ![Nestling demo](docs/assets/demo-preview.gif)
 
-[Download full demo (MP4)](docs/assets/demo.mp4)
-
 ## Features
 
 - **Growth tools** — percentiles / overlays for weight, length/height, and head circumference; WHO (term) and INTERGROWTH (preterm PMA) routing

@@ -1,0 +1,14 @@
+{
+  "name": "@rlm/nestling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@rlm/contracts": "file:../contracts",
+    "@rlm/core": "file:../core",
+    "@rlm/adapters": "file:../adapters"
+  }
+}

@@ -79,7 +79,29 @@ def _seed_knowledge() -> None:
         print("[entrypoint] WARNING: no chunks.json and no image seed", flush=True)
 
 
+def _ensure_knowledge_workspace() -> None:
+    """RLM mode: refresh knowledge/INDEX.md from a directory walk (no RAG chunks)."""
+    use_rlm = (os.environ.get("NESTLING_USE_RLM") or "1").strip() not in {"0", "false", "False"}
+    if not use_rlm:
+        return
+    try:
+        from assistant.rlm.knowledge import knowledge_root, write_index
+
+        root = knowledge_root()
+        if not root.is_dir():
+            print(f"[entrypoint] WARNING: knowledge dir missing at {root}", flush=True)
+            return
+        index = write_index(root)
+        print(f"[entrypoint] knowledge index ready: {index}", flush=True)
+    except Exception as exc:
+        print(f"[entrypoint] knowledge index skipped: {exc}", flush=True)
+
+
 def _ensure_medical_index() -> None:
+    use_rlm = (os.environ.get("NESTLING_USE_RLM") or "1").strip() not in {"0", "false", "False"}
+    if use_rlm:
+        print("[entrypoint] RLM mode — skipping MedicalRAG chunk index", flush=True)
+        return
     chunks = ROOT / "data" / "knowledge" / "chunks.json"
     rag_docs = ROOT / "data" / "knowledge" / "rag_index" / "docs.json"
     if not chunks.exists():
@@ -155,6 +177,7 @@ def main() -> int:
     else:
         print("[entrypoint] data/en present", flush=True)
 
+    _ensure_knowledge_workspace()
     _ensure_medical_index()
 
     argv = sys.argv[1:]

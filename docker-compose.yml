@@ -91,7 +91,8 @@ services:
       - ./tests:/app/tests
       - ./config:/app/config:ro
       - ./data/en:/app/data/en:ro
-      - ./data/knowledge/chunks.json:/app/data/knowledge/chunks.json:ro
+      - ./knowledge:/app/knowledge:ro
+      - ./prompts:/app/prompts:ro
       - ./intergrowth_preterm_equations.py:/app/intergrowth_preterm_equations.py:ro
     environment:
       - PYTHONUNBUFFERED=1
@@ -108,9 +109,14 @@ services:
       - NESTLING_BACKLOG=${NESTLING_BACKLOG:-2048}
       # --- models ---
       - NESTLING_LOAD_MODELS=${NESTLING_LOAD_MODELS:-0}
+      - NESTLING_USE_RLM=${NESTLING_USE_RLM:-1}
+      - NESTLING_KNOWLEDGE_DIR=${NESTLING_KNOWLEDGE_DIR:-/app/knowledge}
       - NESTLING_LLM_URL=${NESTLING_LLM_URL:-http://llm:8000}
       - NESTLING_VISION_LLM_URL=${NESTLING_VISION_LLM_URL:-http://llm:8000}
       - NESTLING_USE_LLM=${NESTLING_USE_LLM:-1}
+      # LTM embeddings only (not knowledge RAG). Point at a pooling embedder when available.
+      - RLM_EMBED_URL=${RLM_EMBED_URL:-}
+      - RLM_EMBED_MODEL=${RLM_EMBED_MODEL:-bge-m3}
       # Adaptive chat concurrency. The app widens its request concurrency and
       # worker-thread pool to match what the sidecar batches, so a bigger GPU
       # serves more parents at once with no code change. It reads

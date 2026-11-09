@@ -1,0 +1,13 @@
+{
+  "name": "rlm-ide",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "nestling": "npm --workspace @rlm/nestling run start"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

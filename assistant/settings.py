@@ -337,6 +337,101 @@ class Settings(BaseSettings):
     chart_curve_step_months: float = 0.5
     chart_curve_step_weeks: float = 0.5
 
+    # ---- RLM orchestrator (assistant/rlm/) --------------------------------
+    # Chat turns go through the RLM REPL engine. Knowledge is files under
+    # knowledge/; embeddings are only for user long-term memory.
+    nestling_use_rlm: bool = True
+    nestling_knowledge_dir: str = ""
+    rlm_ts_url: str = "http://127.0.0.1:8120"
+    rlm_ts_autostart: bool = True
+    rlm_prompts_dir: str = ""
+    rlm_worker_script: str = ""
+    rlm_python: str = ""
+    rlm_chars_per_token: float = 3.2
+    rlm_message_overhead_tokens: int = 6
+    rlm_context_length: int = 32768
+    rlm_max_output_tokens: int = 2048
+    # Compact (session / in-turn)
+    rlm_compact_history_share: float = 0.6
+    rlm_compact_trigger_ratio: float = 0.8
+    rlm_compact_trigger_ratio_in_turn: float = 0.9
+    rlm_compact_keep_recent_ratio: float = 0.35
+    rlm_compact_max_output_ratio: float = 0.25
+    rlm_compact_max_rows_per_1k_history: float = 4.0
+    rlm_compact_newest_limit_ratio: float = 0.6
+    rlm_compact_summary_max_share: float = 0.5
+    # RLM loop
+    rlm_max_steps: int = 24
+    rlm_step_warn_remaining: int = 5
+    rlm_model_stall_sec: float = 300.0
+    rlm_thinking_max_share: float = 0.6
+    rlm_thinking_max_tokens: int = 2048
+    rlm_thinking_max_sec: int = 120
+    rlm_repeat_limit: int = 4
+    rlm_max_cuts_in_a_row: int = 3
+    rlm_max_identical_cells: int = 2
+    # Do not fold history until this many user turns exist, unless the window
+    # would otherwise overflow (false compaction on a short thread).
+    rlm_compact_min_user_turns: int = 3
+    rlm_empty_search_abort: int = 2
+    rlm_grep_topic_stopwords: str = (
+        "please,look,lookup,guidance,month,months,knowledge,files,search,grep,"
+        "read,file,summarize,parent,using,about,what,does,guidelines,short,"
+        "answer,sentence,sentences,give,keep,find,from,with,that,this,exist,"
+        "name,three,hello,using,english"
+    )
+    rlm_cell_timeout_sec: int = 60
+    # Executable markdown fence labels (comma-separated). Small models often
+    # emit ```python instead of ```repl; both run as REPL cells when listed.
+    rlm_cell_fence_labels: str = "repl,python,py"
+    # Namespace prefixes that may be recovered as REPL cells when a small
+    # model describes a tool call in prose instead of a fence.
+    rlm_call_prefixes: str = ""
+    rlm_temperature: float = 0.2
+    rlm_cell_output_limit_chars: int = 16000
+    rlm_cell_output_max_share: float = 0.25
+    rlm_tool_docs_max_share: float = 0.25
+    rlm_old_output_keep_chars: int = 1500
+    rlm_max_subagent_depth: int = 0
+    rlm_kernel_memory_mb: int = 2048
+    rlm_sandbox_no_network: bool = True
+    rlm_sandbox_prefer_bwrap: bool = True
+    rlm_kernel_ready_timeout_sec: float = 20.0
+    rlm_rewrite_min_lines: int = 40
+    rlm_rewrite_max_changed: int = 8
+    rlm_empty_stream_retries: int = 2
+    rlm_empty_stream_backoff_sec: float = 0.5
+    rlm_guard_window_chars: int = 12000
+    rlm_guard_check_every_chars: int = 256
+    rlm_guard_needle_chars: int = 24
+    rlm_fs_read_max_chars: int = 60000
+    rlm_fs_glob_max_results: int = 500
+    rlm_search_max_results: int = 100
+    rlm_grep_file_max_bytes: int = 2_000_000
+    rlm_pdf_max_pages: int = 8
+    rlm_tool_allowlist: str = "fs,search,clinical"
+    # LTM only (STM vector upserts are disabled in code)
+    rlm_memory_enabled: bool = True
+    rlm_memory_db: str = ""
+    rlm_embed_url: str = ""
+    rlm_embed_model: str = ""
+    rlm_memory_min_score: float = 0.55
+    rlm_memory_user_limit: int = 6
+    rlm_memory_always_recall_facts: int = 12
+    rlm_memory_prompt_max_chars: int = 4000
+    rlm_memory_fact_max_adds_per_turn: int = 3
+    rlm_memory_fact_max_chars: int = 200
+    rlm_memory_fact_min_user_chars: int = 12
+    rlm_memory_fact_require_user_grounding: bool = True
+    # When LLM fact-distill returns nothing, store the user utterance if it
+    # matches these cues (comma-separated; not domain-specific values).
+    rlm_memory_fact_cues: str = (
+        "remember,allergic,allergy,named,my daughter,my son,my child,"
+        "lasting fact,آلرژی,حساسیت,به خاطر"
+    )
+    rlm_memory_long_term_scope: str = "workspace"
+    rlm_memory_session_limit: int = 0  # 0 = no short-term vector recall
+
     @property
     def cors_origin_list(self) -> list[str]:
         raw = (self.nestling_cors_origins or "*").strip()
