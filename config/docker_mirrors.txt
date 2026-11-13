@@ -1,0 +1,19 @@
+# Candidate Docker Hub mirrors, tried in order when deploy.sh cannot pull
+# from Docker Hub directly.
+#
+# Docker Hub answers 403 Forbidden to pulls from some networks, which fails the
+# image build at its first FROM line. deploy.sh first pulls a tiny image
+# straight from Docker Hub; only if that fails does it try each mirror below
+# as the daemon's registry-mirror, keeping the first one that actually serves
+# the pull. Docker Hub images only (python, node, vllm, nvidia/cuda).
+#
+# One base URL per line, blank lines and #-comments ignored. Set
+# NESTLING_DOCKER_MIRROR in .env to pin one and skip probing.
+#
+# Only add registries you trust: whatever is listed here supplies the images
+# this stack runs.
+
+https://mirror.gcr.io
+https://docker.arvancloud.ir
+https://docker.iranserver.com
+https://focker.ir

@@ -294,6 +294,70 @@ assert_docker() {
   ok "Docker + Compose v2 available"
 }
 
+# Make sure Docker Hub images can be pulled. Some networks get 403 Forbidden
+# from Docker Hub, which fails the build at its first FROM line. A tiny image is
+# pulled straight from Docker Hub first; only if that fails is each candidate in
+# config/docker_mirrors.txt tried as the daemon's registry-mirror, and the first
+# one that actually serves the pull is kept.
+docker_set_mirror() {
+  # Merge into daemon.json: it already carries the NVIDIA runtime entry.
+  python3 - "$1" <<'PY'
+import json, os, sys
+path = "/etc/docker/daemon.json"
+cfg = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except ValueError:
+        cfg = {}
+if sys.argv[1]:
+    cfg["registry-mirrors"] = [sys.argv[1]]
+else:
+    cfg.pop("registry-mirrors", None)
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+  systemctl restart docker >/dev/null 2>&1 || service docker restart >/dev/null 2>&1 || true
+  local i
+  for i in 1 2 3 4 5 6; do
+    run_with_timeout 10 docker version >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
+docker_can_pull() {
+  docker rmi -f busybox:latest >/dev/null 2>&1 || true
+  run_with_timeout 120 docker pull -q busybox:latest >/dev/null 2>&1
+}
+
+ensure_docker_hub_access() {
+  if docker_can_pull; then
+    ok "Docker Hub reachable"
+    return 0
+  fi
+  if ! is_root || ! have_cmd python3; then
+    err "cannot pull from Docker Hub, and need root + python3 to configure a registry mirror"
+    exit 1
+  fi
+  local pinned="${NESTLING_DOCKER_MIRROR:-}" url
+  [ -z "$pinned" ] && pinned="$(sed -n 's/^NESTLING_DOCKER_MIRROR=//p' .env 2>/dev/null | head -1)"
+  step "Docker Hub refused the pull -- selecting a registry mirror"
+  for url in $pinned $(grep -v '^\s*#' config/docker_mirrors.txt 2>/dev/null | grep -v '^\s*$'); do
+    if docker_set_mirror "$url" && docker_can_pull; then
+      ok "pulling Docker Hub images through $url"
+      grep -qs '^NESTLING_DOCKER_MIRROR=' .env || printf 'NESTLING_DOCKER_MIRROR=%s\n' "$url" >> .env
+      return 0
+    fi
+    warn "mirror did not serve the pull: $url"
+  done
+  docker_set_mirror ""
+  err "no way to pull Docker Hub images from this host (Docker Hub and every mirror in config/docker_mirrors.txt failed)"
+  exit 1
+}
+
 gpu_available() {
   if ! have_cmd nvidia-smi; then
     warn "no nvidia-smi found -- no NVIDIA driver on this host"
@@ -1085,6 +1149,9 @@ case "$ACTION" in
 
     step "preparing .env"
     init_env_file
+
+    # Before the GPU probe and the build: both pull images from Docker Hub.
+    ensure_docker_hub_access
 
     gpu=0
     if [ "$MODE" = full ]; then
