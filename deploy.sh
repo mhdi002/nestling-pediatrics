@@ -355,7 +355,18 @@ version_lt() {
 ' "$1" "$2" | sort -V | head -1)" = "$1" ]
 }
 
+is_wsl() {
+  # WSL's kernel names itself; the GPU driver lives in Windows, not in the distro.
+  grep -qi microsoft /proc/version 2>/dev/null || [ -d /usr/lib/wsl/lib ]
+}
+
 upgrade_nvidia_driver() {
+  # On WSL the Linux side only sees the Windows driver through /usr/lib/wsl;
+  # installing an nvidia-driver package in the distro breaks GPU access.
+  if is_wsl; then
+    warn "WSL: the NVIDIA driver comes from Windows -- update it there (NVIDIA app / nvidia.com), then rerun"
+    return 1
+  fi
   # Pick the newest driver branch apt actually offers; never a pinned number.
   have_apt || { warn "no apt here -- upgrade the NVIDIA driver manually"; return 1; }
   is_root || { warn "need root to upgrade the NVIDIA driver"; return 1; }
