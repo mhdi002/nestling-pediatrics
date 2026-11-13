@@ -257,6 +257,17 @@ prefer_ipv4_when_there_is_no_ipv6() {
 }
 
 assert_docker() {
+  # A docker client with no engine on this host counts as no Docker: on WSL
+  # the PATH carries Docker Desktop's Windows CLI (/mnt/c/...), which cannot
+  # reach a daemon unless Desktop is running with this distro integrated.
+  if have_cmd docker && ! have_cmd dockerd \
+      && ! run_with_timeout 15 docker version >/dev/null 2>&1; then
+    warn "found a docker client ($(command -v docker)) but no Docker engine on this host"
+    if [ "$INSTALL_PREREQS" = "1" ] && is_root && have_apt; then
+      install_docker_linux
+      hash -r
+    fi
+  fi
   if ! have_cmd docker; then
     if [ "$INSTALL_PREREQS" = "1" ] && is_root && have_apt; then
       install_docker_linux
