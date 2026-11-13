@@ -45,3 +45,6 @@ build
 .cache
 **/huggingface
 **/torch_cache
+
+# Installed inside the image (orchestrator stage of the Dockerfile).
+**/node_modules

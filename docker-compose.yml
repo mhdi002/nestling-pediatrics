@@ -81,7 +81,8 @@ services:
       - nestling_children:/app/data/children
       - nestling_overlays:/app/data/overlays
       - nestling_uploads:/app/data/uploads
-      - nestling_knowledge:/app/data/knowledge
+      # Conversations, compacted transcripts and task boards of the RLM orchestrator.
+      - nestling_rlm_state:/app/data/rlm_state
       - nestling_hf_cache:/app/data/hf_cache
       - ./assistant:/app/assistant
       - ./app:/app/app
@@ -225,5 +226,5 @@ volumes:
   nestling_children:
   nestling_overlays:
   nestling_uploads:
-  nestling_knowledge:
+  nestling_rlm_state:
   nestling_hf_cache:

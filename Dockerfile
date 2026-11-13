@@ -1,4 +1,22 @@
 # Nestling — pediatric parent assistant
+
+# The chat agent is the TypeScript RLM orchestrator in vendor/rlm-ide, which the
+# app starts on demand (assistant/rlm/ts_client.py). Its Node runtime and npm
+# dependencies are installed in this stage and copied into the app image below.
+FROM node:22-bookworm-slim AS orchestrator
+# npm registry. Empty means registry.npmjs.org; override when that host is
+# unreachable from the build network, e.g. --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_REGISTRY=""
+WORKDIR /build/vendor/rlm-ide
+COPY vendor/rlm-ide/package.json vendor/rlm-ide/package-lock.json ./
+COPY vendor/rlm-ide/packages ./packages
+RUN set -eux; \
+    if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi; \
+    for i in 1 2 3; do \
+      npm ci --no-audit --no-fund && break || { echo "npm ci failed (attempt $i)"; sleep 5; }; \
+    done; \
+    test -x node_modules/.bin/tsx
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -56,14 +74,17 @@ RUN set -eux; \
       pip install -r requirements-core.txt ; \
     fi
 
-COPY . .
+# Node and npm for the orchestrator (not /usr/local/bin wholesale: Python lives there).
+COPY --from=orchestrator /usr/local/bin/node /usr/local/bin/node
+COPY --from=orchestrator /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
 
-# Persistable seed so empty named volumes do not wipe knowledge
-RUN mkdir -p /opt/nestling-seed \
-    && cp -a /app/data/knowledge /opt/nestling-seed/knowledge \
-    && sed -i 's/\r$//' scripts/entrypoint.sh 2>/dev/null || true \
-    && chmod +x scripts/entrypoint.sh scripts/docker_test.sh || true \
-    && chmod +x scripts/entrypoint.py || true
+COPY . .
+COPY --from=orchestrator /build/vendor/rlm-ide/node_modules /app/vendor/rlm-ide/node_modules
+
+RUN chmod +x scripts/entrypoint.py scripts/docker_test.sh || true
 
 EXPOSE 8000
 
