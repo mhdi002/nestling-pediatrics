@@ -509,6 +509,16 @@ class ParentAssistant:
             elif len(named) > 1:
                 # Never guess between siblings — the reply asks which one.
                 ambiguous_children = named
+            else:
+                # No child picked in the UI and none named. An account with a
+                # single child means that child: without this, what the parent
+                # said ("she has had diarrhoea since yesterday") was saved to no
+                # child and missing from the next conversation about her. With
+                # several children nothing is assumed.
+                roster = self.db.list_children(owner_user_id=owner_user_id)
+                if len(roster) == 1:
+                    child_id = roster[0]["child_id"]
+                    self.chat_memory.set_child(session_id, child_id)
 
         # Every turn runs on the RLM orchestrator; the retrieval (RAG) path is gone.
         return self._chat_rlm(

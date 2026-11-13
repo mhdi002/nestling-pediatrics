@@ -197,14 +197,14 @@ export async function answerableFromKnown(input: Pick<RouteInput, "model" | "pro
       { role: "system", content: system },
       { role: "user", content: input.message },
     ],
-    maxTokens: 60,
+    maxTokens: 160,
     temperature: 0,
     enableThinking: false,
     jsonSchema: {
       name: "known",
       schema: {
         type: "object",
-        properties: { asks: { type: "string", enum: ASKS }, quote: { type: "string", maxLength: 200 } },
+        properties: { asks: { type: "string", enum: ASKS }, quote: { type: "string", maxLength: 400 } },
         required: ["asks", "quote"],
       },
     },
@@ -218,9 +218,12 @@ export async function answerableFromKnown(input: Pick<RouteInput, "model" | "pro
     // "It is already known" has to be shown, not asserted: the model quotes the line that holds
     // the answer, and the quote has to be there. Asked whether a screening questionnaire had
     // already been given in the conversation, it said yes; it could not have quoted one.
+    // Checked sentence by sentence: a recap quotes several saved facts, not always in the order
+    // they are stored and not always every one in between.
     const flat = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-    const quote = flat(p.quote ?? "");
-    return quote.length >= 12 && flat([input.child, input.memory, input.recent].join("\n")).includes(quote);
+    const known = flat([input.child, input.memory, input.recent].join("\n"));
+    const parts = (p.quote ?? "").split(/[.!?؟\n]+/).map(flat).filter((x) => x.length >= 12);
+    return parts.length > 0 && parts.every((x) => known.includes(x));
   } catch {
     return false;
   }

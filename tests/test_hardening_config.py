@@ -92,10 +92,20 @@ def test_defaults_work_without_env_file():
     assert s.nestling_api_key is None
 
 
-def test_paths_derive_from_settings_root():
+def test_paths_derive_from_settings_root(monkeypatch):
+    import importlib
+
     from assistant import config as cfg
 
-    root = Path(get_settings().nestling_root).resolve()
-    for path in (cfg.DATA, cfg.EN_DIR, cfg.OVERLAY_DIR, cfg.UPLOAD_DIR):
-        assert path.is_absolute()
-        assert root in path.parents or path == root
+    # Fresh settings with no data-dir override: other tests leave one cached.
+    monkeypatch.delenv("NESTLING_DATA_DIR", raising=False)
+    get_settings.cache_clear()
+    cfg = importlib.reload(cfg)
+    try:
+        root = Path(get_settings().nestling_root).resolve()
+        for path in (cfg.DATA, cfg.EN_DIR, cfg.OVERLAY_DIR, cfg.UPLOAD_DIR):
+            assert path.is_absolute()
+            assert root in path.parents or path == root
+    finally:
+        get_settings.cache_clear()
+        importlib.reload(cfg)

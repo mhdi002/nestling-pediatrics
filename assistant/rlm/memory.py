@@ -223,26 +223,28 @@ class LongTermMemory:
         assistant_text: str,
         complete_fn,
     ) -> None:
+        """Save what the parent's latest message states, for later conversations.
+
+        The model is asked one plain thing: list the facts this message states,
+        and for each, which saved fact (if any) it makes out of date. Asked
+        instead to edit the store (add/update/delete against facts shown first),
+        a small model copied the saved facts back as new ones and left out the
+        one fact the message added. Duplicates and corrections are handled here.
+        """
         s = get_settings()
         if not s.rlm_memory_enabled or not user_id:
             return
         if len((user_text or "").strip()) < int(s.rlm_memory_fact_min_user_chars):
             return
-        recalled = self.recall(user_text, user_id, workspace_id)
-        known = recalled.get("items") or []
-        known_text = (
-            "\n".join(f"[{k['id']}] (user) {k['text']}" for k in known) if known else "(none)"
-        )
+        saved = self.list_facts(user_id)
+        shown = saved[: int(s.rlm_memory_always_recall_facts)]
         prompt = render(
             get_prompt("memory/fact_distill.md"),
-            known_facts=known_text,
-            project=workspace_id or "(no project folder open)",
+            known_facts="\n".join(f"[{k['id']}] {k['text']}" for k in shown) or "(none)",
             user_message=clip_chars(user_text, 6000),
-            assistant_message=clip_chars(assistant_text, 1500),
-            require_grounding="yes" if s.rlm_memory_fact_require_user_grounding else "no",
         )
         out = ""
-        schema = _fact_ops_schema(s, [k["id"] for k in known])
+        schema = _fact_list_schema(s, [k["id"] for k in shown])
         try:
             try:
                 out = complete_fn(
@@ -260,30 +262,35 @@ class LongTermMemory:
                 )
         except Exception as exc:
             log.warning("fact distill failed: %s", exc)
-        ops = _parse_fact_ops(out)
-        known_ids = {k["id"] for k in known}
+        _ = assistant_text  # the assistant's words are never a source of facts
+        shown_ids = {k["id"] for k in shown}
+        # Words the saved facts already establish (the child's name, the family)
+        # say nothing about whether a new fact came from this message.
+        established = set().union(*(_content_words(k["text"]) for k in saved)) if saved else set()
         added = 0
-        for op in ops:
-            if op.get("op") == "delete" and op.get("id") in known_ids:
-                self._delete(op["id"], user_id)
-            elif op.get("op") == "update" and op.get("id") in known_ids and _fact_ok(op.get("text") or "", s):
-                self._update(op["id"], op["text"], user_id)
-            elif op.get("op") == "add":
-                if added >= int(s.rlm_memory_fact_max_adds_per_turn):
-                    continue
-                text = (op.get("text") or "").strip()
-                if not _fact_ok(text, s):
-                    continue
-                if text.strip() == (user_text or "").strip():
-                    continue
-                if s.rlm_memory_fact_require_user_grounding and not _grounded(text, user_text):
-                    continue
-                about = op.get("about") or "user"
-                ws = workspace_id if about == "project" else None
-                if about == "project" and not workspace_id:
-                    continue
-                self._add(user_id, ws, text, op.get("category") or "general")
-                added += 1
+        for item in _parse_fact_list(out):
+            text = str(item.get("text") or "").strip()
+            if not _fact_ok(text, s) or text == (user_text or "").strip():
+                continue
+            if s.rlm_memory_fact_require_user_grounding and not _grounded(text, user_text, established):
+                continue
+            changes = str(item.get("changes") or "")
+            target = next((k for k in saved if k.get("id") == changes), None)
+            # A correction replaces a saved fact only when the two are about the
+            # same thing. Linked to an unrelated fact ("now stands" said to make
+            # "started crawling" out of date), the old fact would be lost; the
+            # new one is kept beside it instead.
+            if changes in shown_ids and target and _same_subject(text, target["text"], saved):
+                self._update(changes, text, user_id)
+                for k in saved:
+                    if k["id"] == changes:
+                        k["text"] = text
+                continue
+            if added >= int(s.rlm_memory_fact_max_adds_per_turn) or _already_known(text, saved):
+                continue
+            self._add(user_id, None, text, _category_of(text))
+            saved.append({"id": "", "text": text})
+            added += 1
 
     def _add(self, user_id: str, workspace_id: str | None, text: str, category: str) -> None:
         vecs = embed_texts([text])
@@ -379,44 +386,88 @@ def _fact_ok(text: str, s) -> bool:
     return bool(t) and len(t) <= int(s.rlm_memory_fact_max_chars)
 
 
-def _fact_ops_schema(s, known_ids: list[str]) -> dict:
-    """The shape a distilled memory decision must take.
-
-    What is worth keeping is the model's judgement; the shape is not. Before
-    this the reply was free text hunted for a JSON array, and when the model
-    wrote none a regex kept whatever followed the word "remember", which
-    stored the tail of a question ("about Darya from before?") as a fact.
-    """
-    op = {
+def _fact_list_schema(s, known_ids: list[str]) -> dict:
+    """The shape of a distilled memory decision: the facts a message states,
+    each with the saved fact it makes out of date, if any."""
+    item = {
         "type": "object",
         "properties": {
-            "op": {"type": "string", "enum": ["add", "update", "delete"]},
-            "id": {"type": "string", "enum": [*known_ids, ""]},
             "text": {"type": "string", "maxLength": int(s.rlm_memory_fact_max_chars)},
-            "category": {"type": "string", "enum": ["identity", "health", "feeding", "sleep", "development", "routine", "preference", "general"]},
+            "changes": {"type": "string", "enum": [*known_ids, ""]},
         },
-        "required": ["op", "id", "text", "category"],
+        "required": ["text", "changes"],
     }
     return {
         "type": "object",
-        "properties": {
-            "facts": {"type": "array", "items": op, "maxItems": int(s.rlm_memory_fact_max_adds_per_turn) + 2}
-        },
+        "properties": {"facts": {"type": "array", "items": item, "maxItems": int(s.rlm_memory_fact_max_adds_per_turn) + 3}},
         "required": ["facts"],
     }
 
 
-def _grounded(fact: str, user_text: str) -> bool:
-    # Light grounding: at least one content word from the fact appears in the user text.
-    words = [w.lower() for w in re.findall(r"[A-Za-z\u0600-\u06FF]{4,}", fact)]
-    hay = (user_text or "").lower()
+def _category_of(text: str) -> str:
+    """A coarse label for listing; the fact text is what recall uses."""
+    return "general"
+
+
+def _grounded(fact: str, user_text: str, established: set[str] | None = None) -> bool:
+    """Whether a fact plausibly came from the parent's own words.
+
+    Words the saved facts already establish (the child's name above all) are
+    set aside: a parent says "she", not the name, and the check falls on what
+    is new. At least one of the remaining words must appear in the message,
+    or two when nothing is set aside.
+    """
+    words = _content_words(fact) - (established or set())
     if not words:
         return True
-    hits = sum(1 for w in words[:8] if w in hay)
-    return hits >= min(2, len(words[:8]))
+    hay = (user_text or "").lower()
+    hits = sum(1 for w in words if w in hay)
+    return hits >= (1 if established else min(2, len(words)))
 
 
-def _parse_fact_ops(raw: str) -> list[dict]:
+def _content_words(text: str) -> set[str]:
+    from assistant.memory.bm25 import tokenize
+
+    return {w for w in tokenize(text) if len(w) > 2}
+
+
+def _subject_words(text: str, saved: list[dict]) -> set[str]:
+    """Content words of `text` that say what it is about: words shared by most
+    saved facts (the child's name, "has") are set aside."""
+    words = _content_words(text)
+    if len(saved) < 2:
+        return words
+    common = {
+        w for w in words
+        if sum(1 for k in saved if w in _content_words(str(k.get("text") or ""))) > len(saved) / 2
+    }
+    return words - common
+
+
+def _same_subject(new: str, old: str, saved: list[dict]) -> bool:
+    return bool(_subject_words(new, saved) & _subject_words(old, saved))
+
+
+def _already_known(text: str, saved: list[dict], overlap: float = 0.8) -> bool:
+    """Whether `text` says what a saved fact already says.
+
+    Measured on content words, so "Darya started crawling last week" and
+    "Darya started crawling last week." match, as does a reordering, while a
+    fact that adds something new ("... and pulls to stand") does not.
+    """
+    new = _content_words(text)
+    if not new:
+        return True
+    for row in saved:
+        old = _content_words(str(row.get("text") or ""))
+        # Containment, not overlap: "Darya still has mild eczema" is already in
+        # "Darya has mild eczema and is breastfed ...", though the two differ in length.
+        if old and len(new & old) / len(new) >= overlap:
+            return True
+    return False
+
+
+def _parse_fact_list(raw: str) -> list[dict]:
     text = (raw or "").strip()
     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
     data = None
