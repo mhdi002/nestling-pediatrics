@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { LoggerPort, PromptsPort, WorkspacePort } from "@rlm/core";
 import { ProcessManager } from "./tools/shell";
@@ -6,11 +6,16 @@ import { ProcessManager } from "./tools/shell";
 /** Prompts are `.md` files on disk, cached after first read. */
 export class FilePrompts implements PromptsPort {
   private readonly cache = new Map<string, string>();
-  constructor(private readonly dir: string) {}
+  private readonly dirs: string[];
+  /** One directory, or several searched in order: a host overlays its own wording on the stock prompts by listing its directory first. */
+  constructor(dir: string | string[]) {
+    this.dirs = Array.isArray(dir) ? dir : [dir];
+  }
   get(name: string): string {
     let t = this.cache.get(name);
     if (t === undefined) {
-      t = readFileSync(path.join(this.dir, name), "utf8");
+      const hit = this.dirs.map((d) => path.join(d, name)).find((f) => existsSync(f));
+      t = readFileSync(hit ?? path.join(this.dirs[this.dirs.length - 1]!, name), "utf8");
       this.cache.set(name, t);
     }
     return t;

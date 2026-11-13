@@ -9,7 +9,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
 
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,28 +29,24 @@ class Settings(BaseSettings):
     # would make every request pay a failed connection probe.
     nestling_llm_url: str = ""
     nestling_vision_llm_url: str = ""
-    # MiniCPM5-1B: 1.08B parameters, ~2.1GB of weights against Qwen3.5-4B's
-    # 8.7GB, and a KV cache five times cheaper thanks to grouped-query
-    # attention (2 KV heads). scripts/size_llm.py derives 198 concurrent
-    # sequences for it on a 24GB card against 25 for Qwen, which is what makes
-    # a hundred concurrent parents affordable rather than aspirational. It also
-    # honours enable_thinking, so it answers instead of reasoning past its
-    # budget. Measured weaker than Qwen on grounded recall (5/7 against 6/7 on
-    # the same conversation) and markedly better at proposing this project's
-    # tools (8/10).
-    nestling_llm_model: str = "openbmb/MiniCPM5-1B"
-    # Text-only. Left pointing at the same model deliberately: the capability
-    # probe sends a one-pixel image, sees the refusal, and reports vision
-    # unavailable, so a photo turn degrades to caption-plus-care-notes rather
-    # than pretending to have looked. Point this at a vision-capable sidecar
-    # (with NESTLING_VISION_LLM_URL) to turn photo analysis back on.
-    nestling_vision_model: str = "openbmb/MiniCPM5-1B"
-    nestling_tool_model: str = "Salesforce/xLAM-1b-fc-r"
+    # Qwen3.5-2B. The agent has to choose, on its own, which care-library file
+    # answers a parent's question and when a clinical tool is needed. Measured
+    # on 18 natural parent questions with the reply constrained to the files
+    # that exist: Qwen3.5-2B picked the right file 16 times, MiniCPM5-1B about
+    # 3 (it asked for the growth tool in reply to "thanks"). A 1B model wrote
+    # fluent answers from retrieved text well enough; it cannot drive the RLM
+    # loop, so the smallest model that can is the default. ~4.3 GB in bf16.
+    nestling_llm_model: str = "Qwen/Qwen3.5-2B"
+    # Qwen3.5 is multimodal, so the same sidecar serves photo turns when
+    # images are enabled on it (VLLM_LIMIT_MM_IMAGE, sized by deploy.sh). The
+    # capability probe still decides at run time: a sidecar that refuses an
+    # image degrades the turn to caption-plus-guidance rather than pretending
+    # to have looked.
+    nestling_vision_model: str = "Qwen/Qwen3.5-2B"
     nestling_tool_max_new_tokens: int = 512
     nestling_llm_gguf: str = ""
     nestling_vision_gguf: str = ""
     nestling_vision_mmproj: str = ""
-    nestling_use_dense: bool = False
     nestling_embedding_model: str = "BAAI/bge-m3"
 
     # Adaptive chat concurrency. The sidecar batches several turns at once
@@ -166,7 +161,6 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_top_p: float = 0.95
     llm_max_tokens_default: int = 512
-    llm_max_tokens_rag: int = 640
     llm_max_tokens_vision: int = 700
     llm_max_tokens_chat: int = 320
     llm_rag_temperature: float = 0.75
@@ -246,89 +240,11 @@ class Settings(BaseSettings):
     nestling_memory_share_episodic: float = 0.30
     nestling_memory_share_working: float = 0.20
 
-    # Intent routing
-    nestling_router_llm_min_confidence: float = 0.7
-
-    # Retrieval
-    nestling_rag_top_k: int = 5
-    nestling_rag_pool_multiplier: int = 5
-    nestling_rag_pool_min: int = 25
-    nestling_rag_query_multiplier: int = 3
-    nestling_rag_query_min: int = 15
-    nestling_rag_topic_hits: int = 3
-    nestling_rag_speech_hits: int = 2
-    nestling_rag_extract_chars: int = 420
-    nestling_rag_extract_min_sentence_chars: int = 160
-    nestling_rag_extract_keep_ratio: float = 0.75
-    nestling_dense_rrf_k: int = 60
-    nestling_dense_cache_size: int = 2048
     # Deadline for lazily loading the embedding model. It is fetched on the
     # first chat request, so an unreachable huggingface.co would otherwise hang
     # that request indefinitely instead of falling back to BM25. Generous
     # enough to load cached weights from disk, far below the proxy timeout.
     nestling_dense_load_timeout: float = 20.0
-
-    # Audience scoping (assistant/rag/audience.py, config/knowledge_audience.yaml).
-    # A clinician manual is split in document order at the point where it stops
-    # describing the family in the third person and starts addressing them
-    # directly; the tail is released as parent-facing.
-    # Below this many sections a "document order" argument is meaningless, so a
-    # short clinician source stays clinician-only end to end. Every curated
-    # parent file in the corpus is smaller than this; the two WHO manuals have
-    # 56 and 229 sections.
-    nestling_audience_min_sections: int = 20
-    # The split is only believed when the tail is this much more second-person
-    # than the head, on a scale where +1 is "speaks only to you" and -1 is
-    # "speaks only about them". Measured on the corpus: PCPNC separates by
-    # 0.99 at its counselling-sheet boundary; IYCF, which has no such section,
-    # produces no tail at all.
-    nestling_audience_min_separation: float = 0.5
-    # A section needs at least this many person references before its own
-    # grammatical person is treated as evidence rather than noise. Drug-dose
-    # tables ("IM/IV: 10 IU") name nobody and must fall back to the document's
-    # declared audience.
-    nestling_audience_min_person_refs: int = 3
-
-    # Emergency escalation. When the parent reports an emergency, the reply
-    # leads with a call for help instead of care guidance.
-    #
-    # This was off while the trigger was retrieval arithmetic: BM25 scored
-    # "what foods are good for her?" above four of six genuine emergencies, so
-    # a question about solid food was answered as an emergency. The trigger is
-    # now the `urgent` intent -- the LLM router when the sidecar is up, and the
-    # structural test in assistant/agent/urgency.py either way -- which has no
-    # threshold to tune, so there is no companion margin setting any more.
-    #
-    # There is deliberately no "minimum confidence" knob here: the fallback is
-    # a yes/no structural test, and the LLM's share of the decision is already
-    # gated by nestling_router_llm_min_confidence above.
-    #
-    # Withholding clinician procedures from parents does NOT depend on this
-    # flag -- that is the provenance-based audience filter, which is always on.
-    nestling_urgent_escalation_enabled: bool = True
-
-    # Web-search fallback. Off by default: searching costs money and latency,
-    # and the local WHO corpus answers the overwhelming majority of turns.
-    nestling_websearch_enabled: bool = False
-    nestling_websearch_provider: str = "duckduckgo"
-    # Empty means "use the endpoint declared for the provider in
-    # config/websearch.yaml"; set it to point at a self-hosted SearXNG etc.
-    nestling_websearch_endpoint: str = ""
-    nestling_websearch_api_key: str | None = None
-    nestling_websearch_max_results: int = 5
-    nestling_websearch_timeout: float = 6.0
-    nestling_websearch_snippet_chars: int = 400
-    nestling_websearch_context_chars: int = 2000
-    nestling_websearch_query_chars: int = 300
-    nestling_websearch_user_agent: str = "Nestling/1.0 (+pediatric parent assistant)"
-    # Relevance gate: idf-weighted share of the parent's question terms that the
-    # local hits actually cover (0..1). Below this the corpus is judged not to
-    # hold the answer and we may search. Measured on the WHO corpus: on-topic
-    # questions score ~0.6-0.9, out-of-corpus ones ~0.2-0.5.
-    nestling_websearch_min_local_coverage: float = 0.55
-    # A retrieval that returns nothing at all is always weak, whatever the
-    # coverage arithmetic says.
-    nestling_websearch_min_local_score: float = 0.0
 
     # Chart rendering
     chart_dpi: int = 140
@@ -423,12 +339,6 @@ class Settings(BaseSettings):
     rlm_memory_fact_max_chars: int = 200
     rlm_memory_fact_min_user_chars: int = 12
     rlm_memory_fact_require_user_grounding: bool = True
-    # When LLM fact-distill returns nothing, store the user utterance if it
-    # matches these cues (comma-separated; not domain-specific values).
-    rlm_memory_fact_cues: str = (
-        "remember,allergic,allergy,named,my daughter,my son,my child,"
-        "lasting fact,آلرژی,حساسیت,به خاطر"
-    )
     rlm_memory_long_term_scope: str = "workspace"
     rlm_memory_session_limit: int = 0  # 0 = no short-term vector recall
 
@@ -449,11 +359,9 @@ class Settings(BaseSettings):
         raw = (self.nestling_allowed_upload_types or "").strip()
         return frozenset(t.strip().lower() for t in raw.split(",") if t.strip())
 
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
 
 def reset_settings() -> None:
     """Drop the cached Settings so a changed environment is picked up (tests)."""

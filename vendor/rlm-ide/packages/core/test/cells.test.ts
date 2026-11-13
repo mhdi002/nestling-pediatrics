@@ -4,7 +4,8 @@ import { CellFenceFilter, extractCells, stripCells, syntaxHint, unclosedCellAt }
 describe("cells", () => {
   it("extracts closed repl cells only", () => {
     const t = "Plan.\n```repl\nprint(1)\n```\nthen\n```python\nnot_run()\n```\n```repl\nprint(2)\n```";
-    expect(extractCells(t)).toEqual(["print(1)", "print(2)"]);
+    // ```python fences run too (see CELL_RE); other fences do not.
+    expect(extractCells(t)).toEqual(["print(1)", "not_run()", "print(2)"]);
     expect(unclosedCellAt(t)).toBe(-1);
   });
 

@@ -79,32 +79,30 @@ def test_kv_cost_uses_kv_heads_not_attention_heads():
     assert cost == expected
 
 
-def test_context_window_covers_what_the_app_actually_sends():
-    """The sizing constant must not fall below the app's own prompt caps.
-
-    If settings grow the prompt, a window sized for the old cap would silently
-    truncate; this fails instead.
-    """
+def test_context_window_fits_the_agent():
+    """Every turn runs on the RLM agent, whose prompt (system prompt, catalog,
+    record, conversation and library reads) needs a real window. The old
+    retrieval prompt fitted in 1.5k tokens; the agent does not."""
     from assistant.settings import get_settings
 
-    s = get_settings()
-    # The sidecar sees the context, the query, a system prompt, and must have
-    # room to generate the reply. Four characters per token is the usual
-    # English ratio and is deliberately conservative here.
-    chars = s.llm_prompt_context_chars + s.llm_prompt_query_chars
-    prompt_tokens = chars / 4
-    needed = prompt_tokens + s.llm_max_tokens_rag
-    assert size_llm.DEFAULT_CONTEXT_TOKENS >= needed * 1.5, (
-        f"context {size_llm.DEFAULT_CONTEXT_TOKENS} too small for "
-        f"~{needed:.0f} tokens of prompt+reply"
-    )
+    assert size_llm.DEFAULT_CONTEXT_TOKENS >= size_llm.MIN_AGENT_CONTEXT_TOKENS
+    # The orchestrator never asks for more than its own configured window.
+    assert size_llm.DEFAULT_CONTEXT_TOKENS <= get_settings().rlm_context_length
 
 
-def test_concurrency_beats_context_on_a_big_card(monkeypatch, snapshot):
-    """Sizing a 24 GiB card for full 32k context gave two sequences."""
+def test_a_big_card_gets_the_agent_window_and_concurrency(monkeypatch, snapshot):
+    """Concurrency is bought with what is left after the agent's window, never
+    by shrinking the window below what the agent needs."""
     p = _plan(monkeypatch, snapshot, 24)
-    assert p["max_num_seqs"] >= 10, p
     assert p["max_model_len"] == size_llm.DEFAULT_CONTEXT_TOKENS
+    assert p["max_num_seqs"] > 1, p
+
+
+def test_a_small_card_never_drops_below_the_agent_minimum(monkeypatch, snapshot):
+    monkeypatch.setattr(size_llm, "gpu_memory_bytes", lambda: 12 * 1024**3)
+    monkeypatch.setattr(size_llm, "weights_bytes", lambda p: 8 * 1024**3)
+    p = size_llm.plan(snapshot, 0.90, size_llm.MIN_AGENT_CONTEXT_TOKENS, 1)
+    assert p["max_model_len"] >= size_llm.MIN_AGENT_CONTEXT_TOKENS, p
 
 
 def test_proxy_admission_follows_sidecar_capacity():

@@ -13,11 +13,56 @@ from typing import Any, Callable, Iterator
 from assistant.rlm.knowledge import knowledge_root, write_index
 from assistant.rlm.llm import complete
 from assistant.rlm.memory import LongTermMemory
+from assistant.rlm.prompts import get_prompt
 from assistant.rlm.transcript import TranscriptEntry
 from assistant.rlm.ts_client import ensure_ts_orchestrator, run_turn as ts_run_turn
 from assistant.settings import get_settings
 
 log = logging.getLogger(__name__)
+
+
+def _mostly_latin(text: str) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return True
+    return sum(1 for ch in letters if ch.isascii()) / len(letters) >= 0.7
+
+
+def english_gloss(user_message: str, fallback: str = "") -> str:
+    """The parent's message in English, for searching an English library.
+
+    Written by the model that is already serving the chat. The translation
+    this replaces went to an online service (unreachable from many of the
+    places this runs, and the parent's words left the machine) and fell back
+    to a word-for-word glossary that produced half-translated text; a route
+    chosen from that text is a route chosen from noise.
+    """
+    text = (user_message or "").strip()
+    if not text or _mostly_latin(text):
+        return text
+    try:
+        out = complete(
+            [
+                {"role": "system", "content": get_prompt("rlm/english_gloss.md")},
+                {"role": "user", "content": text},
+            ],
+            max_tokens=max(64, min(600, len(text))),
+            temperature=0.0,
+        ).strip()
+    except Exception as exc:
+        log.warning("english gloss failed: %s", exc)
+        out = ""
+    if out and _mostly_latin(out):
+        return out
+    # No usable translation: a fallback that is not English either is not a gloss.
+    return fallback if fallback and _mostly_latin(fallback) else ""
+
+
+def _is_finding(tool_id: str) -> bool:
+    from assistant.tools.clinical import TOOL_SPECS
+
+    short = tool_id.split(".", 1)[-1]
+    return any(spec.get("name") == short and spec.get("finding") for spec in TOOL_SPECS)
 
 _host: "RlmHost | None" = None
 _host_lock = threading.Lock()
@@ -52,8 +97,13 @@ class RlmHost:
         """Run one RLM turn and return Nestling-shaped chat fields."""
         s = get_settings()
         user_id = owner_user_id or "anonymous"
-        recall = self.memory.recall(en_message or user_message, user_id, workspace_id=None)
-        listed = self.memory.list_facts(user_id)
+        en_message = english_gloss(user_message, en_message) or ""
+        # What is remembered belongs to one child of one account. Keyed on the
+        # account alone, a centile computed for one child was recalled in a
+        # chat about a sibling; with sign-in off every family shared one key.
+        memory_key = f"{user_id}|{child_id}" if child_id else user_id
+        recall = self.memory.recall(en_message or user_message, memory_key, workspace_id=None)
+        listed = self.memory.list_facts(memory_key)
         merged: list[dict] = list(recall.get("items") or [])
         seen_ids = {str(it.get("id")) for it in merged}
         for it in listed:
@@ -67,10 +117,18 @@ class RlmHost:
             )
         gloss = ""
         if user_message and en_message and user_message.strip() != en_message.strip():
-            gloss = (
-                "English gloss for tools only (do not answer in English unless the parent wrote English):\n"
-                + en_message
-            )
+            gloss = en_message
+        # The child's age today, worked out from the record rather than read
+        # back out of prose, so the library can say which age sections apply.
+        child_age_months = None
+        if db is not None and child_id:
+            try:
+                from assistant.rlm.clinical_dispatch import _age_months
+
+                rec = db.get_child(child_id) or {}
+                child_age_months = _age_months(rec.get("date_of_birth"))
+            except Exception as exc:  # the turn still runs without it
+                log.warning("child age unavailable: %s", exc)
         turn_idx = self.next_turn_idx(session_id)
         events: list[dict] = []
 
@@ -87,8 +145,13 @@ class RlmHost:
                 "reply_lang": reply_lang,
                 "child_id": child_id,
                 "child_context": child_context,
+                "child_age_months": child_age_months,
                 "owner_user_id": user_id,
-                "child_db": os.environ.get("NESTLING_CHILD_DB") or "",
+                # The database the app itself has open, so the clinical tools
+                # read the same child record the parent is looking at. It used
+                # to come from an environment variable that is only ever set
+                # in tests, which left the tools without a database.
+                "child_db": str(getattr(db, "path", "") or os.environ.get("NESTLING_CHILD_DB") or ""),
                 "memory_block": recall.get("block") or "",
             }
         )
@@ -130,9 +193,15 @@ class RlmHost:
         if s.rlm_memory_enabled and int(s.rlm_memory_session_limit) == 0:
             try:
                 self.memory.learn_facts(
-                    user_id=user_id,
+                    user_id=memory_key,
                     workspace_id=None,
-                    user_text=user_message,
+                    # Both forms of what the parent wrote: a fact distilled in
+                    # English from a Persian message is still the parent's.
+                    user_text=(
+                        "\n".join([user_message, en_message])
+                        if en_message and en_message.strip() != (user_message or "").strip()
+                        else user_message
+                    ),
                     assistant_text=result.final_text,
                     complete_fn=complete,
                 )
@@ -140,9 +209,10 @@ class RlmHost:
                 log.warning("LTM learn failed: %s", exc)
             for tc in result.tool_calls:
                 name = str(tc.get("name") or "")
-                if name.startswith("clinical.") and tc.get("ok"):
+                # Which results are findings is the tool's own declaration.
+                if name.startswith("clinical.") and tc.get("ok") and _is_finding(name):
                     try:
-                        self.memory.remember_tool_result(user_id, name, tc.get("result"))
+                        self.memory.remember_tool_result(memory_key, name, tc.get("result"))
                     except Exception as exc:
                         log.warning("LTM tool fact failed: %s", exc)
 
@@ -159,22 +229,10 @@ class RlmHost:
                 entry["result"] = tc["result"]
             public_tools.append(entry)
 
+        # The reply is the orchestrator's. Saved facts and the child record
+        # reach the model as context (memory_block, child_context); nothing
+        # here rewrites an answer by matching the question's wording.
         reply = (result.final_text or "").strip()
-        items = recall.get("items") or []
-        if _is_recall_question(user_message):
-            listed = self.memory.list_facts(user_id)
-            seen = {str(it.get("id")) for it in items}
-            for it in listed:
-                if str(it.get("id")) not in seen:
-                    items.append(it)
-                    seen.add(str(it.get("id")))
-        if _is_recall_question(user_message) and items and not _reply_uses_facts(user_message, reply, items):
-            spoken = _spoken_recall(user_message, items)
-            if spoken:
-                reply = spoken
-        named = _spoken_child_name(user_message, child_context, reply)
-        if named:
-            reply = named
 
         return {
             "reply": reply,
@@ -214,9 +272,16 @@ class RlmHost:
                 for t in public_tools
                 if t.get("name")
             ],
-            "memory": {"recalled": recall.get("items") or [], "offline": recall.get("offline")},
+            "memory": {
+                "child_context": child_context,
+                "recalled": recall.get("items") or [],
+                "offline": recall.get("offline"),
+            },
             "rlm": {
                 "engine": (ts_out.get("rlm") or {}).get("engine") or "typescript",
+                "turns": (ts_out.get("rlm") or {}).get("turns") or 1,
+                "reply_via": ts_out.get("reply_via"),
+                "failed": bool(ts_out.get("failed")),
                 "steps": result.steps,
                 "compacted": result.compacted,
                 "compaction_reason": result.compaction_reason,
@@ -235,92 +300,13 @@ class RlmHost:
                     }
                 ],
             },
-            "medical_rag": None,
-            "child_rag": None,
+            "task_board": ts_out.get("task_board"),
         }
 
     def stream_tokens_from_events(self, events: list[dict]) -> Iterator[str]:
         for e in events:
             if e.get("type") == "text_delta" and e.get("text"):
                 yield str(e["text"])
-
-
-def _spoken_recall(question: str, items: list[dict]) -> str:
-    q = (question or "").lower()
-    health = [
-        str(it.get("text") or "").strip()
-        for it in items
-        if it.get("text") and not str(it.get("text")).startswith("Tool ")
-    ]
-    tools = [
-        str(it.get("text") or "").strip()
-        for it in items
-        if str(it.get("text") or "").startswith("Tool ")
-    ]
-    parts: list[str] = []
-    if re.search(r"allerg|peanut|حساسیت", q) and health:
-        hit = next((t for t in health if re.search(r"peanut|allerg|بادام", t, re.I)), health[0])
-        parts.append(hit if hit.endswith(".") else hit + ".")
-    if re.search(r"centile|percentile", q):
-        blob = " ".join(tools + health)
-        m = re.search(r"centile(?:≈|=|:)?\s*([0-9.]+)", blob, re.I)
-        if m:
-            parts.append(f"The weight centile was about {float(m.group(1)):.0f}.")
-    if not parts:
-        parts = [t if t.endswith(".") else t + "." for t in health[:2]]
-    return " ".join(parts)
-
-
-def _spoken_child_name(question: str, child_context: str, reply: str) -> str:
-    if not re.search(r"daughter'?s name|child'?s name|اسم", question or "", re.I):
-        return ""
-    if re.search(r"aria|آریا", reply or "", re.I):
-        return ""
-    ctx = child_context or ""
-    hit = re.search(r"\b(Aria|آریا)\b", ctx, re.I)
-    if hit:
-        return f"Your daughter's name is {hit.group(1)}."
-    first = ctx.strip().split("\n")[0].split(",")[0].strip()
-    if first and 1 <= len(first.split()) <= 4 and not first.lower().startswith("child"):
-        return f"Your daughter's name is {first}."
-    return ""
-
-
-def _is_recall_question(text: str) -> bool:
-    t = text or ""
-    if re.search(r"search\.grep|fs\.read|\bgrep\b|knowledge|guidelines|INDEX\.md", t, re.I):
-        return False
-    return bool(
-        re.search(
-            r"\b(did I tell|what was|after all of that|does .+ have)\b",
-            t,
-            re.I,
-        )
-    )
-
-
-def _reply_uses_facts(question: str, reply: str, items: list[dict]) -> bool:
-    blob = (reply or "").lower()
-    if not blob.strip():
-        return False
-    if re.search(r"```|print\s*\(|fs\.read_file|search\.grep|\[repl", blob):
-        return False
-    if re.search(r"centile|percentile", question or "", re.I) and not re.search(r"\d", reply or ""):
-        return False
-    for it in items:
-        words = [
-            w.lower()
-            for w in re.findall(r"[A-Za-z\u0600-\u06FF]{4,}", str(it.get("text") or ""))
-        ]
-        words = [
-            w
-            for w in words
-            if w not in {"last", "result", "tool", "this", "child", "about", "aria", "named", "parent"}
-        ]
-        hits = sum(1 for w in words[:8] if w in blob)
-        if hits >= 2:
-            return True
-    return False
 
 
 def get_rlm_host() -> RlmHost:

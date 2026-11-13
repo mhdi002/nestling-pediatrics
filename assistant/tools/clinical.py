@@ -1169,12 +1169,34 @@ def get_child_summary(child_id: str, db=None) -> dict[str, Any]:
     }
 
 
+# The parameters that decide which chart applies. They were accepted by the
+# functions and by dispatch_tool but missing from the published specs, so a
+# caller reading the spec could only ever ask for a preterm chart in weeks.
+_AGE_ROUTING_PARAMS = {
+    "age_months": {
+        "type": "number",
+        "description": "Chronological age in months (term children, WHO charts)",
+    },
+    "gestational_age_weeks": {
+        "type": "number",
+        "description": "Gestational age at birth in weeks; under 37 selects the preterm chart",
+    },
+    "chart_standard": {
+        "type": "string",
+        "description": "Force a chart: who_term or intergrowth_preterm (normally chosen automatically)",
+        "enum": ["who_term", "intergrowth_preterm"],
+    },
+}
+
 TOOL_SPECS = [
     {
         "name": "growth_percentile",
+        # The result is a finding about this child, worth knowing next time.
+        "finding": True,
         "description": (
-            "Compute INTERGROWTH-21st preterm growth percentiles/z-scores using official equations. "
-            "Use for weight/length/head circumference at postmenstrual weeks 27-64. Never invent numbers."
+            "Compute a growth centile and z-score for weight, length or head circumference. "
+            "Term children use WHO standards by age in months; preterm children use INTERGROWTH-21st "
+            "by postmenstrual weeks. The chart is chosen from gestational_age_weeks. Never invent numbers."
         ),
         "parameters": {
             "type": "object",
@@ -1191,7 +1213,7 @@ TOOL_SPECS = [
                 },
                 "weeks": {
                     "type": "number",
-                    "description": f"Postmenstrual age in weeks ({WEEKS_MIN}-{WEEKS_MAX})",
+                    "description": f"Postmenstrual age in weeks ({WEEKS_MIN}-{WEEKS_MAX}); preterm charts only",
                     "minimum": WEEKS_MIN,
                     "maximum": WEEKS_MAX,
                 },
@@ -1203,8 +1225,12 @@ TOOL_SPECS = [
                     "type": "number",
                     "description": "Optional requested percentile (0-100 exclusive) to evaluate",
                 },
+                **_AGE_ROUTING_PARAMS,
             },
-            "required": ["sex", "measure", "weeks"],
+            # sex is not listed as required: for a conversation about a known child
+            # it comes from the child's record (assistant/rlm/clinical_dispatch.py),
+            # and a call without either is answered with a readable tool error.
+            "required": ["measure", "value"],
         },
     },
     {
@@ -1229,6 +1255,7 @@ TOOL_SPECS = [
                 },
                 "value": {"type": "number", "description": "Measured value (kg or cm)"},
                 "child_id": {"type": "string", "description": "Optional child id for filename/history"},
+                **_AGE_ROUTING_PARAMS,
                 "history": {
                     "type": "array",
                     "description": "Optional prior points [{weeks, value}, ...]",
@@ -1241,11 +1268,16 @@ TOOL_SPECS = [
                     },
                 },
             },
-            "required": ["sex", "measure", "weeks", "value"],
+            # sex is not listed as required: for a conversation about a known child
+            # it comes from the child's record (assistant/rlm/clinical_dispatch.py),
+            # and a call without either is answered with a readable tool error.
+            "required": ["measure", "value"],
         },
     },
     {
         "name": "score_asq_questionnaire",
+        # The result is a finding about this child, worth knowing next time.
+        "finding": True,
         "description": "Score ASQ domain answers (Yes/Sometimes/Not yet) and flag referral domains.",
         "parameters": {
             "type": "object",
@@ -1264,6 +1296,8 @@ TOOL_SPECS = [
     },
     {
         "name": "score_mchat",
+        # The result is a finding about this child, worth knowing next time.
+        "finding": True,
         "description": "Score M-CHAT-R Yes/No answers and return risk tier (low/medium/high).",
         "parameters": {
             "type": "object",
@@ -1279,21 +1313,22 @@ TOOL_SPECS = [
     },
     {
         "name": "list_asq_questions",
-        "description": "List ASQ questionnaire questions for a given age in months (from data/en or extracted).",
+        "description": "Get the developmental screening questionnaire (Ages & Stages, ASQ) for the child's age: the questions a parent answers to check communication, movement, problem-solving and social development. Use it when the parent asks for developmental screening questions or a development check.",
         "parameters": {
             "type": "object",
             "properties": {
                 "age_months": {
-                    "type": "integer",
-                    "description": "Child age in months for the ASQ form (e.g. 4, 12, 24)",
-                }
+                    "type": "number",
+                    "description": "Child age in months; taken from the child record when left out",
+                },
+                "gestational_age_weeks": _AGE_ROUTING_PARAMS["gestational_age_weeks"],
             },
-            "required": ["age_months"],
+            "required": [],
         },
     },
     {
         "name": "list_mchat_questions",
-        "description": "List all M-CHAT-R screening questions from data/en or extracted.",
+        "description": "Get the autism screening questionnaire for toddlers (M-CHAT-R, for 16 to 30 months): the yes/no questions a parent answers. Use it when the parent asks for autism screening questions.",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -1306,9 +1341,9 @@ TOOL_SPECS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "child_id": {"type": "string", "description": "Child UUID / id"},
+                "child_id": {"type": "string", "description": "Child id; defaults to the child in this conversation"},
             },
-            "required": ["child_id"],
+            "required": [],
         },
     },
 ]

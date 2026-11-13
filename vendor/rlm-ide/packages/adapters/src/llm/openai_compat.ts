@@ -104,6 +104,7 @@ export class OpenAICompatChat implements ChatModelPort {
     };
     if (req.stop?.length) body.stop = req.stop;
     if (req.enableThinking === false) body.chat_template_kwargs = { enable_thinking: false };
+    if (req.jsonSchema) body.response_format = { type: "json_schema", json_schema: { name: req.jsonSchema.name, schema: req.jsonSchema.schema } };
     const ctl = new AbortController();
     const onAbort = () => ctl.abort(req.signal?.reason);
     if (req.signal?.aborted) onAbort();

@@ -59,8 +59,9 @@ def test_only_allowed_models_advertised():
     sid = asst.start_session()
     out = asst.chat(sid, "hello")
     settings = get_settings()
-    assert out["models"]["tool_calling"] == settings.nestling_tool_model
-    assert out["models"]["rag"] == settings.nestling_llm_model
+    # Tools are called from the agent's REPL; the model is the configured one.
+    assert out["models"]["tool_calling"] == "rlm_repl"
+    assert out["models"]["llm"] == settings.nestling_llm_model
     asst.chat_memory.close()
     asst.db.close()
 

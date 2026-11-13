@@ -5,7 +5,7 @@ Add books, charts, or guidelines as files; they appear here on the next refresh.
 The agent should use `fs.list_dir`, `fs.glob`, `fs.read_file`, and `search.grep`
 to find answers — never invent clinical numbers.
 
-Total files: 105
+Total files: 104
 
 ## charts/
 
@@ -69,12 +69,6 @@ Total files: 105
 | path | kind | bytes |
 | --- | --- | ---: |
 | `images/model_weight_boys.png` | image | 89140 |
-
-## knowledge/
-
-| path | kind | bytes |
-| --- | --- | ---: |
-| `knowledge/allergy_peanuts.txt` | markdown | 52 |
 
 ## screening/
 

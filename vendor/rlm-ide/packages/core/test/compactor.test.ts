@@ -128,8 +128,9 @@ describe("RLM transcript units", () => {
 describe("cells", () => {
   it("extracts only repl fences", () => {
     const t = "Let me look.\n```repl\nprint(1)\n```\nand\n```python\nnot_run()\n```";
-    expect(extractCells(t)).toEqual(["print(1)"]);
-    expect(stripCells(t)).toContain("not_run()");
+    // ```python fences run too (see CELL_RE).
+    expect(extractCells(t)).toEqual(["print(1)", "not_run()"]);
+    expect(stripCells(t)).not.toContain("not_run()");
   });
 
   it("filters repl fences from a stream split at arbitrary points", () => {

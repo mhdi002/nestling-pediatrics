@@ -227,6 +227,14 @@ class Kernel:
     @staticmethod
     def _format_ipython_error(exc: BaseException) -> str:
         etype, evalue, tb = type(exc), exc, exc.__traceback__
+        if isinstance(exc, SyntaxError):
+            # A cell that did not parse never ran. Say so in the first word:
+            # the engine tells "never ran, send it again corrected" from
+            # "ran and failed" by this prefix, and a traceback header in front
+            # of it made every unparsed cell look like a failed run.
+            where = f" (line {exc.lineno})" if exc.lineno else ""
+            shown = "".join(traceback.format_exception_only(etype, evalue)).rstrip()
+            return _clip(f"SyntaxError: {exc.msg}{where}" + chr(10) + shown, 6000)
         frames = [f for f in traceback.extract_tb(tb) if f.filename in {"<cell>", "<ipython-input>", "<ipython>"}] or traceback.extract_tb(tb)[-4:]
         lines = traceback.format_list(frames) + traceback.format_exception_only(etype, evalue)
         return _clip("Traceback (most recent call last):\n" + "".join(lines), 6000)

@@ -149,7 +149,7 @@ export class Orchestrator {
 
   // ---------- turns ----------
 
-  async send(args: { chatId: string; text: string; editorContext: EditorContextInput; toolGroups?: string[]; origin?: "user" | "wakeup" }): Promise<{ turnId: string }> {
+  async send(args: { chatId: string; text: string; editorContext: EditorContextInput; toolGroups?: string[]; origin?: "user" | "wakeup"; firstStep?: () => Promise<string | null> }): Promise<{ turnId: string }> {
     if (this.runner.isActive(args.chatId)) throw new Error("A turn is already running in this chat. Stop it first.");
     const chat = await this.d.conversations.getChat(args.chatId);
     if (!chat) throw new Error("This chat no longer exists.");
@@ -174,6 +174,15 @@ export class Orchestrator {
 
   stop(turnId: string): boolean {
     return this.runner.stop(turnId);
+  }
+
+  /** Records the answer the user was actually shown for a finished turn, in the stored turn and in
+   * the live transcript, when the host changed the engine's draft before showing it. */
+  async amendAnswer(chatId: string, turnId: string, text: string): Promise<void> {
+    const turn = (await this.d.conversations.getTurns(chatId)).find((t) => t.id === turnId);
+    if (!turn) return;
+    await this.d.conversations.updateTurn(turnId, { assistantText: text });
+    await this.engine.amendAnswer(chatId, turn.idx, text);
   }
 
   // ---------- scheduled wake-ups ----------
@@ -282,7 +291,7 @@ export class Orchestrator {
   private async runTurn(
     turn: StoredTurn,
     prior: StoredTurn[],
-    args: { chatId: string; text: string; editorContext: EditorContextInput; toolGroups?: string[]; origin?: "user" | "wakeup" },
+    args: { chatId: string; text: string; editorContext: EditorContextInput; toolGroups?: string[]; origin?: "user" | "wakeup"; firstStep?: () => Promise<string | null> },
     signal: AbortSignal,
     emit: (e: TurnEventBody) => void,
   ): Promise<void> {
@@ -355,6 +364,7 @@ export class Orchestrator {
         signal,
         emit: capture,
         taskBlock: boards && toolIds.has("task.plan") ? () => boards.render(args.chatId) : undefined,
+        firstStep: args.origin === "wakeup" ? undefined : args.firstStep,
         toolScope: (agentPath) => ({
           turnId: turn.id,
           chatId: args.chatId,
@@ -416,7 +426,7 @@ export class Orchestrator {
   /** Pinned facts are deterministic: the first message of a chat seeds the goal; users edit the rest. */
   private async pinnedBlock(chatId: string, text: string, firstTurn: boolean): Promise<string> {
     let facts = await this.d.pinned.list(chatId);
-    if (firstTurn && !facts.some((f) => f.kind === "goal")) {
+    if (firstTurn && this.d.settings.get().rlm.pinFirstMessageAsGoal && !facts.some((f) => f.kind === "goal")) {
       await this.d.pinned.upsert({ chatId, kind: "goal", text: clipChars(text.trim(), 400) });
       facts = await this.d.pinned.list(chatId);
     }

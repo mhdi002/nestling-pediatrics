@@ -21,6 +21,8 @@ from __future__ import annotations
 import re
 
 _CURRENT_USER = "[CURRENT_USER]"
+_MEMORY_MARKERS = re.compile(r"\[SESSION_SUMMARY\]|\[RECENT_CHAT\]|\[SESSION_SLOTS\]|\[CHILD_MEMORY\]")
+_QUESTION_META_LINE = re.compile(r"(?im)^(known |born preterm|follow-up \(original\)|use only this age).*$")
 _META_LINE = re.compile(r"^\s*Known [^\n]*$", re.IGNORECASE | re.MULTILINE)
 
 PARENT_NOTES_HEADING = "ABOUT THIS CHILD"
@@ -78,9 +80,12 @@ def memory_context(query: str) -> str:
 
 def parent_question(query: str) -> str:
     """The parent's own words, free of memory blocks and injected metadata."""
-    from assistant.websearch import current_user_query
-
-    return current_user_query(query)
+    text = query or ""
+    if _CURRENT_USER in text:
+        text = text.split(_CURRENT_USER, 1)[-1]
+    text = _MEMORY_MARKERS.split(text, maxsplit=1)[0]
+    text = _QUESTION_META_LINE.sub(" ", text)
+    return " ".join(text.split()).strip()
 
 
 def compose_context(memory: str, care_notes: str) -> str:

@@ -1844,3 +1844,24 @@ textarea:focus {
   border: 1px solid rgba(185, 28, 28, 0.3);
 }
 .chat-history-clear:disabled { opacity: 0.5; cursor: default; }
+
+/* The plan a multi-part request was carried out as. */
+.tool-block.task-board ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.task-step::before {
+  content: "\25CB";
+  display: inline-block;
+  width: 1.4em;
+}
+.task-step.done::before {
+  content: "\2713";
+}
+.task-step.blocked::before,
+.task-step.skipped::before {
+  content: "\2013";
+}

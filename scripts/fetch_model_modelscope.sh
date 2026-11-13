@@ -18,7 +18,7 @@
 # Usage: scripts/fetch_model_modelscope.sh [HF_CACHE_DIR]
 set -Eeuo pipefail
 
-MODEL_ID="${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}"
+MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}"
 HF_CACHE="${1:-${NESTLING_HF_CACHE_HOST:-$HOME/.cache/huggingface}}"
 JOBS="${NESTLING_MODEL_FETCH_JOBS:-4}"
 BASE="${NESTLING_MODELSCOPE_BASE:-https://www.modelscope.cn}"

@@ -14,63 +14,162 @@ import type {
 import type { TaskBoard } from "@rlm/core";
 import type { StoredTurn } from "@rlm/core";
 import { newId } from "@rlm/core";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+/** A keyed set of records that survives a restart of this process.
+ *
+ * Given a directory, every record is one JSON file in it, written whole and renamed into place, so
+ * a crash leaves the old file or the new one and never half of either. A record is read from disk
+ * the first time it is asked for. Without a directory the shelf is memory only, which is what a
+ * test wants. A conversation, its compacted transcript and its task board all sit on shelves: the
+ * parent's chat must still be there after the orchestrator is redeployed or crashes. */
+export class Shelf<V> {
+  private readonly cache = new Map<string, V>();
+  private listed = false;
+
+  constructor(private readonly dir?: string) {
+    if (dir) mkdirSync(dir, { recursive: true });
+  }
+
+  private file(key: string): string {
+    // Keys come from outside (a session id); the file name must not.
+    return path.join(this.dir!, `${createHash("sha256").update(key).digest("hex").slice(0, 40)}.json`);
+  }
+
+  get(key: string): V | undefined {
+    if (this.cache.has(key)) return this.cache.get(key);
+    if (!this.dir) return undefined;
+    try {
+      const row = JSON.parse(readFileSync(this.file(key), "utf8")) as { key: string; value: V };
+      this.cache.set(key, row.value);
+      return row.value;
+    } catch {
+      return undefined;
+    }
+  }
+
+  set(key: string, value: V): void {
+    this.cache.set(key, value);
+    if (!this.dir) return;
+    const file = this.file(key);
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ key, value }));
+    renameSync(tmp, file);
+  }
+
+  delete(key: string): void {
+    this.cache.delete(key);
+    if (this.dir) rmSync(this.file(key), { force: true });
+  }
+
+  /** Every record, reading the ones not yet in memory. */
+  values(): V[] {
+    if (this.dir && !this.listed) {
+      for (const name of readdirSync(this.dir)) {
+        if (!name.endsWith(".json")) continue;
+        try {
+          const row = JSON.parse(readFileSync(path.join(this.dir, name), "utf8")) as { key: string; value: V };
+          if (!this.cache.has(row.key)) this.cache.set(row.key, row.value);
+        } catch {
+          /* a file that does not parse is not a record */
+        }
+      }
+      this.listed = true;
+    }
+    return [...this.cache.values()];
+  }
+}
+
+const sub = (dir: string | undefined, name: string) => (dir ? path.join(dir, name) : undefined);
+
+interface ChatRecord {
+  chat: ChatSummary;
+  turns: StoredTurn[];
+}
 
 export class MemoryConversationRepo implements ConversationRepo {
-  private readonly chats = new Map<string, ChatSummary>();
-  private readonly turns = new Map<string, StoredTurn[]>();
+  private readonly chats: Shelf<ChatRecord>;
+  private readonly aliases: Shelf<string>;
+  /** Events are the live trace of a turn, read while it runs; they are not kept across restarts. */
   private readonly events = new Map<string, unknown[]>();
-  private readonly aliases = new Map<string, string>();
+  private readonly turnChat = new Map<string, string>();
+
+  constructor(dir?: string) {
+    this.chats = new Shelf<ChatRecord>(sub(dir, "chats"));
+    this.aliases = new Shelf<string>(sub(dir, "aliases"));
+  }
 
   bindAlias(externalId: string, chatId: string): void {
     this.aliases.set(externalId, chatId);
   }
 
   resolve(externalId: string): string | undefined {
-    return this.aliases.get(externalId);
+    const id = this.aliases.get(externalId);
+    return id && this.chats.get(id) ? id : undefined;
+  }
+
+  private record(chatId: string): ChatRecord | undefined {
+    const r = this.chats.get(chatId);
+    if (r) for (const t of r.turns) this.turnChat.set(t.id, chatId);
+    return r;
+  }
+
+  private recordOfTurn(turnId: string): ChatRecord | undefined {
+    const known = this.turnChat.get(turnId);
+    if (known) return this.record(known);
+    return this.chats.values().find((r) => r.turns.some((t) => t.id === turnId));
   }
 
   async createChat(title: string, workspaceId: string | null): Promise<ChatSummary> {
     const now = Date.now();
     const chat: ChatSummary = { id: newId("chat"), title, createdAt: now, updatedAt: now, workspaceId };
-    this.chats.set(chat.id, chat);
-    this.turns.set(chat.id, []);
+    this.chats.set(chat.id, { chat, turns: [] });
     return chat;
   }
 
   async listChats(workspaceId?: string | null): Promise<ChatSummary[]> {
-    return [...this.chats.values()].filter((c) => workspaceId === undefined || c.workspaceId === workspaceId);
+    return this.chats
+      .values()
+      .map((r) => r.chat)
+      .filter((c) => workspaceId === undefined || c.workspaceId === workspaceId);
   }
 
   async getChat(chatId: string): Promise<ChatSummary | null> {
-    return this.chats.get(chatId) ?? null;
+    return this.record(chatId)?.chat ?? null;
+  }
+
+  private touch(chatId: string, patch: Partial<ChatSummary>): void {
+    const r = this.record(chatId);
+    if (r) this.chats.set(chatId, { ...r, chat: { ...r.chat, ...patch, updatedAt: Date.now() } });
   }
 
   async setChatWorkspace(chatId: string, workspaceId: string): Promise<void> {
-    const c = this.chats.get(chatId);
-    if (c) this.chats.set(chatId, { ...c, workspaceId, updatedAt: Date.now() });
+    this.touch(chatId, { workspaceId });
   }
 
   async renameChat(chatId: string, title: string): Promise<void> {
-    const c = this.chats.get(chatId);
-    if (c) this.chats.set(chatId, { ...c, title, updatedAt: Date.now() });
+    this.touch(chatId, { title });
   }
 
   async deleteChat(chatId: string): Promise<void> {
     this.chats.delete(chatId);
-    this.turns.delete(chatId);
   }
 
   async getTurns(chatId: string): Promise<StoredTurn[]> {
-    return [...(this.turns.get(chatId) ?? [])];
+    return [...(this.record(chatId)?.turns ?? [])];
   }
 
   async appendTurn(turn: Omit<StoredTurn, "idx">): Promise<StoredTurn> {
-    const list = this.turns.get(turn.chatId) ?? [];
-    const stored: StoredTurn = { ...turn, idx: list.length, meta: turn.meta ?? {} };
-    list.push(stored);
-    this.turns.set(turn.chatId, list);
-    const chat = this.chats.get(turn.chatId);
-    if (chat) this.chats.set(turn.chatId, { ...chat, updatedAt: Date.now() });
+    const r = this.record(turn.chatId);
+    const turns = r?.turns ?? [];
+    const stored: StoredTurn = { ...turn, idx: turns.length, meta: turn.meta ?? {} };
+    turns.push(stored);
+    this.turnChat.set(stored.id, turn.chatId);
+    const now = Date.now();
+    const chat = r?.chat ?? { id: turn.chatId, title: "", createdAt: now, updatedAt: now, workspaceId: null };
+    this.chats.set(turn.chatId, { chat: { ...chat, updatedAt: now }, turns });
     return stored;
   }
 
@@ -78,15 +177,14 @@ export class MemoryConversationRepo implements ConversationRepo {
     turnId: string,
     patch: Partial<Pick<StoredTurn, "assistantText" | "status">> & { meta?: StoredTurn["meta"]; events?: unknown[] },
   ): Promise<void> {
-    for (const list of this.turns.values()) {
-      const t = list.find((x) => x.id === turnId);
-      if (!t) continue;
-      if (patch.assistantText !== undefined) t.assistantText = patch.assistantText;
-      if (patch.status !== undefined) t.status = patch.status;
-      if (patch.meta) t.meta = { ...t.meta, ...patch.meta };
-      if (patch.events) this.events.set(turnId, patch.events);
-      return;
-    }
+    if (patch.events) this.events.set(turnId, patch.events);
+    const r = this.recordOfTurn(turnId);
+    const t = r?.turns.find((x) => x.id === turnId);
+    if (!r || !t) return;
+    if (patch.assistantText !== undefined) t.assistantText = patch.assistantText;
+    if (patch.status !== undefined) t.status = patch.status;
+    if (patch.meta) t.meta = { ...t.meta, ...patch.meta };
+    this.chats.set(r.chat.id, r);
   }
 
   async getTurnEvents(turnId: string): Promise<unknown[]> {
@@ -94,15 +192,19 @@ export class MemoryConversationRepo implements ConversationRepo {
   }
 
   async setFeedback(turnId: string, value: "up" | "down" | null): Promise<void> {
-    for (const list of this.turns.values()) {
-      const t = list.find((x) => x.id === turnId);
-      if (t) t.meta = { ...t.meta, feedback: value };
-    }
+    const r = this.recordOfTurn(turnId);
+    const t = r?.turns.find((x) => x.id === turnId);
+    if (!r || !t) return;
+    t.meta = { ...t.meta, feedback: value };
+    this.chats.set(r.chat.id, r);
   }
 }
 
 export class MemoryPinned implements PinnedFactsRepo {
-  private readonly rows = new Map<string, PinnedFactView[]>();
+  private readonly rows: Shelf<PinnedFactView[]>;
+  constructor(dir?: string) {
+    this.rows = new Shelf<PinnedFactView[]>(sub(dir, "pinned"));
+  }
   async list(chatId: string): Promise<PinnedFactView[]> {
     return [...(this.rows.get(chatId) ?? [])];
   }
@@ -116,7 +218,10 @@ export class MemoryPinned implements PinnedFactsRepo {
     return row;
   }
   async delete(id: string): Promise<void> {
-    for (const [k, list] of this.rows) this.rows.set(k, list.filter((x) => x.id !== id));
+    for (const list of this.rows.values()) {
+      const chatId = list.find((x) => x.id === id)?.chatId;
+      if (chatId) this.rows.set(chatId, list.filter((x) => x.id !== id));
+    }
   }
 }
 
@@ -138,7 +243,10 @@ export class MemoryEdits implements EditJournal {
 }
 
 export class MemoryTaskBoards implements TaskBoardStore {
-  private readonly rows = new Map<string, TaskBoard>();
+  private readonly rows: Shelf<TaskBoard>;
+  constructor(dir?: string) {
+    this.rows = new Shelf<TaskBoard>(sub(dir, "boards"));
+  }
   async load(chatId: string): Promise<TaskBoard | null> {
     return this.rows.get(chatId) ?? null;
   }
@@ -149,12 +257,15 @@ export class MemoryTaskBoards implements TaskBoardStore {
     this.rows.delete(chatId);
   }
   async list(): Promise<TaskBoard[]> {
-    return [...this.rows.values()];
+    return this.rows.values();
   }
 }
 
 export class MemorySnapshots implements TranscriptSnapshotStore {
-  private readonly rows = new Map<string, TranscriptSnapshot>();
+  private readonly rows: Shelf<TranscriptSnapshot>;
+  constructor(dir?: string) {
+    this.rows = new Shelf<TranscriptSnapshot>(sub(dir, "snapshots"));
+  }
   async load(chatId: string): Promise<TranscriptSnapshot | null> {
     return this.rows.get(chatId) ?? null;
   }

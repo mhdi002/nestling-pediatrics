@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""End-to-end build: re-extract → translate → index RAG → cleanup temps."""
+"""End-to-end build: re-extract → translate → cleanup temps.
+
+The care library is read as files by the RLM orchestrator; nothing is indexed."""
 
 from __future__ import annotations
 
@@ -46,12 +48,6 @@ def main():
     run([sys.executable, "extract_texts.py"])
     run([sys.executable, "verify_equations.py"])
     run([sys.executable, "-m", "assistant.translate"])
-    # Build medical RAG index
-    from assistant.agent.orchestrator import ParentAssistant
-
-    asst = ParentAssistant()
-    n = asst.refresh_medical_index()
-    print(f"Medical RAG chunks indexed: {n}")
     cleanup()
     print("Build complete.")
 

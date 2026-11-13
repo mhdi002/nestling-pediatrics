@@ -9,7 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-EXTRACTED = ROOT / "extracted" / "asq"
+# The questionnaires the screening tools read (bilingual: *_en / *_fa fields).
+EXTRACTED = ROOT / "data" / "en" / "asq"
 REQUIRED = {
     "communication",
     "gross_motor",
@@ -35,5 +36,5 @@ def test_questions_have_options():
     data = json.loads((EXTRACTED / "4m.json").read_text(encoding="utf-8"))
     for dom in data["domains"]:
         for q in dom["questions"]:
-            assert q["text"].strip()
-            assert len(q["options"]) >= 2
+            assert q["text_en"].strip() and q["text_fa"].strip()
+            assert len(q["options_en"]) >= 2

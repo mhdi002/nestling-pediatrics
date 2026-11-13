@@ -46,30 +46,6 @@ def mchat_config() -> dict[str, Any]:
     return _load("mchat.json")
 
 
-@lru_cache
-def care_topics() -> dict[str, Any]:
-    """Keyword/pattern data that routes parent questions to a care domain."""
-    return _load_yaml("care_topics.yaml")
-
-
-@lru_cache
-def websearch_config() -> dict[str, Any]:
-    """Provider definitions and safety patterns for the web-search fallback."""
-    return _load_yaml("websearch.yaml")
-
-
-@lru_cache
-def knowledge_audience() -> dict[str, Any]:
-    """Per-source provenance and the person markers used to scope chunks."""
-    return _load_yaml("knowledge_audience.yaml")
-
-
-@lru_cache
-def urgency_signs() -> dict[str, Any]:
-    """Red-flag classes and the closed word classes the urgency intent uses."""
-    return _load_yaml("urgency_signs.yaml")
-
-
 def weeks_per_month() -> float:
     b = clinical_bounds()
     if b.get("use_legacy_weeks_per_month", True):
@@ -82,9 +58,6 @@ def clear_refdata_cache() -> None:
     clinical_bounds.cache_clear()
     asq_scoring.cache_clear()
     mchat_config.cache_clear()
-    care_topics.cache_clear()
-    knowledge_audience.cache_clear()
-    urgency_signs.cache_clear()
 
 
 @lru_cache

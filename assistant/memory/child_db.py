@@ -354,7 +354,7 @@ class ChildMemoryDB:
 
         Reuses the `events` timeline rather than adding a parallel store: events
         are already FK'd to `children` (so ownership is inherited), already
-        replayed by timeline_documents() into child RAG, and already share this
+        replayed into the child's context, and already share this
         connection's lock. Returns None when the child is not readable by
         `owner_user_id` — memory must never cross accounts.
         """
@@ -407,7 +407,9 @@ class ChildMemoryDB:
         return None
 
     @_synchronized
-    def child_context_text(self, child_id: str, owner_user_id: str | None = None) -> str:
+    def child_context_text(
+        self, child_id: str, owner_user_id: str | None = None, *, include_events: bool = True
+    ) -> str:
         """
         Compact cross-session digest of what is already known about a child:
         remembered conversation notes, latest growth, recent screenings.
@@ -465,7 +467,11 @@ class ChildMemoryDB:
                 f"{(s.get('result') or {}).get('summary') or (s.get('result') or {})}"
             )
         cap = settings.nestling_child_memory_event_chars
-        for e in self.recent_events(child_id, kinds=(settings.nestling_child_memory_kind,)):
+        # The record is what is known about the child. Lines quoting what the
+        # parent asked in earlier chats are not that; a caller that keeps its
+        # own memory of the conversation leaves them out, because a model
+        # shown old questions under "Child record" sets about answering them.
+        for e in () if not include_events else self.recent_events(child_id, kinds=(settings.nestling_child_memory_kind,)):
             lines.append(f"Earlier: {(e.get('summary') or '')[:cap]}")
         text = "\n".join(l for l in lines if l.strip())
         return text[: settings.nestling_child_memory_max_chars]
@@ -524,62 +530,6 @@ class ChildMemoryDB:
             "recent_screenings": screens[-RECENT_SCREENINGS:],
         }
 
-    @_synchronized
-    def timeline_documents(self, child_id: str) -> list[dict]:
-        """Flatten child history into RAG documents for precision memory retrieval."""
-        child = self.get_child(child_id)
-        if not child:
-            return []
-        docs = [
-            {
-                "id": f"{child_id}_profile",
-                "collection": "child",
-                "child_id": child_id,
-                "title": f"Child profile: {child['name']}",
-                "text": (
-                    f"Child {child['name']} ({child['sex']}), DOB {child.get('date_of_birth')}, "
-                    f"born at {child.get('gestational_age_weeks')} weeks gestation. "
-                    f"Notes: {child.get('notes')}"
-                ),
-            }
-        ]
-        for g in self.growth_history(child_id):
-            docs.append(
-                {
-                    "id": f"growth_{g['id']}",
-                    "collection": "child",
-                    "child_id": child_id,
-                    "title": f"Growth {g['measure']} @ {g['weeks']}w",
-                    "text": (
-                        f"Measured {g['measure']}={g['value']} at {g['weeks']} postmenstrual weeks; "
-                        f"z={g.get('z_score')}, centile={g.get('centile')}, status={g.get('track_status')}"
-                    ),
-                }
-            )
-        for s in self.screenings(child_id):
-            docs.append(
-                {
-                    "id": f"screen_{s['id']}",
-                    "collection": "child",
-                    "child_id": child_id,
-                    "title": f"Screening {s['instrument']}",
-                    "text": f"{s['instrument']} at {s.get('age_months')} months: {s['result']}",
-                }
-            )
-        for e in self.conn.execute(
-            "SELECT * FROM events WHERE child_id=? ORDER BY recorded_at", (child_id,)
-        ):
-            d = dict(e)
-            docs.append(
-                {
-                    "id": f"event_{d['id']}",
-                    "collection": "child",
-                    "child_id": child_id,
-                    "title": f"Event {d['kind']}",
-                    "text": d["summary"],
-                }
-            )
-        return docs
 
     @_synchronized
     def close(self):

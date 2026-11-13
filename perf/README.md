@@ -19,8 +19,7 @@ otherwise every chat turn just measures GPU inference:
 
 ```powershell
 $env:NESTLING_LOAD_MODELS = "0"
-$env:NESTLING_USE_LLM     = "0"     # extractive RAG fallback, no sidecar
-$env:NESTLING_USE_DENSE   = "0"     # skip bge-m3 download/embedding
+$env:NESTLING_USE_LLM     = "0"     # no sidecar: measures the app tier only
 $env:MPLBACKEND           = "Agg"
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
@@ -95,16 +94,13 @@ Measures, in-process and without HTTP:
 - SQLite journal mode / `synchronous` / `busy_timeout` as actually configured
 - write throughput for shared-connection vs per-thread+WAL, under N threads
 - matplotlib chart cost per render, serial vs concurrent (thread scaling)
-- BM25 query cost and index build cost
 - full `assistant.chat()` turn cost and RSS growth
-- module-level caches with no eviction
 
 ## Profiling
 
 ```powershell
 python -m perf.profile_hotpath --target chat  --iterations 20
 python -m perf.profile_hotpath --target chart --iterations 20
-python -m perf.profile_hotpath --target bm25  --iterations 50
 ```
 
 Or sample the live server without restarting it:

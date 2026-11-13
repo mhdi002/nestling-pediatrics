@@ -540,7 +540,7 @@ async def chat_vision(
     ui_lang: str | None = Form(None),
     image: UploadFile = File(...),
 ):
-    """Parent photo + optional caption -> vision model + medically grounded RAG response."""
+    """Parent photo + optional caption -> vision model response (never a diagnosis)."""
     settings = get_settings()
     allowed = settings.allowed_upload_types
     content_type = (image.content_type or "").split(";")[0].strip().lower()
@@ -594,7 +594,6 @@ async def chat_vision(
             "upload": fname,
             "disclaimer": out.get("disclaimer"),
         },
-        "medical_rag": out.get("medical_rag"),
         "tool_results": [],
     }
 

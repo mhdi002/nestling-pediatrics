@@ -14,7 +14,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from assistant.config import EN_DIR, EXTRACTED, KNOWLEDGE_DIR
+from assistant.config import EN_DIR, EXTRACTED
 
 # Curated glossary for UI labels / domains (always exact).
 GLOSSARY = {
@@ -192,67 +192,6 @@ def translate_info(text: str) -> str:
     return "\n\n".join(out)
 
 
-def build_knowledge_chunks(asq_en: list[dict], mchat_en: dict | None, info_en: str) -> list[dict]:
-    chunks = []
-    if info_en:
-        for i, para in enumerate(info_en.split("\n\n")):
-            if len(para.strip()) < 40:
-                continue
-            chunks.append(
-                {
-                    "id": f"info_{i:04d}",
-                    "source": "info.txt",
-                    "collection": "medical",
-                    "title": "Child growth & parenting guidance",
-                    "text": para.strip(),
-                }
-            )
-    for asq in asq_en:
-        age = asq.get("age_months")
-        for dom in asq.get("domains", []):
-            if dom["id"] == "overall":
-                continue
-            qtexts = " ".join(f"Q{q['id']}: {q['text_en']}" for q in dom["questions"])
-            chunks.append(
-                {
-                    "id": f"asq_{age}m_{dom['id']}",
-                    "source": asq.get("source"),
-                    "collection": "medical",
-                    "title": f"ASQ {age} months — {dom['title_en']}",
-                    "text": f"Developmental screening domain {dom['title_en']} at {age} months. "
-                    f"Items: {qtexts}",
-                }
-            )
-    if mchat_en:
-        for q in mchat_en.get("questions", []):
-            chunks.append(
-                {
-                    "id": f"mchat_q{q['id']}",
-                    "source": mchat_en.get("source"),
-                    "collection": "medical",
-                    "title": f"M-CHAT-R item {q['id']}",
-                    "text": q["text_en"],
-                }
-            )
-    # Growth equation documentation chunk
-    chunks.append(
-        {
-            "id": "intergrowth_docs",
-            "source": "intergrowth_preterm_equations.py",
-            "collection": "medical",
-            "title": "INTERGROWTH-21st preterm growth standards",
-            "text": (
-                "INTERGROWTH-21st postnatal growth standards for preterm infants "
-                "(Villar et al., Lancet Glob Health 2015). Weight (kg), length (cm), "
-                "and head circumference (cm) for boys and girls from 27 to 64 postmenstrual weeks. "
-                "Chart percentiles: 3rd, 10th, 50th, 90th, 97th. Always compute with "
-                "growth equation tools; never invent numbers."
-            ),
-        }
-    )
-    return chunks
-
-
 def verify_translation(obj: Any, path: str = "") -> list[str]:
     """Return list of issues (empty = OK)."""
     issues = []
@@ -278,7 +217,6 @@ def main():
     EN_DIR.mkdir(parents=True, exist_ok=True)
     (EN_DIR / "asq").mkdir(exist_ok=True)
     (EN_DIR / "screens").mkdir(exist_ok=True)
-    KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
 
     kind, _ = _init_backend()
     print(f"Translation backend: {kind}")
@@ -311,19 +249,13 @@ def main():
     info_en = translate_info(info_fa)
     (EN_DIR / "info_en.md").write_text("# Child growth notes (English)\n\n" + info_en, encoding="utf-8")
 
-    # Also ship a curated high-quality English medical brief for RAG accuracy
-    curated = CURATED_MEDICAL_EN
-    (EN_DIR / "curated_medical_en.md").write_text(curated, encoding="utf-8")
-
-    chunks = build_knowledge_chunks(asq_en_list, mchat_en, info_en + "\n\n" + curated)
-    (KNOWLEDGE_DIR / "chunks.json").write_text(
-        json.dumps(chunks, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    # The curated English brief ships alongside; the agent reads it from the
+    # care library like any other file.
+    (EN_DIR / "curated_medical_en.md").write_text(CURATED_MEDICAL_EN, encoding="utf-8")
     report = {
         "backend": kind,
         "asq_files": len(asq_en_list),
         "mchat_questions": len(mchat_en["questions"]) if mchat_en else 0,
-        "knowledge_chunks": len(chunks),
         "pending_fa_markers": info_en.count("[FA→EN pending"),
     }
     (EN_DIR / "translation_report.json").write_text(

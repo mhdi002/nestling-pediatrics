@@ -1,0 +1,1 @@
+Your last message ran no ```repl cell, so it was written without looking anything up. If the request needs facts from the project files or a tool result, reply now with ONLY one ```repl cell that gets them. If it truly needs no lookup (a greeting, thanks, or something already established in this conversation), repeat your answer.

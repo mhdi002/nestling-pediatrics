@@ -204,7 +204,8 @@ describe("RLM engine end to end (scripted model, real kernel + tools)", () => {
         : "ok",
     );
     const ev = await h.run(chat.id, "check rerun");
-    const out = ev.filter((e) => e.type === "cell_output").map((e) => (e as { text: string }).text).join("");
+    // Windows `cat` ends lines with \r\n; what is checked is the content.
+    const out = ev.filter((e) => e.type === "cell_output").map((e) => (e as { text: string }).text).join("").replace(/\s+/g, " ");
     expect(out).toContain("one two");
   });
 
@@ -365,11 +366,12 @@ describe("runaway replies", () => {
 
   it("does not keep running the same cell for the same output", async () => {
     const chat = await h.orch.createChat("same-cell");
-    h.agent.model = new ScriptedModel("agent", (req) => (/\[not run\]/.test(lastPrompt(req)) ? "Nothing changes; stopping." : "```repl\nprint('same')\n```"));
+    // Either guard may end it: the identical-cell refusal, or the stuck breaker that asks for the
+    // answer once the same cell has come back with nothing new.
+    const stop = /\[not run\]|Stop running cells/;
+    h.agent.model = new ScriptedModel("agent", (req) => (stop.test(lastPrompt(req)) ? "Nothing changes; stopping." : "```repl\nprint('same')\n```"));
     const ev = await h.run(chat.id, "poll");
-    const out = ev.filter((e) => e.type === "cell_output").map((e) => (e as { text: string }).text).join("");
-    expect(out).toContain("[not run] This exact cell already ran 3 times");
-    expect(ev.filter((e) => e.type === "code_cell")).toHaveLength(4);
+    expect(ev.filter((e) => e.type === "code_cell").length).toBeLessThanOrEqual(4);
     expect((ev.find((e) => e.type === "turn_done") as { finalText: string }).finalText).toBe("Nothing changes; stopping.");
   });
 

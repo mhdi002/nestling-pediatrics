@@ -1,5 +1,5 @@
 # Nestling — dockerized app tier behind an nginx load balancer,
-# plus an optional local MiniCPM vLLM sidecar (profile: llm).
+# plus an optional local Qwen3.5-2B vLLM sidecar (profile: llm).
 #
 #   docker compose up -d --build                 app + nginx
 #   docker compose up -d --scale nestling=3      3 app replicas (see caveat below)
@@ -128,7 +128,7 @@ services:
       - NESTLING_CHAT_QUEUE_SLACK=${NESTLING_CHAT_QUEUE_SLACK:-0}
       - NESTLING_CHAT_ACQUIRE_TIMEOUT_S=${NESTLING_CHAT_ACQUIRE_TIMEOUT_S:-20}
       - NESTLING_WORKER_THREADS=${NESTLING_WORKER_THREADS:-0}
-      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}
+      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}
       # Follows the text model unless set. That is right when one checkpoint
       # serves both, and wrong when it does not: MiniCPM5-1B is text-only, so
       # naming it here would have the app ask a model that cannot see for a
@@ -136,13 +136,8 @@ services:
       # assistant/llm/qwen_client.py sends a one-pixel image and reports vision
       # unavailable when the served model refuses it, so a text-only model
       # degrades to caption-plus-care-notes instead of pretending to look.
-      - NESTLING_VISION_MODEL=${NESTLING_VISION_MODEL:-${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}}
+      - NESTLING_VISION_MODEL=${NESTLING_VISION_MODEL:-${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}}
       - NESTLING_LLM_MODEL_PATH=${NESTLING_LLM_MODEL_PATH:-}
-      # Off unless the operator opts in: deploy.sh provisions the LLM weights
-      # only, so on a fresh host the embedding model is not cached and dense
-      # retrieval cannot succeed -- it would just fail slowly on the first
-      # chat. Set NESTLING_USE_DENSE=1 once the embedding weights are cached.
-      - NESTLING_USE_DENSE=${NESTLING_USE_DENSE:-0}
       - NESTLING_EMBEDDING_MODEL=${NESTLING_EMBEDDING_MODEL:-BAAI/bge-m3}
       # --- API ---
       - NESTLING_API_KEY=${NESTLING_API_KEY:-}
@@ -186,7 +181,7 @@ services:
     volumes:
       - ${NESTLING_HF_CACHE_HOST:-${HOME}/.cache/huggingface}:/root/.cache/huggingface:ro
     environment:
-      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}
+      - NESTLING_LLM_MODEL=${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}
       - NESTLING_LLM_USE_MODEL_ID=0
       - HF_HOME=/root/.cache/huggingface
       - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
@@ -197,7 +192,7 @@ services:
       # Sized for an 8 GB consumer GPU. VLLM_MAX_NUM_SEQS=1 means the sidecar
       # serves ONE request at a time — it is the hard concurrency limit of the
       # whole product when NESTLING_USE_LLM=1. See docs/PERFORMANCE.md.
-      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-1536}
+      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-8192}
       - VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.86}
       - VLLM_TENSOR_PARALLEL_SIZE=${VLLM_TENSOR_PARALLEL_SIZE:-1}
       - VLLM_ENFORCE_EAGER=${VLLM_ENFORCE_EAGER:-1}

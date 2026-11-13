@@ -1,27 +1,57 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import type { ToolImpl } from "@rlm/core";
 
-const NAMES = [
-  "growth_percentile",
-  "overlay_growth_on_chart",
-  "score_asq_questionnaire",
-  "score_mchat",
-  "list_asq_questions",
-  "list_mchat_questions",
-  "get_child_summary",
-] as const;
+/** What a turn knows about whose child it is for. Keyed by chat, never held in process-wide state:
+ * two parents chatting at once must not see each other's child through a shared variable. */
+export interface ChildScope {
+  childId: string;
+  childDb: string;
+  /** The child's age today, when the record has a date of birth. */
+  ageMonths?: number;
+}
+const scopes = new Map<string, ChildScope>();
 
-export function runClinical(name: string, args: Record<string, unknown>): Promise<unknown> {
-  return runDispatch(name, args, { NESTLING_CHILD_DB: process.env.NESTLING_CHILD_DB ?? "" });
+export function setChildScope(chatId: string, scope: ChildScope): void {
+  scopes.set(chatId, scope);
 }
 
-function runDispatch(name: string, args: Record<string, unknown>, env: NodeJS.ProcessEnv): Promise<unknown> {
-  const root = process.env.NESTLING_ROOT || path.resolve(import.meta.dirname, "../../../../..");
-  const script = path.join(root, "assistant/rlm/clinical_dispatch.py");
-  const py = process.env.RLM_PYTHON || process.env.NESTLING_PYTHON || "python3";
+export function childScope(chatId: string): ChildScope | undefined {
+  return scopes.get(chatId);
+}
+
+function root(): string {
+  return process.env.NESTLING_ROOT || path.resolve(import.meta.dirname, "../../../../..");
+}
+
+function python(): string {
+  return process.env.RLM_PYTHON || process.env.NESTLING_PYTHON || "python";
+}
+
+function script(): string {
+  return path.join(root(), "assistant/rlm/clinical_dispatch.py");
+}
+
+interface ToolSpec {
+  name: string;
+  description?: string;
+  parameters?: { type?: string; properties?: Record<string, unknown>; required?: string[] };
+}
+
+/** The clinical tools as Python declares them. Asked once at start-up, so the model is shown each
+ * tool's real parameters and description; a single generic schema for every tool is what made the
+ * model call get_child_summary(measure="iron"). */
+function describeTools(): ToolSpec[] {
+  const r = spawnSync(python(), [script()], { input: JSON.stringify({ describe: true }), encoding: "utf8", env: process.env });
+  if (r.status !== 0) throw new Error(`clinical tools could not be described: ${(r.stderr || r.error?.message || "").slice(0, 400)}`);
+  const specs = JSON.parse(r.stdout) as ToolSpec[];
+  if (!Array.isArray(specs) || !specs.length) throw new Error("clinical dispatch described no tools");
+  return specs;
+}
+
+function runDispatch(name: string, args: Record<string, unknown>, scope: ChildScope | undefined): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const child = spawn(py, [script], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(python(), [script()], { env: process.env, stdio: ["pipe", "pipe", "pipe"] });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => {
@@ -42,40 +72,27 @@ function runDispatch(name: string, args: Record<string, unknown>, env: NodeJS.Pr
         reject(new Error(`clinical dispatch returned non-JSON: ${out.slice(0, 400)}`));
       }
     });
-    child.stdin.end(JSON.stringify({ name, args }));
+    child.stdin.end(JSON.stringify({ name, args, child_id: scope?.childId ?? "", child_db: scope?.childDb ?? "" }));
   });
 }
 
 export function createClinicalTools(): ToolImpl[] {
-  return NAMES.map((name) => ({
+  return describeTools().map((spec) => ({
     descriptor: {
-      id: `clinical.${name}`,
+      id: `clinical.${spec.name}`,
       group: "clinical",
-      description: `Nestling clinical tool ${name}. Returns JSON. Never invent percentiles.`,
+      description: spec.description || spec.name,
       parameters: {
         type: "object",
-        properties: {
-          sex: { type: "string" },
-          measure: { type: "string" },
-          weeks: { type: "number" },
-          value: { type: "number" },
-          gestational_age_weeks: { type: "number" },
-          chart_standard: { type: "string" },
-          child_id: { type: "string" },
-          percentile: { type: "number" },
-          answers: { type: "object" },
-          questionnaire: { type: "string" },
-        },
-        required: [],
+        properties: (spec.parameters?.properties ?? {}) as never,
+        required: spec.parameters?.required ?? [],
       },
       returns: "dict",
       sideEffects: false,
       timeoutSec: 60,
     },
-    async run(args) {
-      return runDispatch(name, args, {
-        NESTLING_CHILD_DB: process.env.NESTLING_CHILD_DB ?? "",
-      });
+    async run(args, ctx) {
+      return runDispatch(spec.name, args, scopes.get(ctx.chatId));
     },
   }));
 }

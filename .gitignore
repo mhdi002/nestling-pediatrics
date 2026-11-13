@@ -52,7 +52,11 @@ data/overlays/*
 data/uploads/*
 !data/uploads/.gitkeep
 data/models/
-data/knowledge/rag_index/
+# Conversations, compacted transcripts and task boards kept by the RLM orchestrator.
+data/rlm_state/
+# SQLite write-ahead files.
+*.db-wal
+*.db-shm
 
 # Model weights
 *.gguf

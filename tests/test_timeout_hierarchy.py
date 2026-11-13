@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
 
 from assistant.settings import get_settings
 
@@ -58,9 +57,3 @@ def test_probe_is_far_shorter_than_generation():
     assert s.nestling_llm_probe_timeout < s.nestling_llm_timeout / 10
 
 
-def test_web_search_timeout_fits_inside_the_turn():
-    s = get_settings()
-    proxy = _lb_chat_timeout_seconds()
-    assert s.nestling_websearch_timeout < proxy - s.nestling_llm_timeout, (
-        "a web search must not consume the headroom generation needs"
-    )

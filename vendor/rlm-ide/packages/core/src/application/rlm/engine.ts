@@ -23,7 +23,7 @@ import { renderToolSurface } from "../tool_surface";
 import type { ToolExecutor, TurnToolScope } from "../tool_executor";
 import { newId } from "../memory_service";
 import { CellFenceFilter, extractCells, retriedCell, retriedCellText, sameErrorHint, stripCells, stripThinking, syntaxHint, timeoutHint, unclosedCellAt, type FailedCell } from "./cells";
-import { buildMessages, estimate, toUnits, truncateOldOutputs, type HostBlocks } from "./transcript";
+import { buildMessages, estimate, toUnits, truncateOldOutputs, type HostBlocks, foldFinishedTurn } from "./transcript";
 import { ReplyGuard, type CutReason } from "./guard";
 
 export interface RlmTurnInput {
@@ -46,6 +46,11 @@ export interface RlmTurnInput {
   toolScope: (agentPath: string[]) => Omit<TurnToolScope, "toolIds">;
   /** Renders the chat's task board; called before every root model call so updates show at once. */
   taskBlock?: () => Promise<string>;
+  /** Lets the host supply the first step of the turn instead of a free generation: the text of an
+   * assistant message, normally one or more ```repl cells chosen by a narrower, constrained model
+   * call. `""` means the host established that no lookup is needed; `null` means it has nothing to
+   * say and the turn starts normally. */
+  firstStep?: () => Promise<string | null>;
 }
 
 export interface RlmTurnOutput {
@@ -76,6 +81,8 @@ interface Session {
   binding?: TurnBinding;
   /** Tool notices raised while the current cell runs. */
   notices?: string[];
+  /** Ids of the tools called by the cells of the step now running. */
+  stepTools?: string[];
   /** The last cell that failed, to spot fixes made by re-sending the whole cell. */
   failedCell?: FailedCell;
   /** The model was already told not to re-send long failing cells; further copies are not run. */
@@ -160,8 +167,10 @@ export class RlmEngine {
     const entries: TranscriptEntry[] = [];
     if (input.checkpoint) entries.push({ kind: "checkpoint", text: input.checkpoint.summary });
     for (const t of input.verbatim) {
+      // A turn that produced no answer is not part of the conversation the model continues.
+      if (!t.assistantText) continue;
       entries.push({ kind: "user", text: t.userText, turnIdx: t.idx });
-      if (t.assistantText) entries.push({ kind: "assistant", text: t.assistantText, turnIdx: t.idx });
+      entries.push({ kind: "assistant", text: t.assistantText, turnIdx: t.idx });
     }
     if (input.verbatim.length || input.checkpoint) {
       entries.push({ kind: "note", turnIdx: input.turnIdx, text: this.deps.prompts.get("rlm/restart_note.md").trim() });
@@ -169,6 +178,30 @@ export class RlmEngine {
     const session: Session = { chatId: input.chatId, entries, kernel: warm?.kernel ?? null, kernelRoot: warm?.kernelRoot, lastTurnIdx: lastStored, depth: 0 };
     this.sessions.set(input.chatId, session);
     return { session, restored: "reseed" };
+  }
+
+  /** Replaces a finished turn's answer in the live transcript with the text the user was actually
+   * given. A host that checks or rewrites the answer before showing it must record that version:
+   * otherwise the model's unchecked draft stays in the conversation and it quotes itself from it. */
+  async amendAnswer(chatId: string, turnIdx: number, text: string): Promise<void> {
+    const s = this.sessions.get(chatId);
+    if (!s) return;
+    // No text means the user was given no answer at all. The exchange is then taken out of the
+    // transcript whole: a question left standing with a stand-in reply ("I could not answer") is
+    // read by the model as how it answers that question, and it says so again next time.
+    if (!text.trim()) s.entries = s.entries.filter((e) => e.turnIdx !== turnIdx);
+    else
+    for (let i = s.entries.length - 1; i >= 0; i--) {
+      const e = s.entries[i]!;
+      if (e.turnIdx !== turnIdx) continue;
+      if (e.kind === "assistant" && !e.text.includes("```")) {
+        s.entries[i] = { ...e, text };
+        break;
+      }
+    }
+    await this.deps.snapshots
+      .save({ chatId: s.chatId, throughTurnIdx: s.lastTurnIdx, entries: s.entries, savedAt: Date.now() })
+      .catch((e) => this.deps.log.warn("snapshot save failed", String(e)));
   }
 
   async dropChat(chatId: string): Promise<void> {
@@ -200,6 +233,7 @@ export class RlmEngine {
     try {
       const out = await this.loop(session, input, [], input.toolIds, children);
       session.lastTurnIdx = input.turnIdx;
+      if (input.rlm.finishedTurnOutputChars > 0) session.entries = foldFinishedTurn(session.entries, input.turnIdx, input.rlm.finishedTurnOutputChars);
       return out;
     } finally {
       if (input.signal.aborted) {
@@ -265,6 +299,7 @@ export class RlmEngine {
         if (!b) return { ok: false, error: "no active turn" };
         const { input, agentPath, toolIds, children } = b;
         if (type === "tool") {
+          (session.stepTools ??= []).push(String(payload.tool_id ?? ""));
           const base = input.toolScope(agentPath);
           const scope = { ...base, toolIds, ctx: { ...base.ctx, notice: (t: string) => (session.notices ??= []).push(t) } };
           const r = await this.deps.executor.execute(String(payload.tool_id ?? ""), payload.args ?? {}, scope);
@@ -325,9 +360,29 @@ export class RlmEngine {
     let edited = false;
     let reviewed = false;
     let toolNudge = 0;
-    let growthNudge = 0;
+    let ranCell = false;
+    let cellOk = false;
     const editedPages = new Set<string>();
     const editedFiles = new Set<string>();
+    /** Steps in a row that only re-ran cells already run in this turn. */
+    let stuck = 0;
+    /** Steps in a row that did nothing but write on the task board. */
+    let boardSteps = 0;
+    /** Set once the model has been told to stop running cells and answer: its next reply is the answer. */
+    let mustFinish = false;
+    let guidedText: string | null = null;
+    if (isRoot && input.firstStep) {
+      try {
+        guidedText = await input.firstStep();
+      } catch (e) {
+        this.deps.log.warn("first-step hook failed; starting the turn normally", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    /** The host already decided this message needs no lookup, so a reply without cells is not sent back. */
+    const lookupDecided = guidedText === "";
+    // Tell the model so. Left to infer it, a model whose instructions say "look everything up"
+    // went through every tool it had for a question its own saved facts already answered.
+    if (lookupDecided) session.entries.push({ kind: "note", text: this.deps.prompts.get("rlm/no_lookup.md").trim(), turnIdx: input.turnIdx });
 
     for (let step = 0; step < input.rlm.maxSteps; step++) {
       if (input.signal.aborted) throw new DOMException("stopped", "AbortError");
@@ -366,6 +421,11 @@ export class RlmEngine {
       const enableThinking = calmNext ? false : undefined;
       const temperature = calmNext === "repeating" ? 0.7 : 0.3;
       calmNext = null;
+      const guided = step === 0 && guidedText ? guidedText : null;
+      if (guided) {
+        raw = guided;
+        if (isRoot) input.emit({ type: "status", text: "Looking it up" });
+      } else
       try {
         const started = Date.now();
         let outChars = 0;
@@ -483,24 +543,22 @@ export class RlmEngine {
               turnIdx: input.turnIdx,
             };
       if (cutNote && isRoot) input.emit({ type: "status", text: "Reply hit the output limit inside a code cell; continuing in smaller steps" });
+      if (mustFinish) return { finalText: prose || lastText, workLog: workLog.join(String.fromCharCode(10)), steps: step + 1, usage };
       if (cells.length === 0) {
         if (cutNote) {
           session.entries.push(cutNote);
           continue;
         }
-        if (
-          isRoot &&
-          toolNudge < 1 &&
-          step + 1 < input.rlm.maxSteps &&
-          /search\.grep|fs\.read|INDEX\.md|guidelines|knowledge|\bgrep\b|growth_percentile|centile/i.test(input.userText)
-        ) {
+        // Evidence before answers. When the host asks for it, a reply given without running a
+        // single cell in this turn is sent back once: the model either looks the answer up or
+        // confirms that the message needs no lookup. The trigger is what the engine observed
+        // (no tool ran), never the wording of the request, so it holds for any question in any
+        // language instead of only for the phrases somebody thought to list.
+        if (isRoot && input.rlm.requireEvidence && !lookupDecided && toolNudge < 2 && !cellOk && step + 1 < input.rlm.maxSteps) {
           toolNudge++;
-          session.entries.push({
-            kind: "note",
-            text: "Your last message had no executable ```repl cell, so no tool ran. Reply with ONLY one ```repl cell that calls search.grep, fs.read_file, or clinical.growth_percentile as the parent asked, then stop. Prose is not executed.",
-            turnIdx: input.turnIdx,
-          });
-          if (isRoot) input.emit({ type: "status", text: "Asking the model for a fenced REPL cell" });
+          // Cells that all failed are no more evidence than no cell at all.
+          session.entries.push({ kind: "note", text: this.deps.prompts.get(ranCell ? "rlm/failed_evidence.md" : "rlm/no_evidence.md").trim(), turnIdx: input.turnIdx });
+          input.emit({ type: "status", text: "Checking the answer against the library" });
           continue;
         }
         if (isRoot && edited && !reviewed && input.rlm.selfReview && step + 1 < input.rlm.maxSteps) {
@@ -530,8 +588,11 @@ export class RlmEngine {
         }
       }
 
+      ranCell = true;
       const kernel = await this.ensureKernel(session, input, agentPath, toolIds, children);
       const outputs: string[] = [];
+      const fresh = cells.some((c) => !ran.has(c.trim()));
+      session.stepTools = [];
       for (const code of cells) {
         if (input.signal.aborted) break;
         const cellId = newId("cell");
@@ -570,6 +631,7 @@ export class RlmEngine {
         const retryNote = retry && !didNotParse ? retriedCellText(retry, false) : "";
         if (retryNote) session.retryWarned = true;
         const repeated = !r.ok && r.error && session.failedCell ? sameErrorHint(session.failedCell.error, r.error) : "";
+        if (r.ok) cellOk = true;
         if (r.ok) session.failedCell = undefined;
         else if (r.error && !didNotParse && !r.interrupted && !r.timedOut) session.failedCell = { code, error: r.error };
         const parts = [r.stdout, r.stderr ? `[stderr]\n${r.stderr}` : "", r.result ? `[result] ${r.result}` : "", r.error ? `[error]\n${r.error}` : "", r.error ? syntaxHint(code, r.error) : "", repeated, retryNote, noticeText, r.timedOut ? timeoutHint(input.rlm.cellTimeoutSec) : ""].filter(Boolean);
@@ -582,23 +644,27 @@ export class RlmEngine {
         if (!r.ok && (r.interrupted || r.timedOut)) break;
       }
       session.entries.push({ kind: "repl", text: outputs.join("\n---\n"), turnIdx: input.turnIdx });
-      if (
-        isRoot &&
-        growthNudge < 1 &&
-        /growth_percentile|centile/i.test(input.userText) &&
-        !cells.some((c) => /clinical\.growth_percentile/.test(c))
-      ) {
-        growthNudge++;
-        session.entries.push({
-          kind: "note",
-          text: "That cell did not call clinical.growth_percentile. Reply with ONLY one ```repl cell that prints clinical.growth_percentile using the parent's kwargs (sex, measure, weeks, value, gestational_age_weeks, chart_standard). Do not use shell.",
-          turnIdx: input.turnIdx,
-        });
-        if (isRoot) input.emit({ type: "status", text: "Asking the model to call clinical.growth_percentile" });
-        continue;
-      }
       if (cutNote) session.entries.push(cutNote);
       const left = input.rlm.maxSteps - step - 1;
+      // A model that keeps running what it has already run is not going to get anywhere new. One
+      // repeat is tolerated (the hint on the output usually corrects it); a second ends the search
+      // and asks for the answer from what was found, instead of spending the whole step budget.
+      stuck = fresh ? 0 : stuck + 1;
+      // Writing on the task board is keeping notes, not doing the work. A step whose every tool
+      // call was to the board found nothing out; a model that, with its answer already in hand,
+      // wrote a plan and then ticked it off line by line spent a whole turn that way. A few such
+      // steps in a row end the turn the same way a repeated cell does.
+      const groupOf = new Map(this.deps.tools().map((t) => [t.id, t.group]));
+      const called = session.stepTools ?? [];
+      const boardOnly = called.length > 0 && called.every((id) => groupOf.get(id) === "task");
+      boardSteps = boardOnly ? boardSteps + 1 : 0;
+      const unplanned = !blocks.task;
+      if (isRoot && left > 0 && (stuck >= 2 || boardSteps >= input.rlm.maxBoardOnlySteps || (input.rlm.finishUnplanned && unplanned && left === 1))) {
+        mustFinish = true;
+        session.entries.push({ kind: "note", text: this.deps.prompts.get("rlm/finish_now.md").trim(), turnIdx: input.turnIdx });
+        input.emit({ type: "status", text: "Wrapping up with what was found" });
+        continue;
+      }
       if (isRoot && input.taskBlock && !blocks.task && step + 1 === Math.max(6, Math.floor(input.rlm.maxSteps / 6)) && left > input.rlm.stepWarnRemaining)
         session.entries.push({
           kind: "note",

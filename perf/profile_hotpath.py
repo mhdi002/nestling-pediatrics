@@ -80,21 +80,7 @@ def _chart_workload(iterations: int):
     return run, lambda: None
 
 
-def _bm25_workload(iterations: int):
-    from assistant.rag.stores import MedicalRAG
-
-    rag = MedicalRAG()
-    rag.load()
-    rag.retrieve(QUESTIONS[0], top_k=5)
-
-    def run():
-        for i in range(iterations):
-            rag.retrieve(QUESTIONS[i % len(QUESTIONS)], top_k=5)
-
-    return run, lambda: None
-
-
-WORKLOADS = {"chat": _chat_workload, "chart": _chart_workload, "bm25": _bm25_workload}
+WORKLOADS = {"chat": _chat_workload, "chart": _chart_workload}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -156,7 +156,7 @@ class NestlingParent(HttpUser):
 
     @task(cfg.W_CHAT)
     def chat_turn(self) -> None:
-        """Heaviest path: router + chat memory + BM25 RAG (+ LLM when the sidecar is up)."""
+        """Heaviest path: a full chat turn on the RLM orchestrator (needs the model sidecar)."""
         body = {
             "session_id": self.session_id,
             "message": random.choice(PARENT_QUESTIONS),

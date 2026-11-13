@@ -98,39 +98,6 @@ def test_the_prompt_never_supplies_the_vocabulary_it_forbids():
             assert word not in low, f"{word!r} is in the prompt: {prompt}"
 
 
-def test_ask_medical_sends_both_sources_to_the_model(monkeypatch):
-    """The model must receive the parent's notes as context, not as the question."""
-    import assistant.llm.qwen_client as qc
-    from assistant.agent.orchestrator import ParentAssistant
-
-    seen = {}
-
-    class _Client:
-        def answer_with_context(self, query, context, *, system=None):
-            seen["query"] = query
-            seen["context"] = context
-            seen["system"] = system
-            return "Your notes say the ulcer is in her stomach."
-
-    monkeypatch.setattr(qc, "llm_enabled", lambda: True)
-    monkeypatch.setattr(qc, "get_qwen", lambda: _Client())
-
-    orch = ParentAssistant()
-    if not orch.medical.load():
-        import pytest
-
-        pytest.skip("medical index not built")
-    orch.use_llm = True
-    res = orch.ask_medical(_query("where was her ulcer?"))
-
-    assert seen["query"] == "where was her ulcer?"
-    assert "ulcer in her stomach" in seen["context"]
-    assert PARENT_NOTES_HEADING in seen["context"]
-    assert PARENT_NOTES_HEADING in seen["system"]
-    assert res["answer_source"] == "memory+notes"
-    assert "stomach" in res["answer"]
-
-
 # --------------------------------------------------------------------------
 # End-to-end: the parent must actually receive the remembered answer
 # --------------------------------------------------------------------------
@@ -173,51 +140,6 @@ def _assistant(monkeypatch, tmp_path, model):
         pytest.skip("medical index not built")
     orch.use_llm = True
     return orch
-
-
-def test_a_later_session_can_answer_what_an_earlier_one_was_told(monkeypatch, tmp_path):
-    """The original bug: 'where was her ulcer?' answered as vaccination guidance."""
-    model = _FaithfulModel()
-    orch = _assistant(monkeypatch, tmp_path, model)
-    cid = orch.db.create_child(name="monika", sex="female", gestational_age_weeks=32.0)
-
-    told = orch.chat_memory.create_session(child_id=cid)
-    orch.chat(told, "she has some ulcer in her stomach", child_id=cid)
-
-    model.calls.clear()
-    asked = orch.chat_memory.create_session(child_id=cid)
-    reply = orch.chat(asked, "where was her ulcer?", child_id=cid).get("reply") or ""
-
-    assert model.calls, "the model was never asked"
-    context = model.calls[-1]["context"]
-    # The parent's own words, not the memory blob, must be the question.
-    assert model.calls[-1]["query"] == "where was her ulcer?"
-    # The remembered fact must reach the slot the model answers from, and must
-    # come before the retrieved guidance.
-    assert "ulcer" in context.lower()
-    assert context.index(PARENT_NOTES_HEADING) < context.index(CARE_NOTES_HEADING)
-    assert "stomach" in reply.lower()
-
-
-def test_a_generated_answer_is_not_truncated_as_if_it_were_extractive(
-    monkeypatch, tmp_path
-):
-    """Retrieval runs with the LLM off, so `mode` must be corrected afterwards.
-
-    format_reply() trims anything not marked as model-generated to three
-    sentences; leaving `mode` at "extractive" silently cut the reply.
-    """
-    from assistant.parent_voice import medical_chat_answer
-
-    long_answer = " ".join(f"Sentence number {i} about her ulcer." for i in range(1, 7))
-    orch = _assistant(monkeypatch, tmp_path, _FaithfulModel(reply=long_answer))
-    res = orch.ask_medical(_query("where was her ulcer?"))
-
-    mode = (res.get("mode") or "").lower()
-    from_llm = "openai" in mode or "llm" in mode
-    assert from_llm, f"generated answer mislabelled as {mode!r}"
-    spoken = medical_chat_answer(res["answer"], from_llm=from_llm)
-    assert spoken.count("Sentence number") == 6
 
 
 def test_gestational_age_is_stated_as_the_child_s_birth(monkeypatch, tmp_path):

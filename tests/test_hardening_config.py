@@ -7,22 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from assistant.refdata import care_topics, clinical_bounds
+from assistant.refdata import clinical_bounds
 from assistant.settings import Settings, get_settings
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def test_defaults_work_without_env_file():
-    """A fresh checkout with no .env must still produce a usable configuration."""
-    s = Settings(_env_file=None)
-    assert s.nestling_llm_timeout > 0
-    assert s.nestling_max_upload_bytes > 0
-    assert s.nestling_rag_top_k > 0
-    assert s.allowed_upload_types
-    assert s.cors_origin_list == ["*"]
-    # Secrets are env-only: never a baked-in default.
-    assert s.nestling_api_key is None
 
 
 def test_llm_urls_are_not_hardcoded():
@@ -45,15 +33,6 @@ def test_model_ids_only_come_from_settings():
             if model_id.match(line):
                 offenders.append(f"{path.relative_to(ROOT)}:{lineno}: {line.strip()}")
     assert not offenders, "Model IDs must come from assistant.settings:\n" + "\n".join(offenders)
-
-
-def test_paths_derive_from_settings_root():
-    from assistant import config as cfg
-
-    root = Path(get_settings().nestling_root).resolve()
-    for path in (cfg.DATA, cfg.EN_DIR, cfg.KNOWLEDGE_DIR, cfg.OVERLAY_DIR, cfg.UPLOAD_DIR):
-        assert path.is_absolute()
-        assert root in path.parents or path == root
 
 
 def test_data_dir_override_relocates_state(tmp_path, monkeypatch):
@@ -89,25 +68,6 @@ def test_clinical_bounds_are_config_driven():
         assert key in b, f"clinical_bounds.json is missing {key}"
 
 
-def test_care_topic_routing_data_is_config_driven():
-    cfg = care_topics()
-    assert cfg.get("topics", {}).get("feeding", {}).get("keywords")
-    assert cfg.get("feeding_age_bands")
-    # The final band is the open-ended catch-all.
-    assert cfg["feeding_age_bands"][-1]["max_age_months"] is None
-    for key in ("safety_tail", "citation_tail", "no_match"):
-        assert cfg["messages"][key].strip()
-
-
-def test_safety_tail_is_topic_neutral():
-    """The extractive tail is appended to every topic, so it must not be skin-specific."""
-    from assistant.rag.stores import SAFETY_TAIL
-
-    lowered = SAFETY_TAIL.lower()
-    for skin_word in ("redness", "rash", "swelling"):
-        assert skin_word not in lowered
-
-
 @pytest.mark.parametrize(
     "field",
     [
@@ -118,3 +78,24 @@ def test_safety_tail_is_topic_neutral():
 )
 def test_every_outbound_call_has_a_configurable_timeout(field):
     assert getattr(Settings(_env_file=None), field) > 0
+
+
+def test_defaults_work_without_env_file():
+    """A fresh checkout with no .env must still produce a usable configuration."""
+    s = Settings(_env_file=None)
+    assert s.nestling_llm_timeout > 0
+    assert s.nestling_max_upload_bytes > 0
+    assert s.rlm_context_length > 0
+    assert s.allowed_upload_types
+    assert s.cors_origin_list == ["*"]
+    # Secrets are env-only: never a baked-in default.
+    assert s.nestling_api_key is None
+
+
+def test_paths_derive_from_settings_root():
+    from assistant import config as cfg
+
+    root = Path(get_settings().nestling_root).resolve()
+    for path in (cfg.DATA, cfg.EN_DIR, cfg.OVERLAY_DIR, cfg.UPLOAD_DIR):
+        assert path.is_absolute()
+        assert root in path.parents or path == root

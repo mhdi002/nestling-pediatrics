@@ -50,7 +50,7 @@ def get_assistant(
     use_xlam: bool | None = None,
     use_pleias: bool | None = None,
 ) -> ParentAssistant:
-    """Factory — xLAM only when NESTLING_LOAD_MODELS=1; generative RAG follows NESTLING_USE_LLM."""
+    """Factory for the parent assistant; chat runs on the RLM orchestrator."""
     load = load_models_enabled()
     return ParentAssistant(
         db=child_db,
@@ -87,7 +87,7 @@ def create_services(
         db=db,
         chat_memory=chat_mem,
         use_xlam=load if use_xlam is None else use_xlam,
-        # Do not force use_pleias=False when LOAD_MODELS=0 — that disabled Qwen RAG.
+        # Do not force use_pleias=False when LOAD_MODELS=0: that turned the LLM off.
         use_pleias=use_pleias,
     )
     return Services(db=db, chat=chat_mem, assistant=assistant)
@@ -97,7 +97,7 @@ def get_services() -> Services:
     global _services
     if _services is None:
         # Double-checked: concurrent first requests must not build two service
-        # containers (two SQLite connections, two RAG indexes).
+        # containers (two SQLite connections).
         with _services_lock:
             if _services is None:
                 _services = create_services()

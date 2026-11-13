@@ -16,7 +16,7 @@ from assistant.agent.orchestrator import ParentAssistant
 
 @pytest.fixture()
 def assistant(tmp_path, monkeypatch):
-    monkeypatch.setenv("NESTLING_USE_LLM", "0")
+    monkeypatch.setenv("NESTLING_USE_LLM", "1")
     monkeypatch.setenv("NESTLING_LOAD_MODELS", "0")
     monkeypatch.setenv("NESTLING_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("NESTLING_CHILD_DB", str(tmp_path / "children.db"))
@@ -52,8 +52,11 @@ def test_child_facts_carry_into_a_new_session(assistant):
     s_b = assistant.chat_memory.create_session(child_id=child)
     out = _reply(assistant, s_b, "any update on that?", child_id=child)
 
-    ctx = out["memory"]["child_context"]
-    assert "cough" in ctx.lower(), ctx
+    # What the new session's turn was given: the child record and the facts
+    # long-term memory recalled for this child.
+    mem = out["memory"]
+    known = " ".join([mem.get("child_context") or ""] + [str(i.get("text") or "") for i in mem.get("recalled") or []])
+    assert "cough" in known.lower(), mem
 
 
 def test_memory_does_not_bleed_between_children(assistant):

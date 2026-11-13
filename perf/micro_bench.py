@@ -254,145 +254,6 @@ def bench_chart_render(iterations: int, threads: int) -> dict:
     }
 
 
-# --- 4. BM25 retrieval cost ------------------------------------------------
-
-
-def bench_bm25(iterations: int, threads: int) -> dict:
-    from assistant.rag.stores import MedicalRAG
-
-    rag = MedicalRAG()
-    loaded = rag.load()
-    doc_count = len(rag.store.docs)
-    queries = [
-        "fever in a 9 month old baby",
-        "how much milk does a 6 month old need",
-        "toddler not walking at 15 months",
-        "signs of dehydration in infants",
-        "when to introduce solid foods",
-    ]
-
-    def one(i: int) -> float:
-        start = time.perf_counter()
-        rag.retrieve(queries[i % len(queries)], top_k=5)
-        return (time.perf_counter() - start) * 1000.0
-
-    if not loaded or doc_count == 0:
-        return {"loaded": loaded, "doc_count": doc_count, "note": "index empty — skipped"}
-
-    one(0)
-    serial = [one(i) for i in range(iterations)]
-
-    started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=threads) as pool:
-        concurrent = list(pool.map(one, range(iterations)))
-    concurrent_wall = time.perf_counter() - started
-
-    # Index build cost tells us how bad a per-request rebuild would be.
-    build_start = time.perf_counter()
-    rag.store._rebuild()
-    rebuild_ms = (time.perf_counter() - build_start) * 1000.0
-
-    return {
-        "loaded": loaded,
-        "doc_count": doc_count,
-        "index_rebuild_ms": round(rebuild_ms, 2),
-        "index_built_once_per_process": True,
-        "serial": {**_stat_block(serial), "queries_per_second_1_core": round(
-            iterations / (sum(serial) / 1000.0), 1) if serial else 0.0},
-        "concurrent": {
-            **_stat_block(concurrent),
-            "threads": threads,
-            "queries_per_second": round(iterations / concurrent_wall, 1)
-            if concurrent_wall
-            else 0.0,
-        },
-        "speedup_from_threads": round((sum(serial) / 1000.0) / concurrent_wall, 2)
-        if concurrent_wall
-        else 0.0,
-    }
-
-
-# --- 5. Child RAG reindex: does per-write cost grow with total children? ----
-
-
-def bench_child_reindex(children_counts: list[int], docs_per_child: int) -> dict:
-    """`refresh_child_index()` runs on every growth submit and every screening.
-
-    It rebuilds the BM25 index over the whole shared child store and rewrites
-    docs.json, so we measure the cost of ONE child's reindex as the number of
-    other children in the process grows.
-    """
-    from assistant.rag.stores import ChildRAG
-
-    tmp = Path(tempfile.mkdtemp(prefix="nestling_perf_rag_"))
-    out: dict = {"docs_per_child": docs_per_child, "scaling": []}
-    try:
-        rag = ChildRAG()
-        rag.store.index_dir = tmp  # keep docs.json out of the repo's data dir
-        rag.store.docs = []
-        target = "child-target"
-
-        def docs_for(cid: str) -> list[dict]:
-            return [
-                {
-                    "id": f"{cid}_doc{i}",
-                    "collection": "child",
-                    "child_id": cid,
-                    "title": f"Growth weight @ {i}w",
-                    "text": (
-                        f"Measured weight={3 + i * 0.1} at {30 + i} postmenstrual weeks; "
-                        f"z=0.4, centile=61, status=on_track for child {cid}"
-                    ),
-                }
-                for i in range(docs_per_child)
-            ]
-
-        rag.reindex_child(docs_for(target))
-        added = 0
-        for count in sorted(children_counts):
-            while added < count:
-                rag.store.docs.extend(docs_for(f"child-other-{added}"))
-                added += 1
-            rag.store._rebuild()
-
-            samples = []
-            for _ in range(5):
-                start = time.perf_counter()
-                rag.reindex_child(docs_for(target))
-                samples.append((time.perf_counter() - start) * 1000.0)
-
-            search_start = time.perf_counter()
-            rag.retrieve("weight centile on track", target, top_k=5)
-            search_ms = (time.perf_counter() - search_start) * 1000.0
-
-            docs_path = tmp / "docs.json"
-            out["scaling"].append(
-                {
-                    "other_children_in_store": count,
-                    "total_docs_in_store": len(rag.store.docs),
-                    "reindex_ms_median": round(statistics.median(samples), 2),
-                    "reindex_ms_max": round(max(samples), 2),
-                    "retrieve_ms": round(search_ms, 2),
-                    "docs_json_kb": round(docs_path.stat().st_size / 1024, 1)
-                    if docs_path.exists()
-                    else 0.0,
-                }
-            )
-        first, last = out["scaling"][0], out["scaling"][-1]
-        if first["reindex_ms_median"]:
-            out["reindex_slowdown"] = round(
-                last["reindex_ms_median"] / first["reindex_ms_median"], 1
-            )
-        out["thread_safe"] = False
-        out["note"] = (
-            "reindex_child() does read-modify-write on a shared list, rebuilds BM25 "
-            "over every child's docs, and rewrites docs.json — with no lock."
-        )
-        return out
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
 # --- 6. Full chat turn cost + memory growth --------------------------------
 
 
@@ -490,36 +351,6 @@ def bench_chat_turn(iterations: int, threads: int) -> dict:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# --- 7. Unbounded cache inspection ----------------------------------------
-
-
-def bench_cache_growth() -> dict:
-    """Look for module-level caches and report whether they can actually evict."""
-    from assistant.rag import dense
-    from assistant.settings import get_settings
-
-    has_lock = hasattr(dense, "_cache_lock")
-    max_size = getattr(get_settings(), "nestling_dense_cache_size", None)
-    bounded = max_size is not None and type(dense._cache).__name__ == "OrderedDict" and has_lock
-    return {
-        "dense_embedding_cache": {
-            "module": "assistant.rag.dense._cache",
-            "type": type(dense._cache).__name__,
-            "entries_now": len(dense._cache),
-            "max_entries": max_size,
-            "thread_locked": has_lock,
-            "bounded": bounded,
-            "worst_case_mb": round((max_size or 0) * 1024 * 4 / 1024 / 1024, 1),
-            "note": (
-                "LRU-bounded via NESTLING_DENSE_CACHE_SIZE; ~4 KB per 1024-dim "
-                "float32 bge-m3 vector, per worker process"
-                if bounded
-                else "unbounded — grows with distinct query/doc text for process lifetime"
-            ),
-        }
-    }
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Nestling bottleneck micro-benchmarks")
     parser.add_argument("--threads", type=int, default=cfg.env_int("PERF_BENCH_THREADS", 16))
@@ -527,17 +358,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--only",
         default="",
-        help="comma-separated subset: pragmas,sqlite,chart,bm25,reindex,chat,cache",
-    )
-    parser.add_argument(
-        "--reindex-children",
-        default=cfg.env_str("PERF_BENCH_REINDEX_CHILDREN", "1,10,50,200,500"),
-        help="child-count points for the reindex scaling curve",
+        help="comma-separated subset: pragmas,sqlite,chart,chat",
     )
     args = parser.parse_args(argv)
 
     wanted = {s.strip() for s in args.only.split(",") if s.strip()} or {
-        "pragmas", "sqlite", "chart", "bm25", "reindex", "chat", "cache",
+        "pragmas", "sqlite", "chart", "chat",
     }
     out: dict = {
         "generated_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -551,14 +377,8 @@ def main(argv: list[str] | None = None) -> int:
             args.threads, max(5, args.iterations // 4))),
         ("chart", "matplotlib chart render", lambda: bench_chart_render(
             args.iterations, args.threads)),
-        ("bm25", "BM25 retrieval", lambda: bench_bm25(args.iterations, args.threads)),
-        ("reindex", "child RAG reindex scaling", lambda: bench_child_reindex(
-            [int(x) for x in args.reindex_children.split(",") if x.strip()],
-            cfg.env_int("PERF_BENCH_DOCS_PER_CHILD", 12),
-        )),
         ("chat", "full chat turn", lambda: bench_chat_turn(
             max(8, args.iterations // 2), args.threads)),
-        ("cache", "unbounded caches", lambda: bench_cache_growth()),
     ]
     for key, label, fn in steps:
         if key not in wanted:

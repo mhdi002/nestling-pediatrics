@@ -114,7 +114,7 @@ class NativeMemoryBackend:
     @staticmethod
     def _rank(rows: list[dict], query: str, text_key: str) -> list[dict]:
         """Order by BM25 relevance to `query`, best first."""
-        from assistant.rag.embeddings import BM25Index
+        from assistant.memory.bm25 import BM25Index
 
         texts = [r.get(text_key) or "" for r in rows]
         if not texts:

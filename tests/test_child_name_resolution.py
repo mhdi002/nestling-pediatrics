@@ -63,15 +63,8 @@ def test_name_resolves_child_and_pulls_history(assistant):
     )
 
     assert out["child_id"] == child_id, out["child_id"]
-    assert "history" in set(out.get("intents") or []), out.get("intents")
-    names = [tc.get("name") for tc in out["tools"]["tool_calls"]]
-    assert "get_child_summary" in names, names
-    summary = next(
-        tc["result"]["summary"]
-        for tc in out["tools"]["tool_calls"]
-        if tc["name"] == "get_child_summary"
-    )
-    assert "9.4" in summary, summary
+    # The turn was given this child's record, growth history included.
+    assert "9.4" in (out["memory"].get("child_context") or ""), out["memory"]
 
 
 def test_persian_name_question_resolves_child(assistant):
@@ -85,8 +78,7 @@ def test_persian_name_question_resolves_child(assistant):
     )
 
     assert out["child_id"] == child_id
-    names = [tc.get("name") for tc in out["tools"]["tool_calls"]]
-    assert "get_child_summary" in names, names
+    assert "9.4" in (out["memory"].get("child_context") or ""), out["memory"]
 
 
 def test_two_children_with_the_same_name_are_not_guessed(assistant):
@@ -99,8 +91,7 @@ def test_two_children_with_the_same_name_are_not_guessed(assistant):
 
     assert out["child_id"] is None, out["child_id"]
     assert len(out["ambiguous_children"]) == 2, out["ambiguous_children"]
-    assert "child (which one?)" in out["missing_slots"], out["missing_slots"]
-    assert "which one" in out["reply"].lower(), out["reply"]
+    assert "which child" in out["reply"].lower(), out["reply"]
 
 
 def test_another_users_child_is_never_resolved(assistant):
@@ -112,5 +103,10 @@ def test_another_users_child_is_never_resolved(assistant):
 
     assert out["child_id"] is None, out["child_id"]
     assert not out["ambiguous_children"]
-    names = [tc.get("name") for tc in out["tools"]["tool_calls"]]
-    assert "get_child_summary" not in names, names
+    # Nothing about that child reached this turn, through the record or a tool.
+    assert not (out["memory"].get("child_context") or "")
+    summaries = [
+        tc for tc in out["tools"]["tool_calls"]
+        if tc.get("name") == "get_child_summary" and tc.get("ok") and (tc.get("result") or {}).get("ok")
+    ]
+    assert not summaries, summaries

@@ -31,21 +31,6 @@ def _reply(assistant, session_id, text):
     return assistant.chat(session_id, text, ui_lang="en")
 
 
-def test_bare_sex_answer_resumes_growth_request(assistant):
-    """'boy' after being asked for sex should complete the plot, not reset."""
-    session_id = assistant.chat_memory.create_session()
-
-    first = _reply(assistant, session_id, "show my kid chart age 12 weight 5")
-    # The assistant should be waiting on something at this point.
-    assert first.get("missing_slots"), "expected the first turn to ask for a slot"
-
-    second = _reply(assistant, session_id, "boy")
-    slots = assistant.chat_memory.get_slots(session_id)
-    # The answer must be retained *and* the original request resumed.
-    assert slots.get("sex") in {"male", "boy"}, slots
-    assert "growth" in set(second.get("intents") or []), second.get("intents")
-
-
 def test_slots_accumulate_across_turns(assistant):
     """Each turn contributes a slot; none of the earlier ones are lost."""
     session_id = assistant.chat_memory.create_session()
@@ -106,11 +91,3 @@ def test_age_in_years_is_parsed(assistant):
     assert "age_months" not in extract_growth_slots("32 weeks at birth")
 
 
-def test_year_age_answer_resumes_growth_request(assistant):
-    """A follow-up given in years must complete the plot, not restart it."""
-    session_id = assistant.chat_memory.create_session()
-    _reply(assistant, session_id, "plot weight for my girl, 3 kg")
-    out = _reply(assistant, session_id, "2 years")
-    slots = assistant.chat_memory.get_slots(session_id)
-    assert slots.get("age_months") == 24.0, slots
-    assert "growth" in set(out.get("intents") or []), out.get("intents")

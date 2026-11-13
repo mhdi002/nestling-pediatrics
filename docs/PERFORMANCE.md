@@ -12,6 +12,12 @@ Harness: [`../perf/README.md`](../perf/README.md). Raw results: `perf/results/`
 
 ---
 
+> **Note (RLM rewrite).** Chat no longer runs the retrieval (RAG) path these
+> measurements were taken on: every turn now runs on the RLM orchestrator, whose
+> cost is dominated by model steps. The SQLite, chart, concurrency and
+> load-balancing findings still apply; the RAG-specific bottlenecks were removed
+> with the code.
+
 ## 1. Test conditions (read before trusting any number)
 
 | | |
@@ -110,45 +116,6 @@ see `perf/results/steady_seeded/summary.md`.
 ## 4. Ranked bottlenecks, with measured evidence
 
 Ranked by how hard each one caps a 1000-user deployment.
-
-### #1 — Child RAG index is fully rebuilt and rewritten to disk on every write
-
-`ChildRAG.reindex_child()` (`assistant/rag/stores.py`) is called from
-`ParentAssistant.refresh_child_index()`, which runs on **every** growth submit,
-**every** ASQ score, **every** M-CHAT score and every growth recorded inside a
-chat turn. It does three O(total-children) things:
-
-1. `remaining = [d for d in self.store.docs if d.get("child_id") != child_id]`
-   — scans every document of every child in the process.
-2. `store.add(...)` → `_rebuild()` → `BM25Index.fit(...)` — re-tokenises the
-   **entire corpus of all children**.
-3. `store.save()` → `json.dumps(all_docs, indent=2)` + `write_text(...)` —
-   rewrites the whole index file synchronously, inside the request.
-
-Measured (`python -m perf.micro_bench --only reindex`, 12 docs per child):
-
-| Other children in store | Total docs | Reindex ms (median) | Child retrieval ms | `docs.json` size |
-|---:|---:|---:|---:|---:|
-| 1 | 24 | 0.84 | 2.6 | 6 KB |
-| 10 | 132 | 1.91 | 0.7 | 34 KB |
-| 50 | 612 | 6.28 | 2.3 | 159 KB |
-| 200 | 2 412 | 24.9 | 8.9 | 630 KB |
-| 500 | 6 012 | 59.2 | 21.8 | 1.5 MB |
-| **1 000** | **12 012** | **131.2** | **45.9** | **3.1 MB** |
-
-**156× slowdown from 1 to 1000 children, linear in total corpus size.** At the
-target scale of 1000 children, one growth submit costs 131 ms of GIL-held pure
-Python plus a 3.1 MB synchronous file write, and every child-scoped retrieval
-costs 46 ms. At 10 000 children, extrapolate to ~1.3 s and ~31 MB per write.
-
-It is also **not thread-safe**: the read-modify-write of `self.store.docs` has
-no lock, and concurrent `write_text()` calls target the same `docs.json`, so two
-parents saving measurements at the same moment can silently lose documents or
-leave a truncated index.
-
-`VectorStore.search()` compounds it: with `filters={"child_id": ...}` it scores
-BM25 across **all** documents and filters afterwards, so one parent's retrieval
-pays for every other parent's data.
 
 ### #2 — Every request runs in a thread pool behind a process-global DB lock
 
@@ -257,19 +224,6 @@ render to unlink stale files (that directory reached 873 files during this
 session, and the scan is O(directory)), and two threads plotting the same
 child+measure can unlink each other's output, producing a 404 from
 `GET /api/overlays/{file}`.
-
-### #5 — BM25 medical retrieval: fine today, quadratic by construction
-
-`--only bm25`: index **built once per process** (18.9 ms rebuild, 243 docs, so
-no per-request rebuild here — good), query cost 3.9 ms p50, 257 queries/s on one
-core, and 0.94× speed-up across 16 threads (GIL-bound, as expected for pure
-Python). Not currently a bottleneck.
-
-The latent issue is `BM25Index.scores()` in `assistant/rag/embeddings.py`: it
-loops over every document and calls `Counter(toks)` **inside** the loop, so term
-frequencies for the whole corpus are recomputed on every query. At 243 documents
-that is 3.9 ms; at 10 000 documents it is ~160 ms per query. Precomputing the
-per-document `Counter` at `fit()` time removes it.
 
 ### #6 — Caches and memory: currently healthy
 

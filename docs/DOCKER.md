@@ -19,7 +19,7 @@ against the real card and appends the derived values to `.env` —
 and the nginx rate limits. `docker compose` then reads `.env`, so the compose
 defaults below are only the fallback when nothing sized the host.
 
-Modes: `--mode full` (GPU, default), `--mode app` (no sidecar, extractive RAG).
+Modes: `--mode full` (GPU, default), `--mode app` (no sidecar; chat needs a model elsewhere).
 Model source: `--model-source auto|hub|hf|ms` (default `auto` tries the Docker
 Hub registry, then Hugging Face, then ModelScope — see below).
 
@@ -30,12 +30,13 @@ docker compose up --build -d nestling
 docker compose exec nestling python docs/_e2e_docker_scenarios.py
 ```
 
-Chat still answers, via **extractive RAG** — no generation, no memory-grounded
-paraphrase. Good for a host with no GPU.
+Growth, screening and charts work. Chat runs on the model, so without one it
+replies that it cannot answer; point `NESTLING_LLM_URL` at a model server on
+another host to enable it.
 
-## Full stack — MiniCPM vLLM sidecar
+## Full stack — Qwen3.5-2B vLLM sidecar
 
-A local `llm` sidecar based on `vllm/vllm-openai` loads **openbmb/MiniCPM5-1B**
+A local `llm` sidecar based on `vllm/vllm-openai` loads **Qwen/Qwen3.5-2B**
 from the host Hugging Face cache.
 
 ### Weights must be present first
@@ -48,7 +49,7 @@ your network can reach:
 ```bash
 scripts/fetch_model_registry.sh     # Docker Hub OCI image (needs a pairing in config/model_images.txt)
 scripts/fetch_model_modelscope.sh   # ModelScope (config/model_mirrors.txt) — reachable where the HF CDN is blocked
-# or the HF CLI:  hf download openbmb/MiniCPM5-1B
+# or the HF CLI:  hf download Qwen/Qwen3.5-2B
 ```
 
 The registry and ModelScope routes exist because the Hugging Face LFS CDN is
@@ -70,14 +71,14 @@ docker compose --profile llm logs -f llm
 
 The compose default is `fp8` weights + `fp8` KV cache, which needs **Ada
 (sm_89) or newer**. On Turing/Ampere (e.g. RTX 2080 Ti, sm_75; RTX 3090,
-sm_86) vLLM refuses to start with fp8, and the app silently falls back to
-extractive RAG while health checks pass. `deploy.sh` avoids this by deriving
+sm_86) vLLM refuses to start with fp8, and chat has no model while health checks
+pass. `deploy.sh` avoids this by deriving
 precision from the card. If you run compose **by hand** on a pre-Ada card,
 set it yourself first (or just run the sizer and source its output):
 
 ```bash
 # derive everything for this card and write it to .env:
-snap=$(ls -d "$HOME/.cache/huggingface/hub/models--openbmb--MiniCPM5-1B/snapshots"/*)
+snap=$(ls -d "$HOME/.cache/huggingface/hub/models--Qwen--Qwen3.5-2B/snapshots"/*)
 python3 scripts/size_llm.py --snapshot "$snap" >> .env
 docker compose --profile llm up --build -d
 ```
@@ -115,9 +116,9 @@ and `docs/PERFORMANCE.md` §6b for the measured numbers.
 ### Fallback behaviour
 
 - If the `llm` profile is not running (no GPU / incomplete weights / wrong
-  precision), Nestling still serves chat with **extractive RAG**
-  (`NESTLING_USE_LLM=0` or an unreachable LLM). CPU-friendly; no generation.
-- MiniCPM5-1B is **text-only**. `/api/chat/vision` still returns `200` and
+  precision), chat has no model and says so (`NESTLING_USE_LLM=0` or an
+  unreachable LLM); growth, screening and charts keep working.
+- If the served model is **text-only**, `/api/chat/vision` still returns `200` and
   falls back to caption + care-notes guidance — the capability probe sends a
   1-pixel image, sees the refusal, and reports vision unavailable rather than
   pretending to have looked. Point `NESTLING_VISION_LLM_URL` at a
@@ -132,10 +133,10 @@ in `.env`.
 |---|---|---|
 | `NESTLING_LLM_URL` | `http://llm:8000` | App → LLM base URL |
 | `NESTLING_VISION_LLM_URL` | `http://llm:8000` | App → vision base URL (same service) |
-| `NESTLING_USE_LLM` | `1` | `0` = force extractive fallback |
+| `NESTLING_USE_LLM` | `1` | `0` = no model; chat replies are unavailable |
 | `NESTLING_LLM_USE_MODEL_ID` | `0` | `0` = load from local snapshot path (offline); `1` = HF model id |
-| `NESTLING_LLM_MODEL` | `openbmb/MiniCPM5-1B` | OpenAI served model name |
-| `NESTLING_VISION_MODEL` | `openbmb/MiniCPM5-1B` | Vision target model name (same endpoint) |
+| `NESTLING_LLM_MODEL` | `Qwen/Qwen3.5-2B` | OpenAI served model name |
+| `NESTLING_VISION_MODEL` | `Qwen/Qwen3.5-2B` | Vision target model name (same endpoint) |
 | `NESTLING_HF_CACHE_HOST` | `~/.cache/huggingface` | Host HF cache mount (read-only) |
 | `VLLM_MAX_MODEL_LEN` | `1536` (derived ↑) | vLLM context window; sized from GPU |
 | `VLLM_MAX_NUM_SEQS` | `1` (derived ↑) | vLLM batch size; also the app's concurrency default |

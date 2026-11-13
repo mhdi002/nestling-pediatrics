@@ -242,20 +242,25 @@ class LongTermMemory:
             require_grounding="yes" if s.rlm_memory_fact_require_user_grounding else "no",
         )
         out = ""
+        schema = _fact_ops_schema(s, [k["id"] for k in known])
         try:
-            out = complete_fn(
-                [{"role": "user", "content": prompt}],
-                max_tokens=800,
-                temperature=0.0,
-            )
+            try:
+                out = complete_fn(
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=800,
+                    temperature=0.0,
+                    json_schema=schema,
+                )
+            except TypeError:
+                # A completion function that cannot constrain its output.
+                out = complete_fn(
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=800,
+                    temperature=0.0,
+                )
         except Exception as exc:
             log.warning("fact distill failed: %s", exc)
         ops = _parse_fact_ops(out)
-        extra = _heuristic_fact_ops(user_text, assistant_text, s)
-        if extra:
-            ops = list(ops) + extra
-        elif not ops:
-            ops = extra
         known_ids = {k["id"] for k in known}
         added = 0
         for op in ops:
@@ -331,6 +336,9 @@ class LongTermMemory:
         s = get_settings()
         if not s.rlm_memory_enabled or not user_id or not isinstance(result, dict):
             return
+        # A call that failed found nothing out; its error text is not a fact.
+        if result.get("ok") is False or result.get("error"):
+            return
         skip = {"ok", "overlay", "overlay_filename", "error"}
         prefer = ("centile", "percentile", "z_score", "summary", "measure", "sex", "weeks", "value")
         parts = []
@@ -368,18 +376,34 @@ class LongTermMemory:
 
 def _fact_ok(text: str, s) -> bool:
     t = (text or "").strip()
-    if not t:
-        return False
-    if len(t) > int(s.rlm_memory_fact_max_chars):
-        return False
-    if re.search(
-        r"lasting (food )?allergy the parent stated|in their own words|"
-        r"please store that as a lasting fact|look up iron|search guidelines",
-        t,
-        re.I,
-    ):
-        return False
-    return True
+    return bool(t) and len(t) <= int(s.rlm_memory_fact_max_chars)
+
+
+def _fact_ops_schema(s, known_ids: list[str]) -> dict:
+    """The shape a distilled memory decision must take.
+
+    What is worth keeping is the model's judgement; the shape is not. Before
+    this the reply was free text hunted for a JSON array, and when the model
+    wrote none a regex kept whatever followed the word "remember", which
+    stored the tail of a question ("about Darya from before?") as a fact.
+    """
+    op = {
+        "type": "object",
+        "properties": {
+            "op": {"type": "string", "enum": ["add", "update", "delete"]},
+            "id": {"type": "string", "enum": [*known_ids, ""]},
+            "text": {"type": "string", "maxLength": int(s.rlm_memory_fact_max_chars)},
+            "category": {"type": "string", "enum": ["identity", "health", "feeding", "sleep", "development", "routine", "preference", "general"]},
+        },
+        "required": ["op", "id", "text", "category"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "facts": {"type": "array", "items": op, "maxItems": int(s.rlm_memory_fact_max_adds_per_turn) + 2}
+        },
+        "required": ["facts"],
+    }
 
 
 def _grounded(fact: str, user_text: str) -> bool:
@@ -392,47 +416,21 @@ def _grounded(fact: str, user_text: str) -> bool:
     return hits >= min(2, len(words[:8]))
 
 
-def _heuristic_fact_ops(user_text: str, assistant_text: str, s) -> list[dict]:
-    """If the distill model returned no JSON, keep standing user statements from cues."""
-    cues = [c.strip().lower() for c in (s.rlm_memory_fact_cues or "").split(",") if c.strip()]
-    blob = (user_text or "").strip()
-    if not blob:
-        return []
-    low = blob.lower()
-    sentence = ""
-    m = re.search(r"remember(?:\s+that)?[:\s]+(.+)", blob, re.I)
-    if m:
-        sentence = re.sub(r"please store.*$", "", m.group(1), flags=re.I).strip(" .")
-    else:
-        am = re.search(
-            r"(?:allergic to|allergy to|حساسیت به)\s+([A-Za-z\u0600-\u06FF-]+)",
-            blob,
-            re.I,
-        )
-        if am:
-            sentence = f"The child is allergic to {am.group(1)}."
-        elif cues and any(c in low for c in cues):
-            first = re.split(r"[.!?]\s+", blob, maxsplit=1)[0]
-            sentence = first if len(first) < 180 else clip_chars(blob, 160)
-    sentence = clip_chars(re.sub(r"\s+", " ", sentence), int(s.rlm_memory_fact_max_chars))
-    if not _fact_ok(sentence, s):
-        return []
-    if s.rlm_memory_fact_require_user_grounding and not _grounded(sentence, user_text):
-        return []
-    _ = assistant_text
-    return [{"op": "add", "about": "user", "text": sentence, "category": "health"}]
-
-
 def _parse_fact_ops(raw: str) -> list[dict]:
     text = (raw or "").strip()
     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
-    m = re.search(r"\[[\s\S]*\]", text)
-    if not m:
-        return []
-    try:
-        data = json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return []
+    data = None
+    for pattern in (r"\{[\s\S]*\}", r"\[[\s\S]*\]"):
+        m = re.search(pattern, text)
+        if not m:
+            continue
+        try:
+            data = json.loads(m.group(0))
+            break
+        except json.JSONDecodeError:
+            continue
+    if isinstance(data, dict):
+        data = data.get("facts")
     if not isinstance(data, list):
         return []
     return [x for x in data if isinstance(x, dict)]

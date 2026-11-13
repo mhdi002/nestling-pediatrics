@@ -8,55 +8,47 @@ Nestling is a **parent-facing pediatric assistant**: growth charting (WHO term +
 
 ## Features
 
-- **Growth tools** — percentiles / overlays for weight, length/height, and head circumference; WHO (term) and INTERGROWTH (preterm PMA) routing
-- **Care guidance (RAG)** — curated notes on feeding by age, sleep, iron/nutrition, development milestones, speech concerns, skin/vision care
-- **Bilingual chat** — FA ↔ EN detection and replies; UI language via `ui_lang`
-- **Child memory** — profiles, growth history, screenings, chat sessions (SQLite)
-- **Topic-aware turns** — intent routing + thread topic so follow-ups stay on the current care topic when the parent switches or continues
-- **Chronological age for care** — feeding/sleep/milestones use chronological months (not mistaken PMA−GA “corrected” ages); chart standards stay separate
-- **Streaming chat** — `POST /api/chat/stream` (SSE tokens + final result event)
-- **Vision assist** — `POST /api/chat/vision` (photo + caption; falls back to RAG if vision LLM unavailable)
-- **Screening helpers** — ASQ question lists / scoring, M-CHAT-R questions / scoring
-- **Optional local LLM** — openbmb/MiniCPM5-1B via a vLLM OpenAI-compatible sidecar; without it, chat still works with extractive RAG
+- **Growth tools** — percentiles / overlays for weight, length/height and head circumference; WHO (term) and INTERGROWTH (preterm PMA) routing. Numbers come from deterministic tools, never from the model.
+- **Care library as skills** — guidelines, curated leaflets and two full WHO books (infant & young child feeding; pregnancy, childbirth, postpartum & newborn care) live as Markdown files under `knowledge/`. The agent opens them with `library.open`, which returns a short file whole and, for a long one, its outline plus the sections that match the question. Add a file and it is offered on the next turn; nothing is indexed by hand.
+- **RLM orchestrator** — a TypeScript engine (`vendor/rlm-ide`) runs each turn as model steps plus a sandboxed Python REPL that executes ```` ```repl ```` cells and exposes the tools.
+- **Age-aware reading** — the child's age is computed from the record; age-ranged sections that apply are named to the model, and library files written for another age band are set aside.
+- **Plans and to-do lists** — a request with several parts is carried out as a plan on a task board: each part is read from its own file, ticked when done, and shown to the parent under the answer.
+- **Auto-continuation** — a planned job that runs out of steps schedules a wake-up and continues in a new turn; the waiting request follows it to the end.
+- **Memory** — short-term: the conversation, with finished turns folded and the session compacted to a checkpoint as it grows. Long-term: facts the parent states and tool findings (centiles, screening scores), distilled by the model into a JSON schema and stored per child.
+- **Grounded replies** — every number in a reply must appear (with the same unit) in what the turn read, the record or the saved facts; unsupported sentences are dropped. A reply with nothing looked up is written only from the record, saved facts and conversation.
+- **No hangs** — a stuck-step breaker, a cap on note-keeping steps, a new message pre-empts a running one, and an empty answer is never stored as one.
+- **Bilingual** — English and Persian; the model writes the English gloss of a Persian message itself (no third-party translation call), and replies in the parent's language.
+- **Screening helpers** — ASQ questionnaires by age and M-CHAT-R, with scoring.
+- **Model** — `Qwen/Qwen3.5-2B` on a vLLM OpenAI-compatible server (constrained JSON output for routing). MiniCPM5-1B was measured and could not drive the agent reliably.
 
 ## Architecture
 
 ```
-┌─────────────────┐     ┌──────────────────────────────────────────┐
-│  web/ (SPA)     │────▶│  FastAPI app (app/)  :8000                │
-└─────────────────┘     │  /api/*  + static UI                      │
-                        └────────────┬─────────────────────────────┘
-                                     │
-              ┌──────────────────────┼──────────────────────┐
-              ▼                      ▼                      ▼
-     Clinical tools           RAG stores              Chat memory
-     (WHO / IG eqs,           (BM25 + optional        (sessions,
-      overlays, ASQ/M-CHAT)    dense bge-m3)           child DB)
-                                     │
-                                     ▼
-                          Optional MiniCPM sidecar
-                          (docker profile `llm`)
-                          host :8001 → container :8000
+web/ (SPA) ──▶ FastAPI app (app/) :8000 ──▶ TypeScript RLM orchestrator :8120 ──▶ vLLM :8100
+                 │  child DB, chat sessions,      │  router → engine → reply writer
+                 │  long-term memory (sqlite)     │  task board, wake-ups, compaction
+                 │                                ▼
+                 │                       Python REPL kernel
+                 └── clinical tools ◀──── (library.open, clinical.*, task.*)
+                                           knowledge/ (Markdown library)
 ```
 
 | Piece | Role |
 |---|---|
-| `app/` | FastAPI entry (`app.main`), routes, auth |
-| `web/` | Parent SPA (chat, charts, child dossier) |
-| `assistant/agent/` | Intent routing, slots, orchestrator |
-| `assistant/tools/` | Deterministic growth + screening |
-| `assistant/rag/` | Knowledge retrieval + LLM or extractive answer |
-| `assistant/llm/qwen_client.py` | OpenAI-compatible client for text/vision |
-| `assistant/settings.py` | Typed `NESTLING_*` / LLM settings |
-| `config/` | WHO LMS, ASQ/M-CHAT, clinical bounds, intent rules |
-| `data/en/` | Curated markdown knowledge sources |
-| `data/knowledge/` | Chunked RAG index (`chunks.json`) |
+| `app/` | FastAPI entry (`app.main`), routes, auth, SSE chat |
+| `web/` | Parent SPA (chat, task board, charts, child dossier) |
+| `assistant/rlm/` | Host for the orchestrator: memory, English gloss, clinical tool bridge |
+| `assistant/tools/` | Deterministic growth + screening tools (`TOOL_SPECS`) |
+| `vendor/rlm-ide/packages/core` | RLM engine: steps, REPL cells, compaction, task boards, wake-ups |
+| `vendor/rlm-ide/packages/nestling` | Nestling server: router, library tool, catalog, reply writer |
+| `prompts/nestling/` | Nestling prompts (system, router, checks), overlaid on the stock ones |
+| `knowledge/` | The care library (guidelines, charts, screening, books) |
 
 ## Requirements
 
 - **Docker** + Docker Compose (preferred path)
 - **Python 3.12+** if running locally without Docker
-- **GPU (optional)** — NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for the `llm` profile; without a usable GPU, `deploy.sh` degrades to app-only / extractive mode
+- **GPU (optional)** — NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for the `llm` profile; without a usable GPU, `deploy.sh` falls back to app-only mode: growth, screening and charts work, but chat needs the model
 
 ## Quick start
 
@@ -89,7 +81,7 @@ It prints the generated web sign-in and the URLs when it finishes. Re-running is
 
 The model is fetched from whichever source is reachable, tried in order: the Docker Hub registry, the Hugging Face Hub, then ModelScope (`--model-source auto`, the default). This matters on networks where the Hugging Face CDN is blocked — the deploy still finds the weights rather than failing. Pin one source with `--model-source hub|hf|ms`.
 
-The sidecar is sized from the GPU, not from a fixed profile. The precision follows the card's compute capability — fp8 on Ada/Hopper, bf16 on Turing/Ampere — so the same command works on a 2080 Ti and an H100 without an edit. On a host with no usable GPU it degrades to app-only (extractive RAG) rather than failing.
+The sidecar is sized from the GPU, not from a fixed profile. The precision follows the card's compute capability — fp8 on Ada/Hopper, bf16 on Turing/Ampere — so the same command works on a 2080 Ti and an H100 without an edit. On a host with no usable GPU it deploys app-only (growth, screening and charts; chat needs a model) rather than failing.
 
 ### Full stack, manually
 
@@ -117,14 +109,13 @@ Canonical defaults live in [`assistant/settings.py`](assistant/settings.py) (Pyd
 
 | Variable | Typical / default | Purpose |
 |---|---|---|
-| `NESTLING_USE_LLM` | `1` (compose) | `0` = force extractive RAG (no generation) |
+| `NESTLING_USE_LLM` | `1` (compose) | `0` = no model; chat replies are unavailable |
 | `NESTLING_LLM_URL` | `http://llm:8000` | App → text LLM base URL |
 | `NESTLING_VISION_LLM_URL` | `http://llm:8000` | Vision endpoint (same service by default) |
-| `NESTLING_LLM_MODEL` | `openbmb/MiniCPM5-1B` | Served model name |
-| `NESTLING_VISION_MODEL` | `openbmb/MiniCPM5-1B` | Vision model name |
+| `NESTLING_LLM_MODEL` | `Qwen/Qwen3.5-2B` | Served model name |
+| `NESTLING_VISION_MODEL` | `Qwen/Qwen3.5-2B` | Vision model name |
 | `NESTLING_LOAD_MODELS` | `0` | Do not load heavy local HF models in the app image |
-| `NESTLING_USE_DENSE` | `1` (compose) | Hybrid dense retrieval (`BAAI/bge-m3`) |
-| `NESTLING_EMBEDDING_MODEL` | `BAAI/bge-m3` | Dense embedding model id |
+| `NESTLING_EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding model for long-term memory recall (lexical fallback without it) |
 | `NESTLING_API_KEY` | unset | If set, require `X-API-Key` or `Authorization: Bearer` (health stays open) |
 | `NESTLING_CORS_ORIGINS` | `*` | Comma-separated origins |
 | `NESTLING_HF_CACHE_HOST` | `C:/Users/mhf/.cache/huggingface` | Host HF cache mounted into `llm` (read-only) |
@@ -135,11 +126,10 @@ vLLM knobs (`VLLM_MAX_MODEL_LEN`, `VLLM_MAX_NUM_SEQS`, `VLLM_QUANTIZATION`, `VLL
 
 ## LLM notes
 
-- Single sidecar: **openbmb/MiniCPM5-1B** on vLLM (`docker/llm/`), profile name `llm`.
+- Single sidecar: **Qwen/Qwen3.5-2B** on vLLM (`docker/llm/`), profile name `llm`.
 - App talks to it over the Docker network (`http://llm:8000`); host maps **8001 → 8000**.
-- If the sidecar is down or `NESTLING_USE_LLM=0`, Nestling still answers via **extractive RAG**.
+- Every chat turn runs on the model. If the sidecar is down or `NESTLING_USE_LLM=0`, chat says it cannot answer; growth, screening and charts keep working.
 - Vision shares the same endpoint; if the stack cannot do images, `/api/chat/vision` still returns guidance with a fallback `mode` (see Docker doc).
-- Optional tool-calling model `Salesforce/xLAM-1b-fc-r` exists in settings/requirements but is **not** required for the default slim Docker image (`INSTALL_ML=0`).
 
 ## API / UI
 
@@ -181,10 +171,13 @@ From the repo root (local venv with `requirements-core.txt` or inside the contai
 
 ```bash
 # Fast, high-signal subset
-python -m pytest tests/test_router.py tests/test_intent_routing.py tests/test_medical_age.py tests/test_chat_stream.py tests/test_clinical_guards.py -q
+python -m pytest tests/test_chat_stream.py tests/test_clinical_guards.py tests/test_size_llm.py -q
 
-# Broader clinical / RAG
-python -m pytest tests/test_equations_accuracy.py tests/test_growth_curves.py tests/test_rag.py tests/test_tools_robust.py -q
+# Broader clinical
+python -m pytest tests/test_equations_accuracy.py tests/test_growth_curves.py tests/test_tools_robust.py -q
+
+# Orchestrator (TypeScript)
+cd vendor/rlm-ide && npx vitest run
 
 # Full suite (slower; some tests may need Docker/live services)
 python -m pytest tests -q

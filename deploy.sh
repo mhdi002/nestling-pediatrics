@@ -18,7 +18,7 @@ cd "$ROOT"
 # however NESTLING_LLM_MODEL was set, so deploying any other model silently
 # downloaded the wrong one -- the compose file, the sidecar entrypoint and the
 # app all honoured the variable; only the download did not.
-MODEL_ID="${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}"
+MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}"
 # The Hugging Face cache layout is mechanical: Qwen/Qwen3.5-4B lives in
 # models--Qwen--Qwen3.5-4B. Derive it rather than repeat it, which is also
 # what scripts/fetch_model_registry.sh does.
@@ -947,7 +947,8 @@ show_summary() {
     echo "  LLM (OpenAI-compatible):   http://localhost:${LLM_PORT}/v1"
   elif [ "$MODE" = app ]; then
     echo
-    echo "  Note: deployed in APP-ONLY mode -- chat uses extractive RAG, not the generative model."
+    echo "  Note: deployed in APP-ONLY mode -- no model is served, so chat replies are unavailable"
+    echo "        until NESTLING_LLM_URL points at a running model (growth, screening and charts still work)."
     echo "  Re-run with GPU + toolkit available: ./deploy.sh --mode full"
   fi
   echo

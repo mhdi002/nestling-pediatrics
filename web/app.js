@@ -1462,6 +1462,8 @@
     if (!thread) return null;
     const div = document.createElement("div");
     div.className = `bubble ${role}`;
+    // Direction follows the text: a Persian reply in an English interface (or the reverse) reads right.
+    div.dir = "auto";
     div.textContent = text;
     thread.appendChild(div);
     thread.scrollTop = thread.scrollHeight;
@@ -1475,6 +1477,8 @@
   function createBubbleShell(thread) {
     const div = document.createElement("div");
     div.className = "bubble assistant streaming";
+    // Direction follows the text: a Persian reply in an English interface (or the reverse) reads right.
+    div.dir = "auto";
     div.setAttribute("aria-hidden", "true");
     const body = document.createElement("span");
     body.className = "stream-text";
@@ -1568,6 +1572,25 @@
       };
       step();
     });
+  }
+
+  /** The plan a multi-part request was carried out as: its goal and each step with its state. */
+  function appendTaskBoard(board) {
+    const thread = $("#chat-thread");
+    if (!thread || !board || !Array.isArray(board.steps) || !board.steps.length) return;
+    const block = document.createElement("div");
+    block.className = "tool-block task-board";
+    block.dir = "auto";
+    const list = document.createElement("ul");
+    board.steps.forEach((s) => {
+      const li = document.createElement("li");
+      li.className = `task-step ${s.status || "todo"}`;
+      li.textContent = s.text || "";
+      list.appendChild(li);
+    });
+    block.appendChild(list);
+    thread.appendChild(block);
+    thread.scrollTop = thread.scrollHeight;
   }
 
   function appendToolResult(payload) {
@@ -1942,6 +1965,7 @@
         if (hasOverlay || data.tool_results) {
           appendToolResult(data);
         }
+        appendTaskBoard(data.task_board);
       };
       const runTurn = async () => {
         await ensureChatSession();

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Size the vLLM sidecar for the GPU that is actually present.
 
-The compose defaults (max_num_seqs=1, max_model_len=1536) were chosen for an
-8 GB consumer card. On a 24 GB board they leave most of the GPU idle and
+The compose defaults (max_num_seqs=1, max_model_len=8192) are the least the
+agent can run in. On a 24 GB board they leave most of the GPU idle and
 serialise every chat: a hundred concurrent requests queued behind a batch of
 one, and two thirds of them aged out at the proxy.
 
@@ -37,12 +37,17 @@ KV_TENSORS = 2
 # roughly a gigabyte on this model class; taken off the top so the KV estimate
 # does not claim memory the runtime needs for itself.
 RUNTIME_OVERHEAD_BYTES = 1024**3
-# Context window this app can actually fill. The prompt is capped in
-# assistant/settings.py (llm_prompt_context_chars + llm_prompt_query_chars,
-# plus the system prompt) and the reply by llm_max_tokens_rag, so anything
-# beyond this is cache reserved for tokens that never arrive.
-# tests/test_size_llm.py asserts it still covers those caps.
-DEFAULT_CONTEXT_TOKENS = 4096
+# Context window the agent works in. Every chat turn runs on the RLM
+# orchestrator: its prompt holds the system prompt, the care-library catalog,
+# the pinned child record and saved facts, the conversation, and what the turn
+# has read from the library (each sized as a share of this window). Measured
+# on the Qwen3.5-2B deploy, a planned three-part turn used about 9,200 tokens of
+# a 16,384 window before compaction; that is the target.
+DEFAULT_CONTEXT_TOKENS = 16384
+# Below this the system prompt, catalog and one library read no longer fit
+# together and the agent cannot work, so concurrency is never bought by
+# shrinking the window past it.
+MIN_AGENT_CONTEXT_TOKENS = 8192
 # Wall-clock for one generation at this prompt and reply size, measured on
 # the deployed 3090: an unloaded chat turn returns in about twelve seconds.
 # Only used to convert concurrency into a sustained per-IP rate.
@@ -277,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--snapshot", required=True, type=Path)
     ap.add_argument("--gpu-util", type=float, default=0.90)
-    ap.add_argument("--floor-model-len", type=int, default=1536)
+    ap.add_argument("--floor-model-len", type=int, default=MIN_AGENT_CONTEXT_TOKENS)
     ap.add_argument("--floor-num-seqs", type=int, default=1)
     ap.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT_TOKENS)
     args = ap.parse_args(argv)

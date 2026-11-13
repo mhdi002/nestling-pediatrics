@@ -14,7 +14,7 @@
 # Usage: scripts/fetch_model_registry.sh [HF_CACHE_DIR]
 set -Eeuo pipefail
 
-MODEL_ID="${NESTLING_LLM_MODEL:-openbmb/MiniCPM5-1B}"
+MODEL_ID="${NESTLING_LLM_MODEL:-Qwen/Qwen3.5-2B}"
 # Which Docker Hub image carries THIS model's weights. Paired in
 # config/model_images.txt rather than defaulted, because a fixed default is
 # wrong the moment the model changes: it stayed pointing at Qwen's image and

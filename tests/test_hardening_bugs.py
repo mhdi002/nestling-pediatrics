@@ -2,59 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
-from pathlib import Path
 
 import pytest
 
-from assistant.agent.orchestrator import parse_tool_calls, resolve_known_age_months
 from assistant.memory.chat_memory import ChatMemory
 from assistant.memory.child_db import ChildMemoryDB
-from assistant.rag.stores import VectorStore, _trim_extract
 from assistant.refdata import weeks_per_month
 
 
 # --- age resolution -----------------------------------------------------------
-
-
-def test_postnatal_life_weeks_are_not_read_as_postmenstrual_age():
-    """
-    A 13.5-month-old born at 28w must not be reported as ~7 months.
-
-    59 weeks of life stored on a WHO save looks like a plausible INTERGROWTH PMA;
-    subtracting the gestational age was the original bug.
-    """
-    slots = {"weeks": 59.0, "gestational_age_weeks": 28.0}
-    age = resolve_known_age_months(slots, None, None)
-    assert age is not None
-    assert 12.5 <= age <= 14.5, f"expected ~13.5 months, got {age}"
-
-
-def test_intergrowth_pma_still_converts_to_chronological_age():
-    """The preterm chart genuinely stores PMA — that path must keep subtracting GA."""
-    slots = {
-        "weeks": 40.0,
-        "gestational_age_weeks": 30.0,
-        "last_chart_standard": "intergrowth_preterm",
-    }
-    age = resolve_known_age_months(slots, None, None)
-    expected = (40.0 - 30.0) / weeks_per_month()
-    assert age == pytest.approx(expected, abs=0.05)
-
-
-def test_explicit_age_months_always_wins():
-    slots = {"age_months": 13.5, "weeks": 59.0, "gestational_age_weeks": 28.0}
-    assert resolve_known_age_months(slots, None, None) == pytest.approx(13.5)
-
-
-def test_future_date_of_birth_does_not_produce_a_negative_age():
-    from assistant.agent.orchestrator import _age_months_from_dob
-
-    assert _age_months_from_dob("2999-01-01") is None
-    assert _age_months_from_dob("not-a-date") is None
-    assert _age_months_from_dob(None) is None
 
 
 def test_growth_route_ignores_derived_weeks_for_preterm_child():
@@ -74,56 +32,7 @@ def test_growth_route_ignores_derived_weeks_for_preterm_child():
 # --- parsing / validation -----------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "raw",
-    ["", "   ", "not json", "[1, 2, 3]", '"a string"', "null", '{"tool_calls": "nope"}'],
-)
-def test_parse_tool_calls_never_raises_on_junk(raw):
-    assert parse_tool_calls(raw) == []
-
-
-def test_parse_tool_calls_reads_an_embedded_object():
-    raw = 'thinking...\n{"tool_calls": [{"name": "growth_percentile"}]}\ndone'
-    assert parse_tool_calls(raw) == [{"name": "growth_percentile"}]
-
-
 # --- RAG index robustness -----------------------------------------------------
-
-
-def test_corrupt_index_is_ignored_instead_of_crashing(tmp_path):
-    """A truncated docs.json must mean 'rebuild', not a 500 on every request."""
-    (tmp_path / "docs.json").write_text("", encoding="utf-8")
-    store = VectorStore("test", tmp_path)
-    assert store.load() is False
-
-    (tmp_path / "docs.json").write_text('{"not": "a list"}', encoding="utf-8")
-    assert store.load() is False
-
-
-def test_index_save_is_atomic_and_reloadable(tmp_path):
-    store = VectorStore("test", tmp_path)
-    store.add([{"id": "a", "title": "Iron", "text": "iron drops for breastfed infants"}])
-    store.save()
-    assert json.loads((tmp_path / "docs.json").read_text(encoding="utf-8"))
-    assert not list(tmp_path.glob("*.tmp"))
-
-    other = VectorStore("test", tmp_path)
-    assert other.load() is True
-    assert other.docs[0]["id"] == "a"
-
-
-def test_extract_trim_keeps_the_configured_budget():
-    """Snapping to a very early sentence end used to discard 40% of the answer."""
-    text = "Short intro. " + "word " * 300
-    trimmed = _trim_extract(text, max_chars=420, min_sentence_chars=160, keep_ratio=0.75)
-    assert len(trimmed) > 300
-    assert len(trimmed) <= 421
-
-
-def test_extract_trim_prefers_a_late_sentence_end():
-    body = "a" * 380 + ". " + "b" * 200
-    trimmed = _trim_extract(body, max_chars=420, min_sentence_chars=160, keep_ratio=0.75)
-    assert trimmed.endswith(".")
 
 
 # --- concurrency --------------------------------------------------------------
@@ -226,18 +135,6 @@ def test_services_singleton_is_built_once_under_concurrency(monkeypatch):
 # --- resource handling --------------------------------------------------------
 
 
-def test_dense_cache_is_bounded():
-    from assistant.rag import dense
-
-    dense._cache.clear()
-    for i in range(50):
-        dense._cache_put(f"k{i}", i, max_size=10)
-    assert len(dense._cache) == 10
-    # Oldest keys are evicted first.
-    assert "k0" not in dense._cache
-    assert "k49" in dense._cache
-
-
 def test_closing_services_releases_every_handle(tmp_path):
     from app.services import Services
 
@@ -260,3 +157,13 @@ def _is_closed(conn) -> bool:
     except sqlite3.ProgrammingError:
         return True
     return False
+
+
+def test_future_date_of_birth_does_not_produce_a_negative_age():
+    from datetime import date, timedelta
+
+    from assistant.rlm.clinical_dispatch import _age_months
+
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    assert _age_months(tomorrow) is None
+    assert _age_months((date.today() - timedelta(days=61)).isoformat()) > 1.9

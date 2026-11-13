@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """
-Pediatrics parent assistant package.
+Nestling parent assistant.
 
-Dual RAG:
-  - medical knowledge (translated educational + screening content)
-  - per-child precision memory (scores, growth, questionnaires)
-
-Tools (deterministic — no LLM math):
-  - INTERGROWTH growth equations
-  - ASQ / M-CHAT scoring
-  - chart overlay plotting
-
-Models (optional, loaded on demand):
-  - Qwen/Qwen3.5-4B via local vLLM OpenAI-compatible sidecar → RAG + chat + vision
-  - Salesforce/xLAM-1b-fc-r → tool/function calling (optional)
+Every chat turn runs on the TypeScript RLM orchestrator (vendor/rlm-ide): a
+model works through a sandboxed Python REPL, reads the care library under
+knowledge/ as files, and calls the deterministic clinical tools for every
+growth and screening number. assistant/rlm/ hosts it from the FastAPI app and
+keeps long-term memory; assistant/tools/ holds the clinical tools.
 """
 
 __version__ = "0.1.0"

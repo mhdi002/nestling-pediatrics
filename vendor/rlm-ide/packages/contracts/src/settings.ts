@@ -65,6 +65,16 @@ export const RlmSettings = z.object({
   oldOutputKeepChars: z.number().int().min(200).default(1500),
   /** After a turn that edited files, ask the model once to check its work against the request before answering. */
   selfReview: z.boolean().default(true),
+  /** Send a reply that ran no cell back to the model once, to look the answer up or confirm none is needed. For hosts whose answers must come from files or tools. */
+  requireEvidence: z.boolean().default(false),
+  /** Steps in a row that only write on the task board before the turn is asked for its answer. */
+  maxBoardOnlySteps: z.number().int().min(1).default(3),
+  /** Pin the first message of a chat as its goal. Right for a chat that is one job; wrong for one where every message is a new question, which would be read against the first for ever. */
+  pinFirstMessageAsGoal: z.boolean().default(true),
+  /** When above zero, a finished turn is folded: its host notes and repeated cells are dropped and each cell output is cut to this many characters. 0 keeps finished turns whole until the budget forces truncation. */
+  finishedTurnOutputChars: z.number().int().min(0).default(0),
+  /** When a turn without a task board is about to run out of steps, ask for the answer from what was found instead of stopping mid-way and continuing in a new turn. For chat hosts where one message is one question. */
+  finishUnplanned: z.boolean().default(false),
   maxSubagentDepth: z.number().int().min(0).max(5).default(2),
   maxConcurrentChildren: z.number().int().min(1).max(16).default(3),
   /** Kernel memory cap (MB) for the Windows Job Object / Linux prlimit. */

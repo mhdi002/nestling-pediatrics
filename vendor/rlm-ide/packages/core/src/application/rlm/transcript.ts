@@ -67,6 +67,45 @@ export function toUnits(entries: TranscriptEntry[]): TranscriptEntry[][] {
   return units;
 }
 
+/** Reduces a finished turn to what later turns need from it: the request, the cells that were run
+ * and the answer. Its host notes are dropped (they steered that turn and mean nothing afterwards),
+ * a cell repeated word for word is kept once, and each output is cut to `keepChars`.
+ *
+ * Without this a turn's working material rides along in full: a few pages read to answer one
+ * question fill the window within three turns, and a turn that went round in circles teaches the
+ * next one to do the same, because the model continues the pattern it sees. */
+export function foldFinishedTurn(entries: TranscriptEntry[], turnIdx: number, keepChars: number): TranscriptEntry[] {
+  const out: TranscriptEntry[] = [];
+  const seenCells = new Set<string>();
+  let dropNextOutput = false;
+  for (const e of entries) {
+    if (e.turnIdx !== turnIdx || e.kind === "user" || e.kind === "checkpoint") {
+      out.push(e);
+      continue;
+    }
+    if (e.kind === "note") continue;
+    if (e.kind === "assistant") {
+      const key = e.text.trim();
+      dropNextOutput = key.includes("```") && seenCells.has(key);
+      if (dropNextOutput) continue;
+      seenCells.add(key);
+      out.push(e);
+      continue;
+    }
+    if (e.kind === "repl") {
+      if (dropNextOutput) {
+        dropNextOutput = false;
+        continue;
+      }
+      out.push(e.text.length > keepChars ? { ...e, text: `${clipChars(e.text, keepChars)}
+[output of an earlier turn, shortened; run the cell again to see all of it]` } : e);
+      continue;
+    }
+    out.push(e);
+  }
+  return out;
+}
+
 /** First budget measure: clip old REPL outputs, keeping the newest `keepUnits` untouched. */
 export function truncateOldOutputs(entries: TranscriptEntry[], keepChars: number, keepUnits: number): { entries: TranscriptEntry[]; changed: boolean } {
   const units = toUnits(entries);

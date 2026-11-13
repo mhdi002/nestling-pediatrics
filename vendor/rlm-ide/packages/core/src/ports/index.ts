@@ -18,6 +18,8 @@ export interface ChatRequest {
   stop?: string[];
   signal?: AbortSignal;
   enableThinking?: boolean;
+  /** Constrains the reply to this JSON schema, on servers that support structured output. */
+  jsonSchema?: { name: string; schema: Record<string, unknown> };
 }
 
 export type ChatChunk =

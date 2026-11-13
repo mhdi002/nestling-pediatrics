@@ -80,7 +80,8 @@ def test_chat_auto_creates_session(client):
     data = r.json()
     assert data.get("session_id")
     assert data.get("reply")
-    assert "help" in (data.get("intents") or []) or "Nestling" in data["reply"]
+    # A real answer, not the stand-in for a failed turn.
+    assert "could not produce a reply" not in data["reply"].lower()
 
 
 def test_child_dossier_endpoint(client):

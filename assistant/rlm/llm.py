@@ -39,6 +39,7 @@ def stream_chat(
     temperature: float = 0.3,
     enable_thinking: bool | None = None,
     signal_aborted: Callable[[], bool] | None = None,
+    json_schema: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield chunks: {type: text|thinking|usage, ...}."""
     s = get_settings()
@@ -53,6 +54,13 @@ def stream_chat(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if json_schema:
+        # The server constrains the reply to this schema, so a small model
+        # cannot answer a "reply with JSON" request with prose around it.
+        payload["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "reply", "schema": json_schema},
+        }
     # Chat template kwargs (disable thinking for Qwen-family when configured).
     raw = (s.nestling_llm_chat_template_kwargs or "").strip()
     if raw:
@@ -127,6 +135,7 @@ def complete(
     *,
     max_tokens: int,
     temperature: float = 0.2,
+    json_schema: dict[str, Any] | None = None,
 ) -> str:
     text = ""
     for c in stream_chat(
@@ -134,6 +143,7 @@ def complete(
         max_tokens=max_tokens,
         temperature=temperature,
         enable_thinking=False,
+        json_schema=json_schema,
     ):
         if c.get("type") == "text":
             text += c.get("text") or ""

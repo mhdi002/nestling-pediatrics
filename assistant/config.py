@@ -13,15 +13,12 @@ ROOT = Path(_settings.nestling_root).resolve()
 EXTRACTED = ROOT / "extracted"
 DATA = Path(_settings.nestling_data_dir) if _settings.nestling_data_dir else ROOT / "data"
 EN_DIR = DATA / "en"
-KNOWLEDGE_DIR = DATA / "knowledge"
 CHILD_DB_PATH = Path(_settings.nestling_child_db or DATA / "children" / "children.db")
 CHAT_DB_PATH = Path(_settings.nestling_chat_db or DATA / "children" / "chat.db")
-CHILD_INDEX_DIR = DATA / "children" / "rag_index"
-MEDICAL_INDEX_DIR = DATA / "knowledge" / "rag_index"
 OVERLAY_DIR = DATA / "overlays"
 
 # Model identifiers are never declared here — they come from assistant.settings
-# (NESTLING_LLM_MODEL / NESTLING_VISION_MODEL / NESTLING_TOOL_MODEL) only.
+# (NESTLING_LLM_MODEL / NESTLING_VISION_MODEL) only.
 
 UPLOAD_DIR = DATA / "uploads"
 MODELS_DIR = DATA / "models" / "llm"

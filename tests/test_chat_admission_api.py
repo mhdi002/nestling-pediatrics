@@ -9,7 +9,6 @@ requests and a deliberately slow turn, so the behaviour is the wire behaviour.
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,12 +50,11 @@ def test_a_saturated_app_returns_503_not_a_hang(client, monkeypatch):
 
     release = threading.Event()
     holding = threading.Event()
-    real_turn = routes._run_chat_turn
 
     def slow_turn(body, owner_user_id=None):
         holding.set()
         release.wait(10)
-        return real_turn(body, owner_user_id)
+        return {"reply": "done", "session_id": "s", "intents": []}
 
     monkeypatch.setattr(routes, "_run_chat_turn", slow_turn)
 
