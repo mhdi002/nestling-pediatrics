@@ -61,9 +61,29 @@ PLAN="$(mktemp)"
 FAILDIR="$(mktemp -d)"
 trap 'rm -f "$PLAN"; rm -rf "$FAILDIR"' EXIT
 
-curl -fsS --retry 3 --retry-delay 2 \
-  "$BASE/api/v1/models/$MS_ID/repo/files?Revision=$REVISION" \
-  | python3 -c '
+# The listing is fetched to a file first, so a refusal is reported with the
+# server's own message rather than as a JSON parse error on an empty body.
+# ModelScope rate-limits bursts with 403/429 ("操作过于频繁"), which clears
+# after a short wait, so those are retried with a growing backoff.
+LISTING="$(mktemp)"
+trap 'rm -f "$PLAN" "$LISTING"; rm -rf "$FAILDIR"' EXIT
+code=000
+for wait_s in 0 15 30 60 120; do
+  [ "$wait_s" -gt 0 ] && { echo "ModelScope answered $code; retrying in ${wait_s}s"; sleep "$wait_s"; }
+  code="$(curl -sS --retry 3 --retry-delay 2 -o "$LISTING" -w '%{http_code}' \
+    "$BASE/api/v1/models/$MS_ID/repo/files?Revision=$REVISION" 2>/dev/null || echo 000)"
+  case "$code" in
+    2??) break ;;
+    403|429|5??|000) continue ;;
+    *) break ;;
+  esac
+done
+if [ "${code#2}" = "$code" ]; then
+  echo "ModelScope listing failed (HTTP $code): $(head -c 300 "$LISTING")" >&2
+  exit 1
+fi
+
+python3 -c '
 import json, sys
 
 data = json.load(sys.stdin)
@@ -79,7 +99,7 @@ for f in files:
     if path.startswith(".") or path.lower().endswith((".md", ".png", ".jpg")):
         continue
     print(f"{path}\t{size}")
-' > "$PLAN"
+' < "$LISTING" > "$PLAN"
 
 count=$(wc -l < "$PLAN")
 total=$(awk -F'\t' '{s+=$2} END {printf "%.2f", s/1073741824}' "$PLAN")
